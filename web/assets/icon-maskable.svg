@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Fabled Lands">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="40%" r="80%">
+      <stop offset="0%" stop-color="#4a2c15"/>
+      <stop offset="100%" stop-color="#2b1a0f"/>
+    </radialGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#e0b34a"/>
+      <stop offset="100%" stop-color="#a8791f"/>
+    </linearGradient>
+  </defs>
+  <!-- full-bleed background for maskable safe-zone -->
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <g transform="translate(256,256) scale(0.72) translate(-256,-256)">
+    <circle cx="256" cy="256" r="196" fill="none" stroke="url(#gold)" stroke-width="12" opacity="0.85"/>
+    <g fill="url(#gold)" stroke="#3a2415" stroke-width="4">
+      <polygon points="256,86 286,232 256,256 226,232"/>
+      <polygon points="256,426 226,280 256,256 286,280"/>
+      <polygon points="86,256 232,226 256,256 232,286"/>
+      <polygon points="426,256 280,286 256,256 280,226"/>
+    </g>
+    <circle cx="256" cy="256" r="26" fill="#2b1a0f" stroke="url(#gold)" stroke-width="8"/>
+  </g>
+</svg>

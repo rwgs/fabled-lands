@@ -1,0 +1,16 @@
+{
+  "name": "Fabled Lands",
+  "short_name": "Fabled Lands",
+  "description": "A faithful web port of the Fabled Lands gamebook series. Play offline; progress is saved in your browser.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#2b1a0f",
+  "theme_color": "#2b1a0f",
+  "categories": ["games", "books", "entertainment"],
+  "icons": [
+    { "src": "assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "assets/icon-maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

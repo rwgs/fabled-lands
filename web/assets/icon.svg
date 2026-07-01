@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Fabled Lands">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="40%" r="75%">
+      <stop offset="0%" stop-color="#4a2c15"/>
+      <stop offset="100%" stop-color="#2b1a0f"/>
+    </radialGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#e0b34a"/>
+      <stop offset="100%" stop-color="#a8791f"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="196" fill="none" stroke="url(#gold)" stroke-width="10" opacity="0.85"/>
+  <!-- compass star -->
+  <g fill="url(#gold)" stroke="#3a2415" stroke-width="4">
+    <polygon points="256,86 286,232 256,256 226,232"/>
+    <polygon points="256,426 226,280 256,256 286,280"/>
+    <polygon points="86,256 232,226 256,256 232,286"/>
+    <polygon points="426,256 280,286 256,256 280,226"/>
+  </g>
+  <circle cx="256" cy="256" r="26" fill="#2b1a0f" stroke="url(#gold)" stroke-width="8"/>
+  <text x="256" y="470" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="52" font-weight="700" fill="url(#gold)">FL</text>
+</svg>

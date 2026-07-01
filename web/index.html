@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=5" />
+  <title>Fabled Lands</title>
+  <meta name="description" content="A faithful web port of the Fabled Lands gamebook series — play offline, saved in your browser." />
+  <meta name="theme-color" content="#2b1a0f" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="assets/icon.svg" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div id="app"><div class="fatal">Loading the Fabled Lands…</div></div>
+  <div id="errlog" hidden style="color:#f5d3c7;padding:1rem;font-family:monospace;white-space:pre-wrap"></div>
+  <script>
+    // Surface uncaught errors in the DOM (aids headless testing; harmless otherwise).
+    (function () {
+      var log = document.getElementById('errlog');
+      function show(m) { log.hidden = false; log.textContent += m + '\n'; }
+      window.addEventListener('error', function (e) {
+        show('ERROR: ' + (e.message || e.error) + (e.filename ? ' @ ' + e.filename + ':' + e.lineno : ''));
+      });
+      window.addEventListener('unhandledrejection', function (e) {
+        show('UNHANDLED: ' + (e.reason && (e.reason.stack || e.reason.message || e.reason)));
+      });
+    })();
+  </script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
