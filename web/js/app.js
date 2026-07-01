@@ -267,8 +267,21 @@ async function navigate(book, section) {
     return;
   }
   state.goTo(book, section);
+  state.snapshot(); // entry state for this section (before its effects run) — enables undo
   story.state = state;
   story.begin(sectionEl, book, section);
+  const pane = $('.story-pane'); if (pane) pane.scrollTop = 0;
+  window.scrollTo(0, 0);
+}
+
+async function undo() {
+  const target = state.undo();
+  if (!target) { toast('Nothing to undo.', 'warn'); return; }
+  deathShown = false;
+  const el = await data.getSection(target.book, target.section);
+  if (!el) { toast('Could not undo.', 'warn'); return; }
+  story.state = state;
+  story.begin(el, target.book, target.section); // re-applies that section's effects from restored state
   const pane = $('.story-pane'); if (pane) pane.scrollTop = 0;
   window.scrollTo(0, 0);
 }
@@ -285,6 +298,7 @@ async function loadCurrent() {
   else {
     const sectionEl = await data.getSection(state.data.book, sec);
     if (!sectionEl) { await navigate(state.data.book, 1); return; }
+    state.snapshot(); // baseline entry state for undo after a load
     story.begin(sectionEl, state.data.book, sec);
   }
 }
@@ -295,13 +309,15 @@ async function handleDeath() {
   if (deathShown) return;
   deathShown = true;
   const res = state.data.resurrections[0];
+  const canUndo = state.canUndo();
   const buttons = [];
   if (res) buttons.push({ label: 'Use resurrection', value: 'res', primary: true });
+  if (canUndo) buttons.push({ label: 'Undo last move', value: 'undo', primary: !res });
   buttons.push({ label: 'Load a game', value: 'load' });
   buttons.push({ label: 'New adventure', value: 'new' });
   const body = res
     ? `Your Stamina has fallen to zero. But you arranged a resurrection deal${res.god ? ` with ${escapeHtml(res.god)}` : ''}…`
-    : 'Your Stamina has fallen to zero. Your adventure ends here.';
+    : 'Your Stamina has fallen to zero.' + (canUndo ? ' You can undo your last move, or your adventure ends here.' : ' Your adventure ends here.');
   const choice = await modal({ title: 'You have died', body, buttons, dismissable: false });
   deathShown = false;
   if (choice === 'res' && res) {
@@ -309,7 +325,8 @@ async function handleDeath() {
     state.data.stamina = Math.max(1, Math.floor(state.data.staminaMax / 2));
     state.changed();
     navigate(res.book, res.section);
-  } else if (choice === 'load') { showSaves(); }
+  } else if (choice === 'undo') { undo(); }
+  else if (choice === 'load') { showSaves(); }
   else { showCreate(); }
 }
 
@@ -319,23 +336,13 @@ async function showGameMenu() {
   const add = (label, fn) => { const b = el('button', 'btn btn-block', label); b.addEventListener('click', () => { close(); fn(); }); body.appendChild(b); };
   let close = () => {};
   add('Continue playing', () => {});
-  add('Undo last move', () => back());
+  add('Undo last move', () => undo());
   add('Rules', () => showRules(true));
   add('World Map', () => showMap(true));
   add('Save & quit to title', () => { state.save(); showTitle(); });
   const p = modal({ title: 'Menu', body, buttons: [{ label: 'Close', value: null }] });
   close = () => { const ov = document.querySelector('.modal-overlay'); if (ov) ov.remove(); };
   await p;
-}
-
-function back() {
-  const h = state.data.history;
-  if (!h.length) { toast('Nothing to undo.', 'warn'); return; }
-  const prev = h.pop();
-  state.data.book = prev.book;
-  state.data.section = prev.section;
-  state.changed();
-  data.getSection(prev.book, prev.section).then((sec) => { if (sec) story.begin(sec, prev.book, prev.section); });
 }
 
 // ---- Rules & Map -----------------------------------------------------------

@@ -64,15 +64,15 @@ The app uses `fetch` to load the bundled book data, so it must be served over HT
 
 ### Locally
 
-Any static file server works. With Python (which ships with most systems):
+Any static file server works. With Python (which ships with most systems), serve
+**from the repository root** — the root `index.html` redirects into `web/`:
 
 ```bash
-cd web
 python -m http.server 8848
-# then open http://localhost:8848/
+# then open http://localhost:8848/   (redirects to /web/)
 ```
 
-Or use the VS Code **Live Server** extension on the `web/` folder.
+(You can also serve the `web/` folder directly, or use the VS Code **Live Server** extension.)
 
 ### On the web (recommended for mobile/tablet)
 

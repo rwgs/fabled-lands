@@ -51,6 +51,23 @@ export class GameState {
     this.data = data;
     this.slot = slot ?? 0;
     this._listeners = new Set();
+    this._undo = []; // in-memory stack of pre-section-effects state snapshots
+  }
+
+  // ---- undo (session-only) --------------------------------------------
+  /** Capture the state as it is on entering a section, before its effects run. */
+  snapshot() {
+    try { this._undo.push(JSON.stringify(this.data)); } catch { /* ignore */ }
+    if (this._undo.length > 30) this._undo.shift();
+  }
+  canUndo() { return this._undo.length >= 2; }
+  /** Restore the previous section's entry state; returns its {book, section}. */
+  undo() {
+    if (this._undo.length < 2) return null;
+    this._undo.pop();                              // discard current section
+    this.data = JSON.parse(this._undo[this._undo.length - 1]); // previous section's entry state
+    this.changed();
+    return { book: this.data.book, section: this.data.section };
   }
 
   onChange(fn) { this._listeners.add(fn); return () => this._listeners.delete(fn); }

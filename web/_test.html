@@ -156,6 +156,20 @@ async function run() {
     }
     ok('all sections render w/o throw ('+total+')', renderErrors===0, renderErrors+' errors; first='+firstErr);
 
+    // --- undo restores full state (incl. stamina), not just position ---
+    const gu = GameState.create({ name:'U', gender:'m', profession:'Warrior', book:1, adv });
+    gu.data.section='1'; gu.snapshot();          // entry of §1 (stamina 9)
+    ok('cannot undo with 1 snapshot', gu.canUndo() === false);
+    gu.damageStamina(5);                          // now 4
+    gu.data.section='2'; gu.snapshot();          // entry of §2 (stamina 4)
+    ok('can undo with 2 snapshots', gu.canUndo() === true);
+    gu.damageStamina(100);                        // die
+    ok('U is dead', gu.isDead());
+    const ut = gu.undo();                         // restore entry of §1
+    ok('undo returns to §1', ut && ut.section === '1', JSON.stringify(ut));
+    ok('undo restores stamina to 9', gu.data.stamina === 9, String(gu.data.stamina));
+    ok('undo clears death', gu.isDead() === false);
+
   } catch (e) {
     out.push('FATAL ' + (e.stack || e.message));
     fail++;
