@@ -137,6 +137,10 @@ export class Story {
     let t = raw.replace(/\s+/g, ' ');
     if (t === '') return;
     t = t.replace(/ - /g, ' – ').replace(/\.\.\./g, '…');
+    // Swallow stray punctuation left dangling after a block widget (e.g. the
+    // "." that follows an inline <difficulty>…</difficulty> in the source).
+    const last = container.lastElementChild;
+    if (last && /\b(roll|fight|market|choices)\b/.test(last.className || '') && /^[\s.,;:–-]+$/.test(t)) return;
     container.appendChild(document.createTextNode(t));
   }
 
