@@ -28,6 +28,7 @@ body {
   background: var(--leather);
   -webkit-text-size-adjust: 100%;
   overscroll-behavior-y: none;
+  overflow-x: hidden; /* the off-canvas sheet drawer is parked off-screen right */
 }
 button { font-family: inherit; cursor: pointer; }
 img { max-width: 100%; }

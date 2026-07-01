@@ -77,22 +77,43 @@ export class Story {
   // ---- core walk -----------------------------------------------------------
   appendChildren(container, parent, basePath) {
     const nodes = Array.from(parent.childNodes);
-    let activeRoll = null; // most recent roll in this sibling scope
+    let activeRoll = null;              // most recent roll in this sibling scope
+    let chainActive = false, chainDone = false; // if/elseif/else chain state
 
     nodes.forEach((node, idx) => {
       const path = basePath + '.' + idx;
       if (node.nodeType === Node.TEXT_NODE) {
         this.appendText(container, node.nodeValue);
+        if (/\S/.test(node.nodeValue || '')) { chainActive = false; chainDone = false; }
         return;
       }
       if (node.nodeType !== Node.ELEMENT_NODE) return;
       const tag = node.tagName.toLowerCase();
 
+      // if / elseif / else chain: only one branch renders
+      if (tag === 'if' || tag === 'elseif' || tag === 'else') {
+        let render = false;
+        if (tag === 'if' || !chainActive) {
+          chainActive = true;
+          render = tag === 'else' ? true : evaluateCondition(node, this.state);
+          chainDone = render;
+        } else if (chainDone) {
+          render = false; // a previous branch already matched
+        } else if (tag === 'else') {
+          render = true; chainDone = true;
+        } else { // elseif with no prior match
+          render = evaluateCondition(node, this.state); chainDone = render;
+        }
+        if (render) this.appendChildren(container, node, path);
+        return;
+      }
+      chainActive = false; chainDone = false;
+
       if (tag === 'success' || tag === 'failure' || tag === 'outcomes') {
         this.renderBranch(container, node, path, activeRoll);
         return;
       }
-      const rendered = this.renderElement(container, node, path);
+      this.renderElement(container, node, path);
       if (ROLL_TAGS.has(tag)) activeRoll = { node, path };
     });
   }
@@ -196,13 +217,13 @@ export class Story {
   // ---- passive effects -----------------------------------------------------
   renderPassive(container, node, path) {
     const key = 'fx@' + path;
+    const hidden = boolAttr(node.getAttribute('hidden'));
     if (!this.ctx.applied.has(key)) {
       this.ctx.applied.add(key);
       const note = applyEffect(node, this.state, { chooser: null });
-      if (note) this.notify(note);
+      if (note && !hidden) this.notify(note);
     }
     // Render its descriptive text (the words the author wrote around the effect).
-    const hidden = boolAttr(node.getAttribute('hidden'));
     if (!hidden) {
       const span = document.createElement('span');
       span.className = 'fx';

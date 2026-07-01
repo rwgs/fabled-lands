@@ -93,6 +93,28 @@ async function run() {
     await renderSec(1,'106');
     ok('§106 has roll (difficulty+outcomes)', !!container.querySelector('.btn-roll'));
 
+    // --- interaction: click the roll, expect it to resolve to a Continue link ---
+    container.querySelector('.btn-roll').click();
+    await new Promise(r => setTimeout(r, 1000)); // let dice animation + rerender complete
+    ok('§106 roll resolves to Continue', !!container.querySelector('.goto-primary') && !!container.querySelector('.die'),
+       'html=' + container.innerHTML.slice(0, 160));
+
+    // --- interaction: clicking a choice navigates ---
+    let navd = null;
+    const story3 = new Story(container, gs, { navigate:(b,s)=>{navd={b,s};}, onDeath(){}, notify(){} });
+    const s10 = await data.getSection(1,'10'); story3.begin(s10,1,'10');
+    const firstChoice = Array.from(container.querySelectorAll('.choice')).find(c => !c.disabled);
+    firstChoice.click();
+    ok('choice click navigates', navd && String(navd.b)==='1', 'navd='+JSON.stringify(navd));
+
+    // --- interaction: fight Attack click advances the fight ---
+    const s105 = await data.getSection(1,'105'); story3.begin(s105,1,'105');
+    const atk = container.querySelector('.fight .btn-roll');
+    atk.click();
+    await new Promise(r => setTimeout(r, 900));
+    ok('fight attack produces a log line', container.querySelectorAll('.fight-log div').length >= 1,
+       'log='+container.querySelectorAll('.fight-log div').length);
+
     // combat terminates
     const fgEl = await data.getSection(1,'105');
     story.begin(fgEl,1,'105');
