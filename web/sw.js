@@ -3,7 +3,7 @@
 // once loaded/installed. Progress lives in localStorage (per-origin), so it
 // survives offline and reloads.
 
-const VERSION = 'fl-v1';
+const VERSION = 'fl-v2';
 const SHELL = [
   './',
   './index.html',

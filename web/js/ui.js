@@ -4,6 +4,7 @@ import { ABILITIES, ABILITY_LABEL, rankTitle, ordinal } from './rules.js';
 
 // ---- dice animation --------------------------------------------------------
 export function animateDice(container, small = false) {
+  if (typeof window !== 'undefined' && window.__FL_INSTANT_DICE__) return Promise.resolve();
   return new Promise((resolve) => {
     const anim = document.createElement('div');
     anim.className = 'dice-anim' + (small ? ' small' : '');

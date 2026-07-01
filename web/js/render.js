@@ -56,8 +56,23 @@ export class Story {
 
     const flow = document.createElement('div');
     flow.className = 'flow';
+    // The most-recent roll in document order. Persists across nesting so that
+    // `<outcomes>`/`<success>` at section level can attach to a `<difficulty>`
+    // nested inside a preceding `<p>` (a very common structure).
+    this.activeRoll = null;
     this.appendChildren(flow, el, 'r');
     this.root.appendChild(flow);
+
+    // Dead-end fallback: a fully-resolved section offering no way forward is a
+    // narrative death (the original game exposed an "Extra Choice: Death" for this).
+    const controls = flow.querySelectorAll('.goto, .choice, .btn-roll, .btn-secondary, .btn-mini, .fight');
+    if (!controls.length && !this.state.isDead()) {
+      const end = document.createElement('button');
+      end.className = 'goto goto-primary end-fate';
+      end.textContent = 'Your tale ends here — accept your fate ▸';
+      end.addEventListener('click', () => this.onDeath());
+      flow.appendChild(end);
+    }
 
     if (this.state.isDead()) this.onDeath();
   }
@@ -77,7 +92,6 @@ export class Story {
   // ---- core walk -----------------------------------------------------------
   appendChildren(container, parent, basePath) {
     const nodes = Array.from(parent.childNodes);
-    let activeRoll = null;              // most recent roll in this sibling scope
     let chainActive = false, chainDone = false; // if/elseif/else chain state
 
     nodes.forEach((node, idx) => {
@@ -110,11 +124,11 @@ export class Story {
       chainActive = false; chainDone = false;
 
       if (tag === 'success' || tag === 'failure' || tag === 'outcomes') {
-        this.renderBranch(container, node, path, activeRoll);
+        this.renderBranch(container, node, path, this.activeRoll);
         return;
       }
       this.renderElement(container, node, path);
-      if (ROLL_TAGS.has(tag)) activeRoll = { node, path };
+      if (ROLL_TAGS.has(tag)) this.activeRoll = { node, path };
     });
   }
 
@@ -182,6 +196,17 @@ export class Story {
         return this.renderRest(container, node, path);
       case 'resurrection':
         return this.renderResurrection(container, node, path);
+      case 'reroll': {
+        const btn = document.createElement('button');
+        btn.className = 'btn-secondary';
+        const inner = document.createElement('span');
+        this.appendChildren(inner, node, path);
+        btn.textContent = inner.textContent.trim() || 'Roll again';
+        const roll = this.activeRoll;
+        btn.addEventListener('click', () => { if (roll) this.ctx.rolls.delete('roll@' + roll.path); this.rerender(); });
+        container.appendChild(btn);
+        return btn;
+      }
       case 'image':
         container.appendChild(this.makeIllustration(node.getAttribute('src') || node.getAttribute('name') || ''));
         return null;
@@ -217,9 +242,14 @@ export class Story {
   // ---- passive effects -----------------------------------------------------
   renderPassive(container, node, path) {
     const key = 'fx@' + path;
+    const tag = node.tagName.toLowerCase();
     const hidden = boolAttr(node.getAttribute('hidden'));
-    if (!this.ctx.applied.has(key)) {
-      this.ctx.applied.add(key);
+    // An absolute <set value="…"> is a pure function of current state, so it is
+    // re-evaluated on every render — this keeps variables derived from a roll
+    // result correct after that roll resolves (rather than frozen at first render).
+    const rerunnable = tag === 'set' && node.hasAttribute('value') && !node.hasAttribute('modifier');
+    if (rerunnable || !this.ctx.applied.has(key)) {
+      if (!rerunnable) this.ctx.applied.add(key);
       const note = applyEffect(node, this.state, { chooser: null });
       if (note && !hidden) this.notify(note);
     }
@@ -269,10 +299,10 @@ export class Story {
   }
 
   // ---- choices -------------------------------------------------------------
-  renderChoices(container, choicesNode, path, only = null) {
+  renderChoices(container, choicesNode, path, only = null, explicitKids = null) {
     const wrap = document.createElement('div');
     wrap.className = 'choices';
-    const kids = only ? [only] : Array.from(choicesNode.children).filter((c) => c.tagName.toLowerCase() === 'choice');
+    const kids = explicitKids || (only ? [only] : Array.from(choicesNode.children).filter((c) => c.tagName.toLowerCase() === 'choice'));
     kids.forEach((choice, i) => {
       wrap.appendChild(this.renderChoice(choice, path + '.c' + i));
     });
@@ -382,9 +412,26 @@ export class Story {
     return widget;
   }
 
+  // Infer die count from the outcome table this random feeds: if every range
+  // fits within 1-6, it's a single die (some `type="travel"` rolls), otherwise 2.
+  inferDice(node, def) {
+    if (!this.sectionEl) return def;
+    const outs = Array.from(this.sectionEl.querySelectorAll('outcomes'));
+    const target = outs.find((o) => node.compareDocumentPosition(o) & Node.DOCUMENT_POSITION_FOLLOWING);
+    if (!target) return def;
+    let max = 0, hasRange = false;
+    target.querySelectorAll('outcome[range]').forEach((oc) => {
+      hasRange = true;
+      oc.getAttribute('range').replace('+', '').split(/[-,]/).forEach((n) => {
+        const v = parseInt(n, 10); if (!isNaN(v)) max = Math.max(max, v);
+      });
+    });
+    return hasRange && max <= 6 ? 1 : def;
+  }
+
   // ---- rolls: random -------------------------------------------------------
   renderRandom(container, node, path) {
-    const dice = parseInt(node.getAttribute('dice') || '2', 10);
+    const dice = node.hasAttribute('dice') ? parseInt(node.getAttribute('dice'), 10) : this.inferDice(node, 2);
     const varName = node.getAttribute('var');
     const desc = document.createElement('span');
     this.appendChildren(desc, node, path);
@@ -496,39 +543,55 @@ export class Story {
   }
 
   // ---- branches (success/failure/outcomes) ---------------------------------
+  // A branch "succeeds" either from the roll's success flag, or — when it
+  // carries its own `var` — from that variable's sign (>0 = success), which is
+  // how the books express computed outcomes (e.g. rank checks via a `<set>`).
+  branchSuccess(node, roll) {
+    if (node.hasAttribute('var')) return this.state.getVar(node.getAttribute('var')) > 0;
+    return roll ? !!roll.success : false;
+  }
+
   renderBranch(container, node, path, activeRoll) {
     const tag = node.tagName.toLowerCase();
-    if (!activeRoll) { // no roll in scope — just render content
-      this.appendChildren(container, node, path);
-      return;
-    }
-    const roll = this.ctx.rolls.get('roll@' + activeRoll.path);
-    if (!roll) return; // roll not yet made: hide branches
+    const roll = activeRoll ? this.ctx.rolls.get('roll@' + activeRoll.path) : null;
 
     if (tag === 'success' || tag === 'failure') {
+      if (!roll && !node.hasAttribute('var')) return; // wait until the roll is made
       const want = tag === 'success';
-      if (roll.success === want) this.revealBranch(container, node, path);
+      if (this.branchSuccess(node, roll) === want) this.revealBranch(container, node, path);
       return;
     }
+
     if (tag === 'outcomes') {
-      // find first matching <outcome>/<success>/<failure> child
-      const children = Array.from(node.children);
-      for (let i = 0; i < children.length; i++) {
-        const c = children[i];
-        const ctag = c.tagName.toLowerCase();
-        let match = false;
-        if (ctag === 'success') match = roll.success === true;
-        else if (ctag === 'failure') match = roll.success === false;
-        else if (ctag === 'outcome') {
-          const range = c.getAttribute('range');
-          const cw = c.getAttribute('codeword');
-          if (range != null) match = matchRange(range, roll.total);
-          else if (cw) match = cw.split(/[|,]/).some((w) => this.state.hasCodeword(w.trim()));
-          else match = true; // default outcome
+      const kids = Array.from(node.children);
+      const branches = kids.filter((c) => /^(outcome|success|failure)$/.test(c.tagName.toLowerCase()));
+      const choiceKids = kids.filter((c) => c.tagName.toLowerCase() === 'choice');
+
+      // Reveal the single matching outcome once the roll is resolved.
+      if (roll) {
+        for (let i = 0; i < branches.length; i++) {
+          const c = branches[i];
+          const ctag = c.tagName.toLowerCase();
+          let match = false;
+          if (ctag === 'success') match = this.branchSuccess(c, roll) === true;
+          else if (ctag === 'failure') match = this.branchSuccess(c, roll) === false;
+          else {
+            const range = c.getAttribute('range');
+            const cw = c.getAttribute('codeword');
+            const val = c.getAttribute('var') ? this.state.getVar(c.getAttribute('var')) : roll.total;
+            if (range != null) match = matchRange(range, val);
+            else if (cw) match = cw.split(/[|,]/).some((w) => this.state.hasCodeword(w.trim()));
+            else match = true; // default
+          }
+          if (match) { this.revealBranch(container, c, path + '.o' + i); break; }
         }
-        if (match) { this.revealBranch(container, c, path + '.o' + i); break; }
       }
+      // Always-available alternatives inside the table (e.g. "or don't try").
+      if (choiceKids.length) this.renderChoices(container, node, path, null, choiceKids);
+      return;
     }
+
+    if (!roll) this.appendChildren(container, node, path);
   }
 
   revealBranch(container, node, path) {

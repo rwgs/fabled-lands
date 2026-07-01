@@ -99,6 +99,22 @@ async function run() {
     ok('§106 roll resolves to Continue', !!container.querySelector('.goto-primary') && !!container.querySelector('.die'),
        'html=' + container.innerHTML.slice(0, 160));
 
+    // §101: difficulty with inline-goto success/failure branches
+    await renderSec(1,'101');
+    container.querySelector('.btn-roll').click();
+    await new Promise(r => setTimeout(r, 1000));
+    const prog101 = container.querySelector('.goto, .goto-primary');
+    ok('§101 roll resolves to a goto', !!prog101 && !!container.querySelector('.die'),
+       'HTML=' + container.querySelector('.flow').innerHTML.replace(/\s+/g,' ').slice(0, 400));
+
+    // §120: random + outcome ranges (travel)
+    await renderSec(1,'120');
+    container.querySelector('.btn-roll').click();
+    await new Promise(r => setTimeout(r, 1000));
+    const prog120 = container.querySelector('.goto, .goto-primary');
+    ok('§120 random resolves to a goto', !!prog120 && !!container.querySelector('.die'),
+       'HTML=' + container.querySelector('.flow').innerHTML.replace(/\s+/g,' ').slice(0, 400));
+
     // --- interaction: clicking a choice navigates ---
     let navd = null;
     const story3 = new Story(container, gs, { navigate:(b,s)=>{navd={b,s};}, onDeath(){}, notify(){} });
