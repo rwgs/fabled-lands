@@ -170,6 +170,27 @@ async function run() {
     ok('undo restores stamina to 9', gu.data.stamina === 9, String(gu.data.stamina));
     ok('undo clears death', gu.isDead() === false);
 
+    // --- <group> is an OPTIONAL action: must not auto-apply on entry ---
+    const gg = GameState.create({ name:'G', gender:'m', profession:'Warrior', book:1, adv });
+    gg.data.shards = 100;
+    const cg = document.createElement('div');
+    const storyG = new Story(cg, gg, { navigate(){}, onDeath(){}, notify(){} });
+    const s291 = await data.getSection(1,'291'); storyG.begin(s291,1,'291'); // become initiate of Elnir (60 shards)
+    ok('§291 shows a group action', !!cg.querySelector('.group-action'));
+    ok('§291 does NOT auto-join god', gg.hasGod('Elnir') === false);
+    ok('§291 does NOT auto-charge', gg.data.shards === 100, String(gg.data.shards));
+    cg.querySelector('.group-action').click();
+    ok('§291 join applied on click', gg.hasGod('Elnir') === true);
+    ok('§291 charged 60 on click', gg.data.shards === 40, String(gg.data.shards));
+
+    // townhouse purchase (§10) must not auto-buy
+    const gh = GameState.create({ name:'H', gender:'m', profession:'Warrior', book:1, adv });
+    gh.data.shards = 300;
+    const ch = document.createElement('div');
+    const storyH = new Story(ch, gh, { navigate(){}, onDeath(){}, notify(){} });
+    const s10b = await data.getSection(1,'10'); storyH.begin(s10b,1,'10');
+    ok('§10 does NOT auto-buy townhouse', !gh.hasCodeword('1.10.1') && gh.data.shards === 300, `cw=${gh.hasCodeword('1.10.1')} sh=${gh.data.shards}`);
+
   } catch (e) {
     out.push('FATAL ' + (e.stack || e.message));
     fail++;

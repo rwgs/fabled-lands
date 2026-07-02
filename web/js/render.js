@@ -165,6 +165,7 @@ export class Story {
         return p;
       }
       case 'group':
+        return this.renderGroup(container, node, path);
       case 'text':
       case 'desc': {
         // inline grouping wrapper
@@ -243,6 +244,37 @@ export class Story {
       this.appendChildren(container, node, path);
     }
     return null;
+  }
+
+  // ---- group: an optional, click-to-apply action --------------------------
+  // The books bundle the effects of an *optional* choice (buy a house, become an
+  // initiate, purchase a blessing, accept a mission…) inside a <group> with a
+  // <text> label. These must NOT auto-apply — the player opts in by clicking.
+  renderGroup(container, node, path) {
+    const label = (node.textContent || '').replace(/\s+/g, ' ').trim();
+    const effects = Array.from(node.querySelectorAll('lose, tick, gain, adjust, set, curse'));
+    if (!label || !effects.length) {
+      // no visible action (or nothing to apply) — plain inline wrapper
+      const span = document.createElement('span');
+      this.appendChildren(span, node, path);
+      container.appendChild(span);
+      return span;
+    }
+    const key = 'group@' + path;
+    const done = this.ctx.applied.has(key);
+    const btn = document.createElement('button');
+    btn.className = 'group-action' + (done ? ' done' : '');
+    btn.disabled = done;
+    btn.textContent = (done ? '☑ ' : '☐ ') + label;
+    if (!done) {
+      btn.addEventListener('click', () => {
+        effects.forEach((fx) => applyEffect(fx, this.state, {}));
+        this.ctx.applied.add(key);
+        this.rerender();
+      });
+    }
+    container.appendChild(btn);
+    return btn;
   }
 
   // ---- passive effects -----------------------------------------------------

@@ -79,7 +79,8 @@ export function evaluateCondition(el, state) {
   } else if (get('god') != null) {
     result = state.hasGod(get('god'));
   } else if (get('safeAddGod') != null) {
-    result = !state.data.godless;
+    // Can become an initiate only if not godless and not already worshipping a god.
+    result = !state.data.godless && !state.hasGod(get('safeAddGod')) && state.data.gods.length === 0;
   } else if (get('blessing') != null) {
     result = state.hasBlessing(get('blessing'));
   } else if (get('curse') != null) {

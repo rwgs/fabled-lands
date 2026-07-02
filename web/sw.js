@@ -1,9 +1,9 @@
-// sw.js — service worker for offline play.
+// sw.js - service worker for offline play.
 // Precaches the app shell and all book data so the whole game works offline
 // once loaded/installed. Progress lives in localStorage (per-origin), so it
 // survives offline and reloads.
 
-const VERSION = 'fl-v5';
+const VERSION = 'fl-v6';
 const SHELL = [
   './',
   './index.html',
