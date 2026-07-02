@@ -42,7 +42,7 @@ fabled-lands/
 │   └── books.ini      Book titles
 ├── rules/            Rules.xml, QuickRules.xml
 ├── images/           world-map.jpg (+ icons). Section illustrations are NOT included.
-├── source/           The original Java engine (JaFL) — kept for reference, UNTOUCHED
+├── java-source/      The original Java engine (JaFL) — kept for reference, UNTOUCHED
 ├── build/            Build scripts (PowerShell)
 │   ├── build-data.ps1  Bundles books/ + rules/ + maps → web/data & web/assets
 │   └── stamp-version.ps1  Writes the in-game version stamp
@@ -55,8 +55,8 @@ fabled-lands/
     └── data/          meta.json, book1.json … book6.json   (generated)
 ```
 
-The `source/` Java project is the original work of Jonathan Mann and is left exactly as
-found — it was used only as the reference specification for the game rules.
+The `java-source/` Java project is the original work of Jonathan Mann and is left exactly
+as found — it was used only as the reference specification for the game rules.
 
 ---
 

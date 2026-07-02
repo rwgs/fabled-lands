@@ -98,6 +98,11 @@ img { max-width: 100%; }
 .prof-stat { font-size: 0.8rem; color: var(--ink-soft); }
 .prof-stat i { display: inline-block; width: 4.8em; font-style: normal; opacity: 0.7; }
 .prof-info { grid-column: 1 / -1; text-align: center; color: var(--ink-soft); font-style: italic; margin-top: 0.4rem; }
+.prof-detail { margin-top: 1rem; padding: 0.9rem 1.1rem; border: 1px solid var(--parchment-edge); border-left: 4px solid var(--gold-bright); border-radius: 8px; background: #fdf3d8; }
+.prof-detail[hidden] { display: none; }
+.prof-detail-name { font-family: var(--display); font-size: 1.25rem; color: var(--crimson); margin-bottom: 0.35rem; }
+.prof-detail-bio { margin: 0 0 0.5rem; line-height: 1.5; }
+.prof-detail-hint { margin: 0; font-size: 0.85rem; font-style: italic; color: var(--ink-soft); }
 .create-actions { display: flex; justify-content: space-between; gap: 1rem; margin-top: 1.6rem; }
 
 .save-list { display: flex; flex-direction: column; gap: 0.8rem; margin: 0.5rem 0 1.5rem; }

@@ -48,7 +48,11 @@ function registerSW() {
 async function getAdvData(book) {
   if (advData[book]) return advData[book];
   const info = data.bookInfo(book);
-  advData[book] = data.parseAdventurers(info?.adventurers);
+  const adv = data.parseAdventurers(info?.adventurers) || {};
+  // Prefer the build's structured pregens (they carry each character's bio);
+  // fall back to whatever parseAdventurers pulled from the <starting> block.
+  if (info?.pregens?.length) adv.pregens = info.pregens;
+  advData[book] = adv;
   return advData[book];
 }
 
@@ -92,7 +96,7 @@ function showTitle() {
   app.appendChild(menu);
 
   const credits = el('div', 'title-credits');
-  credits.innerHTML = 'Book text © Dave Morris & Jamie Thomson. Original engine by Jonathan Mann.<br>A faithful web port. Progress is saved in your browser.';
+  credits.innerHTML = 'Book text © Dave Morris & Jamie Thomson. Original engine by Jonathan Mann.<br>A faithful web port.<br>Progress is saved in your browser.';
   credits.appendChild(el('div', 'title-version', 'Version ' + VERSION));
   app.appendChild(credits);
 }
@@ -106,7 +110,8 @@ async function showCreate() {
   let book = availBooks.includes(1) ? 1 : availBooks[0];
   let adv = await getAdvData(book);
   let profession = 'Warrior';
-  let gender = 'm';
+  let nameEdited = false;    // true once the player types their own name
+  let genderEdited = false;  // true once the player picks a gender by hand
 
   const wrap = el('div', 'create-wrap');
   wrap.appendChild(el('h1', 'create-title', 'Create your Adventurer'));
@@ -140,12 +145,18 @@ async function showCreate() {
   const profGrid = el('div', 'prof-grid');
   wrap.appendChild(profGrid);
 
+  // ready-made character (name + bio) for the chosen profession
+  const detail = el('div', 'prof-detail');
+  wrap.appendChild(detail);
+
   const startBtn = el('button', 'btn btn-primary btn-lg', 'Begin Adventure');
   const backBtn = el('button', 'btn', 'Back');
   const btnRow = el('div', 'create-actions');
   btnRow.appendChild(backBtn); btnRow.appendChild(startBtn);
   wrap.appendChild(btnRow);
   app.appendChild(wrap);
+
+  const pregenFor = (p) => (adv.pregens || []).find((x) => x.profession === p) || null;
 
   function drawProfs() {
     profGrid.innerHTML = '';
@@ -160,29 +171,67 @@ async function showCreate() {
         statList.appendChild(s);
       }
       card.appendChild(statList);
-      card.addEventListener('click', () => { profession = p; drawProfs(); });
+      card.addEventListener('click', () => selectProfession(p));
       profGrid.appendChild(card);
     }
     const info = el('div', 'prof-info');
     info.textContent = `Starts at ${ordinal(adv.rank)} Rank · ${adv.stamina} Stamina · ${adv.gold} Shards`;
     profGrid.appendChild(info);
   }
-  drawProfs();
 
-  bookSel.addEventListener('change', async () => { book = Number(bookSel.value); adv = await getAdvData(book); drawProfs(); });
+  function renderDetail() {
+    const pg = pregenFor(profession);
+    detail.innerHTML = '';
+    if (!pg) { detail.hidden = true; return; }
+    detail.hidden = false;
+    detail.appendChild(el('div', 'prof-detail-name', pg.name));
+    if (pg.bio) detail.appendChild(el('p', 'prof-detail-bio', pg.bio));
+    const typed = nameInput.value.trim();
+    detail.appendChild(el('p', 'prof-detail-hint',
+      (nameEdited && typed)
+        ? `You’ll play as ${typed}, a ${profession.toLowerCase()}.`
+        : `Play as ${pg.name}, or type your own name above.`));
+  }
+
+  // Fill in the ready-made character's name/gender for the current profession,
+  // without clobbering a name or gender the player has already set by hand.
+  function applyDefaults() {
+    const pg = pregenFor(profession);
+    if (!pg) return;
+    if (!nameEdited) nameInput.value = pg.name;
+    if (!genderEdited) genderSel.value = pg.gender;
+  }
+
+  function selectProfession(p) {
+    profession = p;
+    applyDefaults();
+    drawProfs();
+    renderDetail();
+  }
+
+  nameInput.addEventListener('input', () => {
+    nameEdited = nameInput.value.trim().length > 0; // cleared field → defaults resume
+    renderDetail();
+  });
+  genderSel.addEventListener('change', () => { genderEdited = true; });
+
+  selectProfession(profession); // initial cards + defaults + bio
+
+  bookSel.addEventListener('change', async () => {
+    book = Number(bookSel.value);
+    adv = await getAdvData(book);
+    applyDefaults(); // refresh defaults for the new book (respects manual edits)
+    drawProfs();
+    renderDetail();
+  });
   backBtn.addEventListener('click', showTitle);
   startBtn.addEventListener('click', async () => {
-    const name = nameInput.value.trim() || pickPregenName(adv, profession) || 'Adventurer';
+    const name = nameInput.value.trim() || pregenFor(profession)?.name || 'Adventurer';
     state = GameState.create({ name, gender: genderSel.value, profession, book, adv });
     state.slot = nextFreeSlot();
     state.save();
     startGame(1); // book start section
   });
-}
-
-function pickPregenName(adv, profession) {
-  const p = (adv.pregens || []).find((x) => x.profession === profession);
-  return p ? p.name : null;
 }
 
 // ---- Save import / export --------------------------------------------------
