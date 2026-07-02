@@ -444,7 +444,7 @@ export class Story {
     if (stored) {
       this.showDiceResult(widget, stored.dice, `${abLabel.toUpperCase()} ${stored.abilityScore >= 0 ? '+' : ''}${stored.abilityScore} = ${stored.total} vs ${level}`, stored.success ? 'Success' : 'Failure', stored.success);
     } else {
-      const btn = this.rollButton(`Roll 2d6 + ${abLabel.toUpperCase()}`, widget, () => {
+      const btn = this.rollButton(`Roll 2 dice + ${abLabel.toUpperCase()}`, widget, () => {
         const res = rollDifficulty(this.state, ability, level, modifier + childAdjustment(node, this.state));
         if (node.getAttribute('var')) this.state.setVar(node.getAttribute('var'), res.margin);
         this.ctx.rolls.set(key, res);
@@ -489,7 +489,7 @@ export class Story {
     if (stored) {
       this.showDiceResult(widget, stored.dice, `Rolled ${stored.total}`, '', true);
     } else {
-      widget.appendChild(this.rollButton(`Roll ${dice}d6`, widget, () => {
+      widget.appendChild(this.rollButton(`Roll ${diceWord(dice)}`, widget, () => {
         const r = rollDice(dice);
         const total = r.total + childAdjustment(node, this.state);
         const res = { kind: 'random', dice: r.dice, total };
@@ -512,7 +512,7 @@ export class Story {
     if (stored) {
       this.showDiceResult(widget, stored.dice, `Rolled ${stored.total} vs Rank ${this.state.data.rank}`, stored.success ? 'Success' : 'Failure', stored.success);
     } else {
-      widget.appendChild(this.rollButton(`Rank check (${dice}d6)`, widget, () => {
+      widget.appendChild(this.rollButton(`Rank check (roll ${diceWord(dice)})`, widget, () => {
         const res = rollRankCheck(this.state, dice, add, childAdjustment(node, this.state));
         if (node.getAttribute('var')) this.state.setVar(node.getAttribute('var'), res.margin);
         this.ctx.rolls.set(key, res);
@@ -534,7 +534,7 @@ export class Story {
     if (stored) {
       this.showDiceResult(widget, stored.dice, `Rolled ${stored.total} vs ${ability.toUpperCase()} ${stored.natural}`, stored.success ? `+1 ${ability.toUpperCase()}` : 'No gain', stored.success);
     } else {
-      widget.appendChild(this.rollButton(`Train ${ability.toUpperCase()} (${dice}d6)`, widget, () => {
+      widget.appendChild(this.rollButton(`Train ${ability.toUpperCase()} (roll ${diceWord(dice)})`, widget, () => {
         this.ctx.rolls.set(key, rollTraining(this.state, ability, dice, add));
         this.rerender();
       }));
@@ -935,3 +935,4 @@ const MARKET_TITLES = {
   weapon: 'Weapons', magic: 'Magical equipment', other: 'Goods for sale',
 };
 function titleCase(s) { return (s || '').replace(/\b\w/g, (c) => c.toUpperCase()); }
+function diceWord(n) { return n === 1 ? '1 die' : `${n} dice`; }

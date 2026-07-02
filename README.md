@@ -50,7 +50,8 @@ fabled-lands/
     ├── index.html
     ├── manifest.webmanifest, sw.js       PWA shell + offline service worker
     ├── css/style.css
-    ├── js/            app.js, data.js, state.js, rules.js, engine.js, render.js, ui.js
+    ├── js/            app.js, data.js, state.js, rules.js, engine.js,
+    │                  combat.js, market.js, render.js, ui.js, tts.js, version.js
     ├── assets/        icon.svg, world-map.jpg
     └── data/          meta.json, book1.json … book6.json   (generated)
 ```
@@ -151,10 +152,17 @@ structure of the books is preserved exactly.
 | `data.js` | Loads the bundled JSON, parses section XML, exposes `getSection(book, n)`. |
 | `state.js` | The **Adventure Sheet** model + derived stats (affected abilities, Defence) + `localStorage` save slots. |
 | `rules.js` | Static constants: abilities, professions, rank titles, limits. |
-| `engine.js` | Dice, `<if>` condition evaluation, and passive effect application (`lose`/`tick`/`gain`/`adjust`/`set`). |
-| `render.js` | Turns a `<section>` tree into interactive DOM and drives all interactions. |
+| `engine.js` | The headless rules core: dice, `<if>` condition evaluation, passive effects (`lose`/`tick`/`gain`/`adjust`/`set`), and roll resolution (ability/difficulty, rank check, training), rest, and resurrection deals. No DOM. |
+| `combat.js` | Headless combat resolution — building an enemy, attack rounds, initiative, damage, `<fightdamage>`. No DOM. |
+| `market.js` | Headless economy — buying/selling goods, weapons, armour, ships, cargo, and crew upgrades. No DOM. |
+| `render.js` | Turns a `<section>` tree into interactive DOM and wires all interactions, delegating the actual rules to `engine.js` / `combat.js` / `market.js`. |
 | `ui.js` | Adventure-Sheet panel, dice animation, modals, toasts. |
 | `app.js` | Bootstrap, screens, routing, character creation, death/resurrection, saves. |
+
+The rules were deliberately split **out of the renderer**: `render.js` builds DOM and
+handles clicks, while all game logic lives in DOM-free modules (`engine.js`, `combat.js`,
+`market.js`). This keeps the rules unit-testable in isolation — `web/_test.html` exercises
+combat, economy, rolls and effects directly, without touching the DOM.
 
 ### The rendering model
 
