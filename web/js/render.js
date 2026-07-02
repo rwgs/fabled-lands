@@ -26,6 +26,7 @@ export class Story {
     this.navigate = opts.navigate;         // (book, section) => void
     this.onDeath = opts.onDeath || (() => {});
     this.notify = opts.notify || (() => {});
+    this.onRender = opts.onRender || (() => {}); // called after each (re)render
     this.ctx = null;
     this.sectionEl = null;
   }
@@ -74,6 +75,7 @@ export class Story {
       flow.appendChild(end);
     }
 
+    this.onRender();
     if (this.state.isDead()) this.onDeath();
   }
 

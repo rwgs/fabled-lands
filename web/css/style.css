@@ -119,6 +119,17 @@ img { max-width: 100%; }
 .header-title { flex: 1; text-align: center; font-family: var(--display); color: var(--gold-bright); font-size: 1.2rem; letter-spacing: 0.03em; }
 .icon-btn { background: rgba(255,255,255,0.06); border: 1px solid rgba(200,150,42,0.4); color: var(--gold-bright); font-size: 1.3rem; width: 2.5rem; height: 2.5rem; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
 .icon-btn:hover { background: rgba(200,150,42,0.18); }
+.icon-btn.active { background: rgba(200,150,42,0.3); border-color: var(--gold-bright); }
+
+/* narration (text-to-speech) */
+.tts-s { border-radius: 4px; transition: background 0.2s; }
+.tts-active { background: rgba(200,150,42,0.35); box-shadow: 0 0 0 2px rgba(200,150,42,0.35); }
+.tts-settings { display: flex; flex-direction: column; gap: 0.9rem; }
+.tts-row { display: flex; align-items: center; gap: 0.6rem; }
+.tts-row > label:first-child { min-width: 4rem; font-weight: 700; color: var(--ink-soft); }
+.tts-row .select { flex: 1; }
+.tts-row input[type="range"] { flex: 1; accent-color: var(--gold); }
+.tts-rate { min-width: 3rem; text-align: right; color: var(--ink-soft); }
 
 .game-main { flex: 1; display: flex; min-height: 0; position: relative; }
 .story-pane { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 1.2rem; background:

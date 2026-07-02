@@ -6,6 +6,7 @@ import { ABILITIES, ABILITY_LABEL, ABILITY_BLURB, PROFESSIONS, rankTitle, ordina
 import { Story } from './render.js';
 import { renderSheet, modal, toast, escapeHtml } from './ui.js';
 import { VERSION } from './version.js';
+import { Narrator } from './tts.js'; // [TTS] optional narration — remove this + the [TTS] hooks below to drop the feature
 
 const $ = (sel) => document.querySelector(sel);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
@@ -13,6 +14,9 @@ const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls)
 let state = null;
 let story = null;
 let advData = {}; // book number -> parsed adventurers data
+const narrator = new Narrator(); // [TTS]
+let narrateBtn = null;           // [TTS]
+const currentFlow = () => document.querySelector('#story .flow'); // [TTS]
 
 async function boot() {
   try { await data.loadMeta(); }
@@ -50,6 +54,7 @@ async function getAdvData(book) {
 
 // ---- Title screen ----------------------------------------------------------
 function showTitle() {
+  narrator.stop(); // [TTS]
   const slots = loadSlotMeta();
   const hasSaves = Object.keys(slots).length > 0;
   const app = $('#app');
@@ -223,7 +228,18 @@ function buildGameScreen() {
   const title = el('div', 'header-title', 'Fabled Lands');
   const sheetBtn = iconBtn('📜', 'Adventure Sheet', () => toggleSheet());
   sheetBtn.classList.add('sheet-toggle');
-  header.appendChild(menuBtn); header.appendChild(title); header.appendChild(sheetBtn);
+  header.appendChild(menuBtn); header.appendChild(title);
+  // [TTS] narration play/stop button
+  if (narrator.supported) {
+    narrateBtn = iconBtn('🔊', 'Read aloud', () => narrator.toggle(currentFlow()));
+    narrator.onState = (playing) => {
+      narrateBtn.textContent = playing ? '⏹' : '🔊';
+      narrateBtn.classList.toggle('active', playing);
+      narrateBtn.title = playing ? 'Stop reading' : 'Read aloud';
+    };
+    header.appendChild(narrateBtn);
+  }
+  header.appendChild(sheetBtn);
   app.appendChild(header);
 
   const main = el('div', 'game-main');
@@ -243,6 +259,7 @@ function buildGameScreen() {
     navigate: (book, section) => navigate(book, section),
     onDeath: handleDeath,
     notify: (msg, type) => toast(msg, type),
+    onRender: () => narrator.handleRerender(), // [TTS] stop narration when the DOM changes
   });
 
   state.onChange(() => refreshSheet());
@@ -274,6 +291,7 @@ async function navigate(book, section) {
   story.begin(sectionEl, book, section);
   const pane = $('.story-pane'); if (pane) pane.scrollTop = 0;
   window.scrollTo(0, 0);
+  narrator.autoplayIfEnabled(currentFlow()); // [TTS]
 }
 
 async function undo() {
@@ -286,6 +304,7 @@ async function undo() {
   story.begin(el, target.book, target.section); // re-applies that section's effects from restored state
   const pane = $('.story-pane'); if (pane) pane.scrollTop = 0;
   window.scrollTo(0, 0);
+  narrator.autoplayIfEnabled(currentFlow()); // [TTS]
 }
 
 async function startGame(section) {
@@ -302,6 +321,7 @@ async function loadCurrent() {
     if (!sectionEl) { await navigate(state.data.book, 1); return; }
     state.snapshot(); // baseline entry state for undo after a load
     story.begin(sectionEl, state.data.book, sec);
+    narrator.autoplayIfEnabled(currentFlow()); // [TTS]
   }
 }
 
@@ -310,6 +330,7 @@ let deathShown = false;
 async function handleDeath() {
   if (deathShown) return;
   deathShown = true;
+  narrator.stop(); // [TTS]
   const res = state.data.resurrections[0];
   const canUndo = state.canUndo();
   const buttons = [];
@@ -341,12 +362,55 @@ async function showGameMenu() {
   add('Undo last move', () => undo());
   add('Rules', () => showRules(true));
   add('World Map', () => showMap(true));
+  if (narrator.supported) add('Narration…', () => showNarrationSettings()); // [TTS]
   add('Save & quit to title', () => { state.save(); showTitle(); });
   const ver = el('div', 'menu-version', 'Version ' + VERSION);
   body.appendChild(ver);
   const p = modal({ title: 'Menu', body, buttons: [{ label: 'Close', value: null }] });
   close = () => { const ov = document.querySelector('.modal-overlay'); if (ov) ov.remove(); };
   await p;
+}
+
+// ---- Narration settings [TTS] ----------------------------------------------
+function showNarrationSettings() {
+  const body = el('div', 'tts-settings');
+
+  const auto = el('label', 'tts-row');
+  const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = narrator.settings.autoplay;
+  cb.addEventListener('change', () => { narrator.settings.autoplay = cb.checked; narrator.saveSettings(); });
+  auto.appendChild(cb); auto.appendChild(document.createTextNode(' Auto-narrate each new section'));
+  body.appendChild(auto);
+
+  const vrow = el('div', 'tts-row');
+  vrow.appendChild(el('label', null, 'Voice'));
+  const sel = document.createElement('select'); sel.className = 'select';
+  const voices = narrator.englishVoices();
+  if (!voices.length) { const o = el('option', null, 'System default'); o.value = ''; sel.appendChild(o); }
+  voices.forEach((v) => { const o = el('option', null, `${v.name} (${v.lang})`); o.value = v.voiceURI; sel.appendChild(o); });
+  if (narrator.settings.voiceURI) sel.value = narrator.settings.voiceURI;
+  sel.addEventListener('change', () => { narrator.settings.voiceURI = sel.value || null; narrator.saveSettings(); });
+  vrow.appendChild(sel); body.appendChild(vrow);
+
+  const rrow = el('div', 'tts-row');
+  rrow.appendChild(el('label', null, 'Speed'));
+  const rng = document.createElement('input'); rng.type = 'range'; rng.min = '0.6'; rng.max = '1.4'; rng.step = '0.05'; rng.value = String(narrator.settings.rate);
+  const rval = el('span', 'tts-rate', Number(narrator.settings.rate).toFixed(2) + '×');
+  rng.addEventListener('input', () => { narrator.settings.rate = parseFloat(rng.value); rval.textContent = narrator.settings.rate.toFixed(2) + '×'; narrator.saveSettings(); });
+  rrow.appendChild(rng); rrow.appendChild(rval); body.appendChild(rrow);
+
+  const test = el('button', 'btn', 'Test voice');
+  test.addEventListener('click', () => {
+    try {
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance('The Fabled Lands await your command.');
+      const v = narrator.voices.find((x) => x.voiceURI === narrator.settings.voiceURI); if (v) u.voice = v;
+      u.rate = narrator.settings.rate;
+      speechSynthesis.speak(u);
+    } catch {}
+  });
+  body.appendChild(test);
+
+  modal({ title: 'Narration', body, buttons: [{ label: 'Done', value: null, primary: true }] });
 }
 
 // ---- Rules & Map -----------------------------------------------------------

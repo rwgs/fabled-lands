@@ -26,6 +26,7 @@ the browser, on any device, with progress saved locally.
 - **Classic-fantasy presentation** — parchment, serif book text, tactile dice.
 - **Mobile, tablet & desktop** — responsive; the sheet becomes a slide-in drawer on phones.
 - **Installable PWA** — works fully **offline** after first load; add it to your home screen.
+- **Read-aloud narration** — optional text-to-speech of the story prose (see below).
 - **Saved in your browser** — multiple save slots via `localStorage`; autosaves as you go.
 - **No backend, no build toolchain, no dependencies** — plain HTML/CSS/ES modules.
 
@@ -120,6 +121,22 @@ powershell -ExecutionPolicy Bypass -File tools/stamp-version.ps1
 (`build-data.ps1` runs this automatically at the end.)
 
 ---
+
+## Narration (text-to-speech)
+
+Story prose can be read aloud using the browser's built-in **Web Speech API** — no
+backend, no API keys, no cost, and it keeps working offline with the device's own voices.
+
+- A **🔊 button** in the game header plays/stops narration of the current section.
+- **Auto-narrate** (on by default) reads each new section as you arrive; toggle it, pick a
+  **voice**, and set the **speed** under **Menu → Narration…** (remembered per browser).
+- Prose is spoken sentence-by-sentence (so long passages aren't truncated) and the current
+  sentence is **highlighted**; button/roll/choice labels are excluded from the reading.
+
+It is a **self-contained, optional module** ([web/js/tts.js](web/js/tts.js)). Every
+integration point in `app.js` is tagged with a `[TTS]` comment, so the feature can be
+removed entirely by deleting that module and those few lines — the game is unaffected.
+If a browser has no speech support, the button simply doesn't appear.
 
 ## How it works
 

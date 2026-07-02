@@ -5,6 +5,7 @@ import * as data from './js/data.js';
 import { GameState } from './js/state.js';
 import * as eng from './js/engine.js';
 import { Story } from './js/render.js';
+import { Narrator } from './js/tts.js';
 
 const out = [];
 let pass = 0, fail = 0;
@@ -190,6 +191,26 @@ async function run() {
     const storyH = new Story(ch, gh, { navigate(){}, onDeath(){}, notify(){} });
     const s10b = await data.getSection(1,'10'); storyH.begin(s10b,1,'10');
     ok('§10 does NOT auto-buy townhouse', !gh.hasCodeword('1.10.1') && gh.data.shards === 300, `cw=${gh.hasCodeword('1.10.1')} sh=${gh.data.shards}`);
+
+    // --- narration (TTS): sentence wrapping preserves interactivity ---
+    const narrator = new Narrator();
+    ok('TTS supported in test browser', narrator.supported === true);
+    const gn = GameState.create({ name:'N', gender:'m', profession:'Warrior', book:1, adv });
+    let navdN = null;
+    const cn = document.createElement('div');
+    const storyN = new Story(cn, gn, { navigate:(b,s)=>{navdN={b,s};}, onDeath(){}, notify(){}, onRender(){} });
+    const s1n = await data.getSection(1,'1'); storyN.begin(s1n,1,'1');
+    const flowN = cn.querySelector('.flow');
+    const nChunks = narrator.prepare(flowN);
+    ok('narration produces chunks', nChunks > 5, 'chunks='+nChunks);
+    ok('narration wrapped sentences', flowN.querySelectorAll('.tts-s').length > 5);
+    const glink = flowN.querySelector('.goto');
+    ok('goto survives narration prep', !!glink);
+    glink.click();
+    ok('goto still navigates after prep (listeners preserved)', navdN && navdN.s === '20', JSON.stringify(navdN));
+    const joined = narrator.chunks.map(c => c.text).join(' ');
+    ok('narration excludes control labels', !/\b20\b/.test(joined));
+    ok('narration includes prose', /dawn|sea|boat|Spider/i.test(joined));
 
   } catch (e) {
     out.push('FATAL ' + (e.stack || e.message));
