@@ -284,9 +284,26 @@ export class Story {
 
   // ---- passive effects -----------------------------------------------------
   renderPassive(container, node, path) {
-    const key = 'fx@' + path;
     const tag = node.tagName.toLowerCase();
     const hidden = boolAttr(node.getAttribute('hidden'));
+    const price = node.getAttribute('price');
+    const flag = node.getAttribute('flag');
+
+    // JaFL "price/flag" optional purchase: a node with price="k" is a click-to-pay
+    // cost; nodes with flag="k" are its linked rewards. These must NOT auto-apply —
+    // the player opts in by clicking the cost, which also applies the linked rewards.
+    if (price != null) return this.renderOptionalPay(container, node, path, price);
+    if (flag != null && this.sectionEl && this.sectionEl.querySelector(`[price="${flag}"]`)) {
+      if (!hidden) { // dependent reward: show its words; effect applies with the linked cost
+        const span = document.createElement('span');
+        span.className = 'fx';
+        this.appendChildren(span, node, path);
+        if (span.textContent.trim()) container.appendChild(span);
+      }
+      return null;
+    }
+
+    const key = 'fx@' + path;
     // An absolute <set value="…"> is a pure function of current state, so it is
     // re-evaluated on every render — this keeps variables derived from a roll
     // result correct after that roll resolves (rather than frozen at first render).
@@ -304,6 +321,33 @@ export class Story {
       if (span.textContent.trim()) container.appendChild(span);
     }
     return null;
+  }
+
+  // Optional purchase via the price/flag idiom. The cost node becomes a click-to-apply
+  // button; clicking applies it plus every linked reward (flag == this price key), once.
+  renderOptionalPay(container, node, path, key) {
+    const memo = 'pay@' + path;
+    const done = this.ctx.applied.has(memo);
+    const cost = node.getAttribute('shards') ? resolveValue(this.state, node.getAttribute('shards')) : 0;
+    const label = document.createElement('span');
+    this.appendChildren(label, node, path);
+    const btn = document.createElement('button');
+    btn.className = 'btn-mini pay-action' + (done ? ' done' : '');
+    btn.textContent = (done ? '☑ ' : '') + (label.textContent.trim() || (cost ? `Pay ${cost} Shards` : 'Confirm'));
+    if (done) {
+      btn.disabled = true;
+    } else if (cost && this.state.data.shards < cost) {
+      btn.disabled = true; btn.title = 'Not enough Shards';
+    } else {
+      btn.addEventListener('click', () => {
+        applyEffect(node, this.state, {});
+        this.sectionEl.querySelectorAll(`[flag="${key}"]`).forEach((r) => applyEffect(r, this.state, {}));
+        this.ctx.applied.add(memo);
+        this.rerender();
+      });
+    }
+    container.appendChild(btn);
+    return btn;
   }
 
   // ---- navigation ----------------------------------------------------------
