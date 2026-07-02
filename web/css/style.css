@@ -38,6 +38,11 @@ img { max-width: 100%; }
 .fatal { color: var(--parchment); text-align: center; padding: 3rem 1.5rem; font-size: 1.1rem; }
 .fatal small { opacity: 0.7; }
 
+.inherit-style {
+  color: inherit;
+  text-decoration: inherit;
+}
+
 /* ---- Buttons -------------------------------------------------------------- */
 .btn {
   appearance: none;

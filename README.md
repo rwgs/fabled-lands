@@ -112,7 +112,7 @@ whole book in a single request and cache it for offline play.
 
 ### Build stamp / version
 
-A build version in the form `yy.MM.dd.HH.mm` is shown at the bottom of the in-game menu
+A build version in the form `yy.MM.dd.HH` is shown at the bottom of the in-game menu
 (and on the title screen). It is generated into `web/js/version.js` from the most recently
 modified file under `web/`. After changing anything in `web/`, refresh it with:
 
@@ -201,7 +201,7 @@ rolls are memoised per-visit by a stable node path, which guarantees that:
 
 ## Testing
 
-`web/_test.html` is a headless smoke test: it creates a character, exercises the engine
+`web/_test.html` is a headless smoke test: it creates a character, exercises the engine 
 (conditions, effects, dice, ranges, combat), verifies interactions (rolling, choosing,
 fighting), and renders **every section of all six books** to confirm none throw. Serve the
 `web/` folder and open `/_test.html`, or run it headlessly:
@@ -218,10 +218,10 @@ The first line of the dumped `#results` reads `RESULT ALL PASS …` when healthy
 
 ## Credits & licence
 
-- Book text © **Dave Morris & Jamie Thomson**, 1996.
-- Illustrations © **Russ Nicholson**.
-- Original *Java Fabled Lands* engine © **Jonathan Mann** (used here as the rules reference).
+- Web App port © 2026 **Robert Southgate**
+- Book text © 1996 **Dave Morris & Jamie Thomson**
+- Illustrations © **Russ Nicholson**
+- Original *Java Fabled Lands* engine © 2005 **Jonathan Mann** (used here as the rules reference).
 
-This web port automates the published rules for personal play. *Fabled Lands* and its
-text/artwork remain the property of their respective rights holders; please support the
-official releases.
+*Fabled Lands* and its text and artwork remain the property of their respective rights holders.
+Please support the official releases.
