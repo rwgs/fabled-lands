@@ -218,10 +218,20 @@ The first line of the dumped `#results` reads `RESULT ALL PASS …` when healthy
 
 ## Credits & licence
 
-- Web App port © 2026 **Robert Southgate**
-- Book text © 1996 **Dave Morris & Jamie Thomson**
-- Illustrations © **Russ Nicholson**
-- Original *Java Fabled Lands* engine © 2005 **Jonathan Mann** (used here as the rules reference).
+This project has two layers of rights — see [`NOTICE`](NOTICE) for the full breakdown.
 
-*Fabled Lands* and its text and artwork remain the property of their respective rights holders.
-Please support the official releases.
+**Software** — licensed **GPL-2.0** (see [`LICENSE`](LICENSE)). This *Progressive Web App Fabled Lands* (WebFL) design &
+implementation are © 2026 **Robert Southgate**. The rules automation is a clean-room
+JavaScript reimplementation using *Java Fabled Lands* (JaFL) © 2005 **Jonathan Mann** as the
+reference; JaFL is published under GPL-2.0, and the bundled section data was obtained from
+that project — hence GPL-2.0 here too (JaFL is v2-only, incompatible with v3).
+
+**Content** — *not* covered by the GPL; copyright of the respective owners:
+
+- Book text © 1996 **Dave Morris & Jamie Thomson** (Books 1–6); rights held by **Fabled Lands LLP**.
+- Book 7, *The Serpent King's Domain*, text © 2017 **Paul Gresty** (Megara Entertainment / Fabled Lands LLP).
+- Illustrations & Maps © **Russ Nicholson**; Book 7 cover © 2017 **Kevin Jenkins**.
+
+*Fabled Lands* and its text and artwork remain the property of their respective rights
+holders. This is an unofficial, non-commercial fan project — please support the official
+releases. A GPL licence on the software does **not** grant rights to the book content.

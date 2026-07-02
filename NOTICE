@@ -1,0 +1,43 @@
+Fabled Lands — Web Edition
+==========================
+
+This repository contains two kinds of material with DIFFERENT rights, and the
+LICENSE file (GPL-2.0) applies only to the first.
+
+1. SOFTWARE  —  licensed GPL-2.0 (see LICENSE)
+   ------------------------------------------------------------------------
+   The web application under web/ (HTML, CSS, JavaScript), the build scripts
+   under build/, and the arrangement of the bundled data.
+
+   The rules automation is a clean-room reimplementation in JavaScript of the
+   game rules, using Jonathan Mann's "Java Fabled Lands" (JaFL) as the
+   reference specification. JaFL is published on SourceForge
+   (https://sourceforge.net/projects/flapp/) under GPL-2.0, and the section
+   data files under books/ were obtained from that project. Because JaFL is
+   distributed as GPL version 2 (with no "or later" clause), this project is
+   licensed GPL-2.0 to remain compatible with the material it reuses.
+
+       Java Fabled Lands engine and data structure © Jonathan Mann, GPL-2.0.
+
+2. CONTENT  —  NOT covered by the GPL; copyright of the respective owners
+   ------------------------------------------------------------------------
+   The *Fabled Lands* book text, game rules, world, place names, maps and
+   illustrations are copyrighted works. They are reproduced here (via the JaFL
+   data files and, for Book 7, direct transcription of the published PDF) for a
+   personal, non-commercial fan project. A GPL licence on the software does NOT
+   grant any rights to this content, and the content may not be redistributed
+   without permission from the rights holders.
+
+       Book text © Dave Morris & Jamie Thomson, 1996 (Books 1–6);
+         rights held by Fabled Lands LLP.
+       Book 7, "The Serpent King's Domain", text © Paul Gresty, 2017,
+         published by Megara Entertainment / Fabled Lands LLP.
+       Illustrations and maps © Russ Nicholson.
+       Book 7 cover painting © Kevin Jenkins, 2017.
+
+   "Fabled Lands" is a trademark of Fabled Lands LLP. This is an unofficial fan
+   project and is not endorsed by the rights holders. Please support the
+   official releases.
+
+If you are a rights holder and have any concern about this repository, please
+contact the maintainer and it will be addressed promptly.
