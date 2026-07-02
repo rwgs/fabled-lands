@@ -1,8 +1,4 @@
 <section>
-	<table>
-		<tr><h2>Adventuring in the</h2></tr>
-		<tr><h1>Fabled Lands</h1></tr>
-	</table>
 	<p>
 		<i>Fabled Lands</i> is unlike any other gamebook series. The reason is that you can play the books in any order, coming back to earlier books whenever you wish. You need only one book to start, but by collecting other books in the series you can explore more of this rich fantasy world. Instead of just one single storyline, there are virtually unlimited adventures to be had in the <i>Fabled Lands</i>. All you need is two dice, an eraser and a pencil.
 	</p>
@@ -61,7 +57,7 @@
 		You will be told during the course of your adventures when you are entitled to advance in Rank. Characters of higher Rank are tougher, luckier and generally better able to deal with trouble.
 	</p>
 	<table>
-		<tr><i><td>Rank</td><td>Title</td></i></tr>
+		<tr><td><i>Rank</i></td><td><i>Title</i></td></tr>
 		<tr><td>1st</td><td>Outcast</td></tr>
 		<tr><td>2nd</td><td>Commoner</td></tr>
 		<tr><td>3rd</td><td>Guildmember</td></tr>

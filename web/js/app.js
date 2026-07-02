@@ -156,7 +156,7 @@ async function showCreate() {
       const statList = el('div', 'prof-stats');
       for (const ab of ABILITIES) {
         const s = el('span', 'prof-stat');
-        s.innerHTML = `<i>${ABILITY_LABEL[ab].slice(0, 3)}</i>${scores[ab] ?? '-'}`;
+        s.innerHTML = `<i>${ABILITY_LABEL[ab]}</i>${scores[ab] ?? '-'}`;
         statList.appendChild(s);
       }
       card.appendChild(statList);
