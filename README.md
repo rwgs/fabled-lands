@@ -107,6 +107,18 @@ This reads every numeric `books/book<n>/<section>.xml`, each book's `Adventurers
 skipped. Book text is left untouched; the JSON simply bundles it so the app can load a
 whole book in a single request and cache it for offline play.
 
+### Build stamp / version
+
+A build version in the form `yy.MM.dd.HH.mm` is shown at the bottom of the in-game menu
+(and on the title screen). It is generated into `web/js/version.js` from the most recently
+modified file under `web/`. After changing anything in `web/`, refresh it with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/stamp-version.ps1
+```
+
+(`build-data.ps1` runs this automatically at the end.)
+
 ---
 
 ## How it works

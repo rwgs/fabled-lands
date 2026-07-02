@@ -5,6 +5,7 @@ import { GameState, loadSlotMeta, deleteSlot, nextFreeSlot } from './state.js';
 import { ABILITIES, ABILITY_LABEL, ABILITY_BLURB, PROFESSIONS, rankTitle, ordinal } from './rules.js';
 import { Story } from './render.js';
 import { renderSheet, modal, toast, escapeHtml } from './ui.js';
+import { VERSION } from './version.js';
 
 const $ = (sel) => document.querySelector(sel);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
@@ -83,6 +84,7 @@ function showTitle() {
 
   const credits = el('div', 'title-credits');
   credits.innerHTML = 'Book text © Dave Morris & Jamie Thomson. Original engine by Jonathan Mann.<br>A faithful web port. Progress is saved in your browser.';
+  credits.appendChild(el('div', 'title-version', 'Version ' + VERSION));
   app.appendChild(credits);
 }
 
@@ -340,6 +342,8 @@ async function showGameMenu() {
   add('Rules', () => showRules(true));
   add('World Map', () => showMap(true));
   add('Save & quit to title', () => { state.save(); showTitle(); });
+  const ver = el('div', 'menu-version', 'Version ' + VERSION);
+  body.appendChild(ver);
   const p = modal({ title: 'Menu', body, buttons: [{ label: 'Close', value: null }] });
   close = () => { const ov = document.querySelector('.modal-overlay'); if (ov) ov.remove(); };
   await p;

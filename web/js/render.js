@@ -196,6 +196,8 @@ export class Story {
         return this.renderFight(container, node, path);
       case 'market':
         return this.renderMarket(container, node, path);
+      case 'buy':
+        return this.renderInlineBuy(container, node, path);
       case 'rest':
         return this.renderRest(container, node, path);
       case 'resurrection':
@@ -738,39 +740,66 @@ export class Story {
   }
 
   // ---- market --------------------------------------------------------------
+  // A <market> lists goods either as <trade> rows (ships/cargo) or as direct
+  // <armour>/<weapon>/<tool>/<item>/<cargo> elements, split into groups by one
+  // or more <header type="…"> dividers.
   renderMarket(container, node, path) {
     const box = document.createElement('div');
     box.className = 'market';
-    const header = node.querySelector('header');
-    const type = header?.getAttribute('type') || 'other';
-    const heading = document.createElement('div');
-    heading.className = 'market-head';
-    heading.textContent = MARKET_TITLES[type] || 'Market';
-    box.appendChild(heading);
-
-    Array.from(node.querySelectorAll(':scope > trade')).forEach((tr, i) => {
-      box.appendChild(this.renderTrade(tr, type, path + '.t' + i));
+    let hasHeader = false;
+    Array.from(node.children).forEach((child, i) => {
+      const tag = child.tagName.toLowerCase();
+      if (tag === 'header') {
+        hasHeader = true;
+        const type = child.getAttribute('type') || 'other';
+        const h = document.createElement('div');
+        h.className = 'market-head';
+        h.textContent = MARKET_TITLES[type] || 'Market';
+        box.appendChild(h);
+      } else if (tag === 'trade' || tag === 'armour' || tag === 'weapon' || tag === 'tool' || tag === 'item' || tag === 'cargo') {
+        box.appendChild(this.renderShopRow(child, path + '.r' + i));
+      }
     });
-    // standalone <buy> rows (crew upgrades etc.) are handled inline elsewhere
+    if (!hasHeader) {
+      const h = document.createElement('div');
+      h.className = 'market-head';
+      h.textContent = 'Market';
+      box.insertBefore(h, box.firstChild);
+    }
     container.appendChild(box);
     return box;
   }
 
-  renderTrade(node, type, path) {
-    const row = document.createElement('div');
-    row.className = 'trade';
+  shopKind(node) {
+    const tag = node.tagName.toLowerCase();
+    if (tag !== 'trade') return tag; // armour | weapon | tool | item | cargo
+    if (node.hasAttribute('ship')) return 'ship';
+    if (node.hasAttribute('cargo')) return 'cargo';
+    if (node.hasAttribute('weapon')) return 'weapon';
+    if (node.hasAttribute('armour')) return 'armour';
+    if (node.hasAttribute('tool')) return 'tool';
+    return 'item';
+  }
+
+  renderShopRow(node, path) {
+    const kind = this.shopKind(node);
+    const name = node.getAttribute('name') || node.getAttribute(kind) || node.getAttribute('item') || (kind === 'weapon' ? 'weapon' : kind);
+    const bonus = node.getAttribute('bonus') ? parseInt(node.getAttribute('bonus'), 10) : 0;
+    const ability = node.getAttribute('ability');
     const buy = node.getAttribute('buy');
     const sell = node.getAttribute('sell');
-    const name = node.getAttribute('name') || node.getAttribute('item') || node.getAttribute('weapon') ||
-      node.getAttribute('armour') || node.getAttribute('tool') || node.getAttribute('cargo') || node.getAttribute('ship') || 'item';
-    const bonus = node.getAttribute('bonus') ? parseInt(node.getAttribute('bonus'), 10) : 0;
-    const kind = node.getAttribute('weapon') ? 'weapon' : node.getAttribute('armour') ? 'armour' :
-      node.getAttribute('tool') ? 'tool' : node.getAttribute('ship') ? 'ship' :
-      node.getAttribute('cargo') ? 'cargo' : 'item';
+    const carryable = kind === 'weapon' || kind === 'armour' || kind === 'tool' || kind === 'item';
 
+    const row = document.createElement('div');
+    row.className = 'trade';
     const label = document.createElement('span');
     label.className = 'trade-name';
-    label.textContent = titleCase(name) + (bonus ? ` (+${bonus})` : '');
+    let tag = '';
+    if (kind === 'weapon') tag = ` (Combat +${bonus})`;
+    else if (kind === 'armour') tag = ` (Defence +${bonus})`;
+    else if (kind === 'tool' && ability) tag = ` (${titleCase(ability)} +${bonus})`;
+    else if (bonus) tag = ` (+${bonus})`;
+    label.textContent = titleCase(name) + tag;
     row.appendChild(label);
 
     const actions = document.createElement('span');
@@ -780,22 +809,30 @@ export class Story {
       const b = document.createElement('button');
       b.className = 'btn-mini';
       b.textContent = `Buy ${price}`;
-      b.disabled = this.state.data.shards < price || (kind === 'item' && this.state.freeSlots() <= 0);
-      b.title = this.state.data.shards < price ? 'Not enough Shards' : '';
+      const noSlot = carryable && this.state.freeSlots() <= 0;
+      b.disabled = this.state.data.shards < price || noSlot;
+      b.title = this.state.data.shards < price ? 'Not enough Shards' : (noSlot ? 'No room (12-item limit)' : '');
       b.addEventListener('click', () => this.buyTrade(kind, name, price, bonus, node));
       actions.appendChild(b);
     }
     if (sell != null) {
       const price = resolveValue(this.state, sell);
+      const owned = kind === 'ship' ? this.state.ships.some((sh) => sh.type === node.getAttribute('ship'))
+        : kind === 'cargo' ? this.state.ships.some((sh) => (sh.cargo || []).includes(node.getAttribute('cargo') || name))
+          : this.state.hasItem(name);
       const s = document.createElement('button');
       s.className = 'btn-mini';
       s.textContent = `Sell ${price}`;
-      const owned = kind === 'ship' ? this.state.ships.some((sh) => sh.type === node.getAttribute('ship'))
-        : kind === 'cargo' ? this.state.ships.some((sh) => (sh.cargo || []).includes(node.getAttribute('cargo')))
-          : this.state.hasItem(name);
       s.disabled = !owned;
+      s.title = owned ? '' : 'You have none to sell';
       s.addEventListener('click', () => this.sellTrade(kind, name, price, node));
       actions.appendChild(s);
+    }
+    if (buy == null && sell == null) {
+      const na = document.createElement('span');
+      na.className = 'trade-na';
+      na.textContent = 'not available';
+      actions.appendChild(na);
     }
     row.appendChild(actions);
     return row;
@@ -839,6 +876,34 @@ export class Story {
       this.state.removeItemById(it.id); this.state.adjustMoney(price);
     }
     this.rerender();
+  }
+
+  // Inline <buy> in prose (e.g. crew upgrades: "…it costs <buy crew=… shards=…/>…").
+  renderInlineBuy(container, node, path) {
+    const shards = node.getAttribute('shards');
+    const price = shards != null ? resolveValue(this.state, shards) : 0;
+    const crew = node.getAttribute('crew');
+    const item = node.getAttribute('item');
+    const btn = document.createElement('button');
+    btn.className = 'btn-mini';
+    const inner = document.createElement('span');
+    this.appendChildren(inner, node, path);
+    btn.textContent = inner.textContent.trim() || (price ? `${price} Shards` : 'Buy');
+
+    const crewRank = (c) => ['poor', 'average', 'good', 'excellent'].indexOf(c);
+    const ship = this.state.ships[0];
+    let usable = true;
+    if (crew) usable = !!ship && crewRank(ship.crew) < crewRank(crew);
+    btn.disabled = (price > 0 && this.state.data.shards < price) || !usable;
+    btn.addEventListener('click', () => {
+      if (price) this.state.adjustMoney(-price);
+      if (crew && ship) ship.crew = crew;
+      else if (item) this.state.addItem(makeItem('item', item, node.getAttribute('bonus') ? parseInt(node.getAttribute('bonus'), 10) : 0, node.getAttribute('ability')));
+      this.state.changed();
+      this.rerender();
+    });
+    container.appendChild(btn);
+    return btn;
   }
 
   // ---- rest ----------------------------------------------------------------
