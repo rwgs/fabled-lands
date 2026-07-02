@@ -96,7 +96,14 @@ function showTitle() {
   app.appendChild(menu);
 
   const credits = el('div', 'title-credits');
-  credits.innerHTML = 'Book text © Dave Morris & Jamie Thomson. Original engine by Jonathan Mann.<br>A faithful web port.<br>Progress is saved in your browser.';
+  credits.innerHTML =
+    'Book text © <strong>Dave Morris &amp; Jamie Thomson</strong>, 1996.<br>' +
+    'Illustrations © <strong>Russ Nicholson</strong>.<br>' +
+    'Original <em>Java Fabled Lands</em> engine © <strong>Jonathan Mann</strong> (used here as the rules reference).' +
+    '<p class="title-licence">This web port automates the published rules for personal play. ' +
+    '<em>Fabled Lands</em> and its text/artwork remain the property of their respective rights holders; ' +
+    'please support the official releases.</p>' +
+    '<div class="title-note">Progress is saved in your browser.</div>';
   credits.appendChild(el('div', 'title-version', 'Version ' + VERSION));
   app.appendChild(credits);
 }

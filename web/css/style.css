@@ -76,7 +76,9 @@ img { max-width: 100%; }
 }
 .game-tagline { color: #d8c49a; font-style: italic; font-size: clamp(1rem, 3.5vw, 1.2rem); margin-top: 0.6rem; max-width: 32ch; }
 .title-menu { display: flex; flex-direction: column; gap: 0.7rem; width: min(360px, 90vw); }
-.title-credits { margin-top: 2.2rem; color: #b39c76; font-size: 0.8rem; line-height: 1.5; max-width: 44ch; }
+.title-credits { margin-top: 2.2rem; color: #b39c76; font-size: 0.8rem; line-height: 1.5; max-width: 46ch; }
+.title-licence { margin: 0.9rem 0 0; font-style: italic; }
+.title-note { margin-top: 0.9rem; }
 
 /* ---- Create & Saves ------------------------------------------------------- */
 .screen-create, .screen-saves { min-height: 100vh; min-height: 100dvh; padding: 1.5rem 1rem 3rem; }
