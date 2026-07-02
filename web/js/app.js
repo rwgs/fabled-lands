@@ -60,12 +60,12 @@ async function getAdvData(book) {
 // the in-game menu. Returns inner HTML; the container styles it per context.
 function creditsHtml() {
   return (
+    'Web Port Design and Implementation © <strong>Robert Southgate</strong>, 2026.<br>' +
     'Book text © <strong>Dave Morris &amp; Jamie Thomson</strong>, 1996.<br>' +
-    'Illustrations © <strong>Russ Nicholson</strong>.<br>' +
-    'Original <em>Java Fabled Lands</em> engine © <strong>Jonathan Mann</strong> (used here as the rules reference).' +
-    '<p class="credits-licence">This web port automates the published rules for personal play. ' +
-    '<em>Fabled Lands</em> and its text/artwork remain the property of their respective rights holders; ' +
-    'please support the official releases.</p>'
+    'Maps & Illustrations © <strong>Russ Nicholson</strong>.<br>' +
+    'Web Port Engine based on <em>Java Fabled Lands</em> © <strong>Jonathan Mann</strong>, 2005.<br>' +
+    '<em>Fabled Lands</em> and its text and artwork remain the property of their respective rights holders.<br>' +
+    '<a href="https://amzn.to/4ve469x" target="_blank">Please support by purchasing the official releases on Amazon here.</a>'
   );
 }
 

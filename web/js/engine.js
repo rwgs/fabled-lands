@@ -345,6 +345,13 @@ export function applyRest(state, perUse, cost) {
   return amt;
 }
 
+// ---- resurrection ----------------------------------------------------------
+/** Purchase a resurrection deal: pay the (optional) cost and record the deal. */
+export function buyResurrectionDeal(state, { book, section, text, god, cost = 0 }) {
+  if (cost) state.adjustMoney(-cost);
+  state.addResurrection({ book, section, text, god: god || null });
+}
+
 // ---- roll resolution helpers ----------------------------------------------
 /** Total adjustment from <adjust> children of a roll node. */
 export function childAdjustment(el, state) {
@@ -371,7 +378,28 @@ export function rollDifficulty(state, ability, level, modifier = 0) {
   const r = rollDice(2);
   const abilityScore = ab ? state.ability(ab) : 0;
   const total = r.total + abilityScore + modifier;
-  return { dice: r.dice, rollTotal: r.total, abilityScore, ability: ab, total, level, success: total > level };
+  return { dice: r.dice, rollTotal: r.total, abilityScore, ability: ab, total, level, margin: total - level, success: total > level };
+}
+
+// rank check: success iff (dice + add + adjust) <= current Rank. `margin` (>0 on
+// success) is what the books store in a <success var> for later branch logic.
+export function rollRankCheck(state, dice = 1, add = 0, adjust = 0) {
+  const r = rollDice(dice);
+  const total = r.total + add + adjust;
+  const success = total <= state.data.rank;
+  return { kind: 'rankcheck', dice: r.dice, total, success, margin: 1 + state.data.rank - total };
+}
+
+// training: roll to raise an ability. Success iff the roll beats your *natural*
+// (unmodified) score; on success the ability permanently gains +1. Mutates state.
+// `ability` is the resolved ability key (e.g. 'combat'); '?' means player-chosen.
+export function rollTraining(state, ability, dice = 2, add = 0) {
+  const natural = state.abilityNatural(ability);
+  const r = rollDice(dice);
+  const total = r.total + add;
+  const success = total > natural;
+  if (success) state.adjustAbility(ability, 1);
+  return { kind: 'training', dice: r.dice, total, success, natural, ability };
 }
 
 // outcome range matching against a value

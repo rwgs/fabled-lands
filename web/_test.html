@@ -4,6 +4,7 @@
 import * as data from './js/data.js';
 import { GameState, readSlotData, importSave, loadSlotMeta, deleteSlot } from './js/state.js';
 import * as eng from './js/engine.js';
+import { fightRound } from './js/combat.js';
 import { Story } from './js/render.js';
 import { Narrator } from './js/tts.js';
 
@@ -67,8 +68,28 @@ async function run() {
     ok('range 2-10 ~1 no', !eng.matchRange('2-10', 1));
 
     // difficulty roll logic
-    let sc=0; for (let i=0;i<200;i++){ const r=eng.rollDifficulty(gs,'combat',10,0); if (r.success !== (r.total>10)) sc++; if (r.dice.length!==2) sc+=100; }
+    let sc=0; for (let i=0;i<200;i++){ const r=eng.rollDifficulty(gs,'combat',10,0); if (r.success !== (r.total>10)) sc++; if (r.dice.length!==2) sc+=100; if (r.margin !== r.total-10) sc+=1000; }
     ok('difficulty roll consistent', sc===0, 'mismatches='+sc);
+
+    // training rule (extracted to engine.rollTraining): success ⇒ +1 ability
+    const gt = GameState.create({ name:'T', gender:'m', profession:'Warrior', book:1, adv });
+    let tbad=0, tgain=0;
+    for (let i=0;i<300;i++){ gt.data.abilities.combat=2; const r=eng.rollTraining(gt,'combat',2,0);
+      if (r.success !== (r.total>2)) tbad++;
+      if (r.success && gt.abilityNatural('combat')!==3) tbad++;
+      if (r.success) tgain++; }
+    ok('training: success flag = roll>natural', tbad===0, 'bad='+tbad);
+    ok('training: +1 ability on success', tgain>0);
+
+    // rank check rule (extracted to engine.rollRankCheck): success iff roll<=Rank
+    const gk = GameState.create({ name:'K', gender:'m', profession:'Warrior', book:1, adv }); gk.data.rank=5;
+    let kbad=0; for (let i=0;i<200;i++){ const r=eng.rollRankCheck(gk,1,0,0); if (r.success!==(r.total<=5)) kbad++; if (r.margin!==1+5-r.total) kbad++; }
+    ok('rankcheck: success=roll<=Rank & margin', kbad===0, 'bad='+kbad);
+
+    // resurrection deal (extracted to engine.buyResurrectionDeal)
+    const gr = GameState.create({ name:'R', gender:'f', profession:'Priest', book:1, adv }); gr.data.shards=100;
+    eng.buyResurrectionDeal(gr, { book:2, section:'50', text:'a deal', god:'Elnir', cost:30 });
+    ok('resurrection: charges cost + records deal', gr.data.shards===70 && gr.hasResurrection() && gr.data.resurrections[0].section==='50', `sh=${gr.data.shards}`);
 
     // render representative sections
     const container = document.createElement('div');
@@ -135,11 +156,9 @@ async function run() {
     // combat terminates
     const fgEl = await data.getSection(1,'105');
     story.begin(fgEl,1,'105');
-    const fightNode = fgEl.querySelector('fight');
-    const fkey='fight@r'; // not used; call fightRound directly
     const fight = { name:'X', combat:5, defence:8, stamina:9, maxStamina:9, playerFirst:true, outcome:null, log:[] };
     let guard=0;
-    while(!fight.outcome && !gs.isDead() && guard<500){ story.fightRound(fight, fightNode, null); guard++; }
+    while(!fight.outcome && !gs.isDead() && guard<500){ fightRound(gs, fight, null); guard++; }
     ok('combat terminates', (fight.outcome==='win'||gs.isDead()) && guard<500, 'guard='+guard+' outcome='+fight.outcome);
 
     // scan: render EVERY section of EVERY book without throwing

@@ -8,7 +8,8 @@
 
 import {
   evaluateCondition, applyEffect, boolAttr, resolveValue,
-  rollDifficulty, rollDice, matchRange, childAdjustment, applyRest,
+  rollDifficulty, rollRankCheck, rollTraining, rollDice, matchRange, childAdjustment,
+  applyRest, buyResurrectionDeal,
 } from './engine.js';
 import { makeFight, fightRound } from './combat.js';
 import { shopKind, goodsFrom, buyTrade, sellTrade, applyInlineBuy } from './market.js';
@@ -445,7 +446,7 @@ export class Story {
     } else {
       const btn = this.rollButton(`Roll 2d6 + ${abLabel.toUpperCase()}`, widget, () => {
         const res = rollDifficulty(this.state, ability, level, modifier + childAdjustment(node, this.state));
-        if (node.getAttribute('var')) this.state.setVar(node.getAttribute('var'), res.total - level);
+        if (node.getAttribute('var')) this.state.setVar(node.getAttribute('var'), res.margin);
         this.ctx.rolls.set(key, res);
         this.rerender();
       });
@@ -512,11 +513,8 @@ export class Story {
       this.showDiceResult(widget, stored.dice, `Rolled ${stored.total} vs Rank ${this.state.data.rank}`, stored.success ? 'Success' : 'Failure', stored.success);
     } else {
       widget.appendChild(this.rollButton(`Rank check (${dice}d6)`, widget, () => {
-        const r = rollDice(dice);
-        const total = r.total + add + childAdjustment(node, this.state);
-        const success = total <= this.state.data.rank;
-        const res = { kind: 'rankcheck', dice: r.dice, total, success };
-        if (node.getAttribute('var')) this.state.setVar(node.getAttribute('var'), 1 + this.state.data.rank - total);
+        const res = rollRankCheck(this.state, dice, add, childAdjustment(node, this.state));
+        if (node.getAttribute('var')) this.state.setVar(node.getAttribute('var'), res.margin);
         this.ctx.rolls.set(key, res);
         this.rerender();
       }));
@@ -537,12 +535,7 @@ export class Story {
       this.showDiceResult(widget, stored.dice, `Rolled ${stored.total} vs ${ability.toUpperCase()} ${stored.natural}`, stored.success ? `+1 ${ability.toUpperCase()}` : 'No gain', stored.success);
     } else {
       widget.appendChild(this.rollButton(`Train ${ability.toUpperCase()} (${dice}d6)`, widget, () => {
-        const natural = this.state.abilityNatural(ability);
-        const r = rollDice(dice);
-        const total = r.total + add;
-        const success = total > natural;
-        if (success) this.state.adjustAbility(ability, 1);
-        this.ctx.rolls.set(key, { kind: 'training', dice: r.dice, total, success, natural, ability });
+        this.ctx.rolls.set(key, rollTraining(this.state, ability, dice, add));
         this.rerender();
       }));
     }
@@ -898,10 +891,9 @@ export class Story {
       btn.textContent = cost ? `Buy resurrection deal (${cost} Shards)` : 'Arrange resurrection';
       btn.disabled = cost > 0 && this.state.data.shards < cost;
       btn.addEventListener('click', () => {
-        if (cost) this.state.adjustMoney(-cost);
-        this.state.addResurrection({
+        buyResurrectionDeal(this.state, {
           book: node.getAttribute('book') ? Number(node.getAttribute('book')) : this.book,
-          section, text: node.getAttribute('text') || span.textContent.trim(), god: node.getAttribute('god') || null,
+          section, text: node.getAttribute('text') || span.textContent.trim(), god: node.getAttribute('god'), cost,
         });
         this.notify('Resurrection deal arranged.');
         this.rerender();

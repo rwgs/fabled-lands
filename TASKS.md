@@ -41,17 +41,21 @@ and the 4 `flee="N"` sections (esp. `book1/570`) before/after.
 
 ---
 
-## 2. Finish the logic/view split (started with combat/market/rest)  — MEDIUM
+## 2. Finish the logic/view split (started with combat/market/rest)  — **done**
 
-`combat.js`, `market.js`, and `engine.applyRest` now hold their rules headlessly.
-Remaining rules still live inside `render.js` and should move out the same way:
-- **Training** roll (`renderTraining`) — the "2d6 > current ability ⇒ +1" logic.
-- **Resurrection** deal purchase (`renderResurrection`) — cost/deal creation.
-- The roll widgets (`difficulty`/`random`/`rankcheck`) mix presentation with the
-  success/var computation; the math could move to `engine.js` leaving the widget
-  purely visual.
+Every game rule now lives in a headless, DOM-free module; `render.js` builds the
+widget and wires the button, then calls the rule and displays the result:
+- **Training** → `engine.rollTraining()` (roll beats natural score ⇒ +1 ability).
+- **Rank check** → `engine.rollRankCheck()` (success iff roll ≤ Rank; returns `margin`).
+- **Difficulty** → `engine.rollDifficulty()` (already extracted; now also returns `margin`).
+- **Resurrection** deal purchase → `engine.buyResurrectionDeal()`.
+- (Combat → `combat.js`, economy → `market.js`, rest → `engine.applyRest` — earlier.)
 
-Goal: `render.js` builds DOM and wires events only; every rule is unit-testable.
+`<random>` needs no extraction: it has no pass/fail rule at the roll site (it
+sums `rollDice` + `childAdjustment`, both already in `engine.js`; outcome ranges
+are matched later by `engine.matchRange`).
+
+Remaining: add the unit tests these now enable — see item #7.
 
 ---
 
