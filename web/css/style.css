@@ -74,10 +74,10 @@ img { max-width: 100%; }
   font-size: clamp(2.8rem, 12vw, 5rem); margin: 0; letter-spacing: 0.04em;
   text-shadow: 0 2px 0 #1a0f06, 0 0 24px rgba(200,150,42,0.35);
 }
-.game-tagline { color: #d8c49a; font-style: italic; font-size: clamp(1rem, 3.5vw, 1.2rem); margin-top: 0.6rem; max-width: 32ch; }
+.game-tagline { color: #d8c49a; font-style: italic; font-size: clamp(1rem, 3.5vw, 1.2rem); margin: 0.6rem auto 0; max-width: 32ch; }
 .title-menu { display: flex; flex-direction: column; gap: 0.7rem; width: min(360px, 90vw); }
 .title-credits { margin-top: 2.2rem; color: #b39c76; font-size: 0.8rem; line-height: 1.5; max-width: 46ch; }
-.title-licence { margin: 0.9rem 0 0; font-style: italic; }
+.credits-licence { margin: 0.9rem 0 0; font-style: italic; }
 .title-note { margin-top: 0.9rem; }
 
 /* ---- Create & Saves ------------------------------------------------------- */
@@ -315,6 +315,7 @@ img { max-width: 100%; }
 .menu-list { display: flex; flex-direction: column; }
 .menu-item { display: flex; align-items: center; gap: 0.7rem; text-align: left; }
 .menu-icon { width: 1.6rem; text-align: center; font-size: 1.15rem; flex: none; }
+.menu-credits { text-align: center; color: var(--ink-soft); font-size: 0.8rem; line-height: 1.5; margin-top: 1.3rem; padding-top: 1rem; border-top: 1px solid var(--parchment-edge); }
 .menu-version { text-align: center; margin-top: 0.9rem; color: #9c885f; font-size: 0.8rem; font-variant: small-caps; letter-spacing: 0.05em; }
 .title-version { margin-top: 0.6rem; color: #8a744f; font-size: 0.75rem; letter-spacing: 0.05em; }
 .static-doc { font-size: 1rem; line-height: 1.65; }

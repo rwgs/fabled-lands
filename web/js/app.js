@@ -56,6 +56,19 @@ async function getAdvData(book) {
   return advData[book];
 }
 
+// Attribution + licence (mirrors the README), shown on the title screen and in
+// the in-game menu. Returns inner HTML; the container styles it per context.
+function creditsHtml() {
+  return (
+    'Book text © <strong>Dave Morris &amp; Jamie Thomson</strong>, 1996.<br>' +
+    'Illustrations © <strong>Russ Nicholson</strong>.<br>' +
+    'Original <em>Java Fabled Lands</em> engine © <strong>Jonathan Mann</strong> (used here as the rules reference).' +
+    '<p class="credits-licence">This web port automates the published rules for personal play. ' +
+    '<em>Fabled Lands</em> and its text/artwork remain the property of their respective rights holders; ' +
+    'please support the official releases.</p>'
+  );
+}
+
 // ---- Title screen ----------------------------------------------------------
 function showTitle() {
   narrator.stop(); // [TTS]
@@ -96,14 +109,7 @@ function showTitle() {
   app.appendChild(menu);
 
   const credits = el('div', 'title-credits');
-  credits.innerHTML =
-    'Book text © <strong>Dave Morris &amp; Jamie Thomson</strong>, 1996.<br>' +
-    'Illustrations © <strong>Russ Nicholson</strong>.<br>' +
-    'Original <em>Java Fabled Lands</em> engine © <strong>Jonathan Mann</strong> (used here as the rules reference).' +
-    '<p class="title-licence">This web port automates the published rules for personal play. ' +
-    '<em>Fabled Lands</em> and its text/artwork remain the property of their respective rights holders; ' +
-    'please support the official releases.</p>' +
-    '<div class="title-note">Progress is saved in your browser.</div>';
+  credits.innerHTML = creditsHtml() + '<div class="title-note">Progress is saved in your browser.</div>';
   credits.appendChild(el('div', 'title-version', 'Version ' + VERSION));
   app.appendChild(credits);
 }
@@ -489,6 +495,9 @@ async function showGameMenu() {
   add('📤', 'Export this save', () => exportSave(null, null));
   add('📥', 'Import a save', () => importSaveFile());
   add('💾', 'Save & quit to title', () => { state.save(); showTitle(); });
+  const menuCredits = el('div', 'menu-credits');
+  menuCredits.innerHTML = creditsHtml();
+  body.appendChild(menuCredits);
   const ver = el('div', 'menu-version', 'Version ' + VERSION);
   body.appendChild(ver);
   const p = modal({ title: 'Menu', body, buttons: [{ label: 'Close', value: null }] });
