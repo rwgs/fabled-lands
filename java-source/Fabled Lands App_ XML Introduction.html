@@ -1,0 +1,323 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0 Transitional//EN">
+<HTML>
+<HEAD>
+	<META HTTP-EQUIV="CONTENT-TYPE" CONTENT="text/html; charset=windows-1252">
+	<TITLE>Fabled Lands App: XML Introduction</TITLE>
+	<META NAME="GENERATOR" CONTENT="OpenOffice.org 2.0  (Win32)">
+	<META NAME="CREATED" CONTENT="20060918;18041706">
+	<META NAME="CHANGEDBY" CONTENT="Jonathan Mann">
+	<META NAME="CHANGED" CONTENT="20061008;15285048">
+	<STYLE>
+	<!--
+		H1 { color: #ffffff }
+		P { color: #ffffff }
+		H3 { color: #ffffff }
+		PRE { color: #ffffff }
+		A:link { color: #ffff00 }
+		A:visited { color: #93db70 }
+	-->
+	</STYLE>
+</HEAD>
+<BODY LANG="en-GB" TEXT="#ffffff" LINK="#ffff00" VLINK="#93db70" BGCOLOR="#42426f" DIR="LTR">
+<P ALIGN=CENTER><A HREF="index.htm">Home Page</A> | XML Format -
+Introduction | <A HREF="xmlformat.html">XML Format - List</A></P>
+<H1>FLApp - XML Format - Introduction</H1>
+<P>A few brave souls have asked about the format by used by FLApp to
+encode the books, out of curiosity or because they want to create
+their own content. In this and in the accompanying <A HREF="xmlformat.html">tag
+list</A> is a fairly complete dump of the necessaries. If something
+is unclear or missing, tell me about it and I'll attempt to clarify.
+Good luck!</P>
+<P>To begin: you'll want a text editor with some sort of support for
+XML formatting. I use Vim, which provides me with syntax highlighting
+and indenting; there are probably (definitely) other, better, editors
+for this purpose. Someone with more skill in macros and templates may
+be able to create a more appropriate environment for writing in this
+format, but it won't be me.</P>
+<P>Maybe this would be easiest if I describe how I go about
+converting a section from one of the available <I>Fabled Lands</I>
+books.</P>
+<H3>XML</H3>
+<P>First off, I create a file for that particular section, named
+<B><I>&lt;section number&gt;</I>.xml</B>, in the book directory that
+the section belongs to (I'll get to that). Each visible document is
+in its own file &ndash; every section, as well as each playable
+character description and the (readable) rules.</P>
+<P STYLE="font-style: normal; font-weight: medium">Next, I copy and
+paste the text for that section from the PDF. Add a <B>&lt;section&gt;</B>
+tag at the beginning, with the <B>name</B> attribute giving the
+section number (as displayed at the top of the page). General HTML
+rules apply here &ndash; extra whitespace (spaces, tabs) and new
+lines are ignored. To break the text into paragraphs, use the <B>&lt;p&gt;</B>
+tag at the start of each paragraph (and the matching close tag, <B>&lt;/p&gt;</B>,
+at the end). If there is only one paragraph (besides the list of
+choices or outcomes at the end) you can leave these out.</P>
+<P STYLE="font-style: normal; font-weight: medium">Oh yes, this is
+XML, not HTML. You can get away with badly formatted HTML, but XML is
+less forgiving. Every start tag (<B>&lt;tagname <I>attributes</I>&gt;</B>)
+must be matched by an end tag (<B>&lt;/tagname&gt;</B>). Empty tags
+are indicated by a a slash at the end of the tag, eg. <B>&lt;tagname
+<I>attributes</I> /&gt;</B>. So when I mentioned the <B>&lt;section&gt;</B>
+tag before, it goes without saying that the file also needs to end
+with the matching tag, <B>&lt;/section&gt;</B>. Attributes can be
+supplied in start tags and empty tags, and are of the form
+<B>attributeName=&quot;<I>attribute value</I>&quot;</B>.</P>
+<H3>Actions</H3>
+<P STYLE="font-style: normal; font-weight: medium">Within the section
+you'll need to identify 'actions' &ndash; the things that are
+generally underlined and can be clicked on (if not greyed out). These
+are indicated by enclosing the action text within the appropriate
+tags, <B>&lt;tagname <I>attributes</I>&gt;</B><I>action
+text</I><B>&lt;/tagname&gt;</B>. There are various action types
+available, each with their own attributes that will make the action
+even more specific. For example, the most common is probably the
+<B>&lt;goto&gt;</B> tag. The most common form of this is</P>
+<PRE STYLE="margin-bottom: 0.5cm">&lt;goto section=&quot;I&quot;/&gt;</PRE><P>
+which will produce the action <U>turn to <B>I</B></U>. Notice here
+that I used an empty tag, without any action text. Most of the tags
+have their own default text which will get used in this case; this
+can vary depending on the attributes present. This default text will
+start with a leading capital, if the program thinks a new sentence is
+required. To provide action text, do the following eg.</P>
+<PRE STYLE="margin-bottom: 0.5cm">&lt;goto section=&quot;J&quot;&gt;return to J&lt;/goto&gt;</PRE><P>
+which will produce the action <U>return to <B>J</B></U>. Notice that
+the section number is bold here; this is one of those automatic
+conversions that that the program does, and which I'll try to
+remember to document. In the same way, codewords can be automatically
+italicised, and items automatically displayed in bold. Also, an
+ability name given in uppercase will be automatically formatted. To
+supply your own style to the text, the standard tags <B>&lt;b&gt;</B>,
+<B>&lt;i&gt;</B> and <B>&lt;u&gt;</B> can be used (to indicate bold,
+italics, and underlined text respectively). These can be used within
+the action text as well as within the regular text (though not in
+attribute values).</P>
+<P STYLE="font-weight: medium">When the section is 'read' by the
+player, these actions are generally activated sequentially. If an
+action would have no effect, or can't be activated by the player, it
+generally stays disabled (greyed out) and execution continues to the
+next action; otherwise, the action 'blocks' the program until it has
+been activated. There are exceptions all over the place &ndash; eg.
+the <B>&lt;item</B>&gt; action, which defines an item that the
+character can pick up, is generally enabled (if the character has
+room to pick it up) but doesn't block. The 'blocking' behaviour can
+be specified by using the <B>force</B> attribute in the action, with
+a value of &quot;<B>true</B>&quot; or &quot;<B>false&quot;</B> (or
+&quot;<B>T&quot;</B> or &quot;<B>F&quot;</B>). For example, the
+action <B>&lt;tick shards=&quot;100&quot; force=&quot;t&quot;/&gt;</B>
+will create the action <U>100 Shards</U><SPAN STYLE="text-decoration: none">
+and block further execution until it has been clicked on.</SPAN></P>
+<P STYLE="font-weight: medium; text-decoration: none">Which actions
+get 'reached' can be changed by using the <B>&lt;if&gt;</B>, <B>&lt;elseif&gt;</B>
+and <B>&lt;else</B>&gt; tags, which will be familiar to any
+programmers. If the conditions defined by the <B>&lt;if&gt;</B>
+attributes are met, then the actions within that block will be
+activated in turn. Otherwise the text and actions within the <B>&lt;if</B>&gt;:
+block remain greyed out. The <B>&lt;elseif&gt;</B> and <B>&lt;else&gt;</B>
+tags can be used after an <B>&lt;if&gt;</B> block, and are activated
+if the conditions of the <B>&lt;if&gt;</B> are not met (and their own
+conditions are). These tags can also be nested, although the program
+gets confused if the <B>&lt;else&gt; </B>and <B>&lt;elseif&gt;</B>s
+are used at different nesting 'levels' in close proximity.<BR>This
+explanation is probably less useful than just poking about in one of
+the files for examples.</P>
+<P STYLE="font-weight: medium; text-decoration: none">Many sections
+will end with a series of choices (a description and the section
+destination), or outcomes (a range of dice results and the section
+destination). Outcomes are more difficult and may illustrate some
+other features, so I'll describe them. To start with, a set of
+outcomes need to be grouped with the <B>&lt;outcomes&gt;</B> tag.
+Then each possible outcome is given by a separate <B>&lt;outcome&gt;</B>
+tag, which supplies a <B>range</B> attribute (giving the range of
+dice results it will match), a <B>section</B> to turn to (and
+possibly a <B>book</B> as well), and possibly a description (between
+the start and end tags). The description can actually include actions
+(eg. <B>&lt;lose stamina=&quot;1d&quot;&gt;</B>1-6 Stamina<B>&lt;/lose&gt;</B>),
+which will need to be clicked by the player before the destination is
+enabled. In fact, the <B>section</B> can be left out entirely.</P>
+<P STYLE="font-weight: medium; text-decoration: none">Outcomes can
+also be used like <B>&lt;if&gt;</B> tags, containing some amount of
+text and actions which can only be activated if the outcome is
+matched.</P>
+<H3>Variables</H3>
+<P STYLE="font-weight: medium; text-decoration: none">Now, the dice
+result that the outcomes work on are generated elsewhere, usually by
+a <B>&lt;random dice=&quot;I&quot;/&gt;</B> action. When activated,
+this action will simulate rolling a number of dice, storing the
+result into a <I>variable</I>. Variables can be kept with each
+section, and are only kept while that section is the current one. To
+specify the name of the variable, the <B>var</B> attribute can be
+used (here and in various tags). If it's missing, an 'anonymous'
+variable is used. Most sections won't need more than one variable,
+and in these cases you can leave out the <B>var</B> attribute. So
+after the dice result is stored in a variable, the <B>&lt;outcome&gt;</B>
+actions are reached; each of them checks the value of the variable
+for a match with their own range. Variables can be used for other
+purposes, holding the results of calculations and used to hold the
+result of calculations, and to compare against in <B>if</B> blocks.</P>
+<P STYLE="font-style: normal; font-weight: medium; text-decoration: none">
+To store a value directly into a variable, there's the <B>&lt;set&gt;</B>
+tag. This can be hidden in the text, being automatically activated
+when it's reached. Alternatively, it can be used like any normal
+action if some action text is supplied. Generally it's used with the
+<B>var</B> and <B>value</B> attributes, the latter supplying the
+value to be stored in the variable. This value can actually be in the
+form of an expression &ndash; ie. using plus (+), minus (-), divide
+(/), multiply (*) and parentheses ('(' and ')'). As operands within
+the expression, you can use a variable name, an ability, 'stamina',
+'shards', or a few other possibilities. This has made it rather
+useful for when the authors come up with another unique test or
+calculation. A more common usage is shown by this example, book 1,
+275:</P>
+<PRE>&lt;if god=&quot;Alvir and Valmir&quot;&gt;&lt;set var=&quot;cost&quot; value=&quot;5&quot;/&gt;&lt;/if&gt;
+&lt;else&gt;&lt;setvar=&quot;cost&quot; value=&quot;20&quot;/&gt;&lt;/else&gt;</PRE><P>
+This determines the price for a blessing paid for later in the
+section, where the variable is referenced directly by <B>shards=&quot;cost&quot;</B>.</P>
+<H3>Codewords</H3>
+<P>Codewords should be familiar &ndash; the set of words kept by the
+player to track which quests they've done, who they've annoyed, etc.
+Within the program codewords have a more general use as variables
+that are maintained between sections. A codeword is 'set' if it holds
+a value other than 0 (usually 1); a codeword is 'missing' if it
+equals 0 or is absent. Ticked boxes are also recorded as codewords,
+with the number of ticks stored under the name <I>book </I>#'/'<I>section
+#</I>. Thus, 2 ticks at section 10 in book 1 is recorded as '1/10=2'.
+Similarly, the ticks recorded by a 'town-house' option are stored as
+codewords. It's quite easy to use codewords to track the progress of
+the character, though it's advisable to make codewords fairly unique
+(eg. by including the book and section number), since once created
+they continue to exist across all books. For example, in book 5 your
+status at court is kept by the codeword 'UttakuStatus'.</P>
+<H3>Items</H3>
+<P>There are four basic item types used within the program: weapon,
+tool, armour and item. A weapon is anything that can be wielded, and
+usually gives a Combat bonus. Armour is any item which can be worn,
+giving a Defence bonus. A tool is an item that gives a bonus to one
+of the six abilities (excluding Combat); the tool that gives the best
+bonus for a particular ability is automatically used. An item is
+anything else (for the programmers out there, Item is the superclass
+of Weapon and Armour; Weapon is the superclass of Tool).</P>
+<P>To include an item that the character can pick up, buy or sell, a
+tag corresponding to the item type should be used. Other attributes
+further define the item. A few examples:</P>
+<PRE>&lt;item name=&quot;bag of pearls&quot;/&gt;
+&lt;weapon name=&quot;enchanted sword&quot; bonus=&quot;1&quot;/&gt;
+&lt;tool name=&quot;golden compass&quot; ability=&quot;scouting&quot; bonus=&quot;2&quot;/&gt;
+&lt;armour name=&quot;ring mail&quot; bonus=&quot;2&quot;/&gt;</PRE><P>
+You can also match items in the character's possession by using the
+same attributes in another tag, with the item type taking the place
+of the <B>name</B> attribute. For example:</P>
+<PRE>&lt;if item=&quot;golden katana&quot;&gt;
+&lt;choice item=&quot;lantern|candle&quot; section=&quot;100&quot;&gt;Continue into tunnel&lt;/choice&gt;
+&lt;lose weapon=&quot;*&quot; bonus=&quot;0&quot;&gt;lose all your non-magical weapons&lt;/lose&gt;</PRE><P>
+The <B>if</B> tag here tests whether the character has an item with
+the name 'golden katana' (it could be a weapon, tool or even armour
+type). The <B>choice</B> tag, which is used to give the player a set
+of choices to follow, will only enable if the character possesses an
+item with the name of 'lantern' or 'candle'. The <B>lose</B> action
+will remove all weapons with a bonus of 0 from the character's
+possession. The wildcards '*' and '?' can be used in many attribute
+values, with the first meaning 'match all', and the second meaning
+'match one'.</P>
+<H3>Effects</H3>
+<P>Items (and curses) may also have additional <I>effects</I>. These
+are either attribute modifiers, or actions that occur when the item
+is used. These are defined by additional tags nested within the item
+tags. For example:</P>
+<PRE>&lt;weapon name=&quot;sword of wood&quot;&gt;
+  &lt;effect type=&quot;aura&quot; ability=&quot;scouting&quot; bonus=&quot;2&quot;/&gt;
+&lt;/weapon&gt;
+
+&lt;weapon name=&quot;Jade Defender&quot; bonus=&quot;3&quot;&gt;
+  &lt;effect type=&quot;wielded&quot; ability=&quot;defence&quot; bonus=&quot;3&quot;/&gt;
+&lt;/weapon&gt;
+
+&lt;item name=&quot;potion of restoration&quot; verb=&quot;Drink&quot;&gt;
+  &lt;effect type=&quot;use&quot; uses=&quot;1&quot;&gt;
+    &lt;rest/&gt;
+    &lt;lose poison=&quot;*&quot;/&gt;
+    &lt;lose disease=&quot;*&quot;/&gt;
+  &lt;/effect&gt;
+&lt;/item&gt;
+
+&lt;item name=&quot;Black Diptych&quot;&gt;
+  &lt;effect type=&quot;use&quot; verb=&quot;Read&quot; text=&quot;Court of Hidden Faces 410&quot;&gt;
+    &lt;desc&gt;&lt;i&gt;Court of Hidden Faces&lt;/i&gt; &lt;b&gt;410&lt;/b&gt;&lt;/desc&gt;
+    &lt;goto book=&quot;5&quot; section=&quot;410&quot; hidden=&quot;t&quot;/&gt;
+  &lt;/effect&gt;
+&lt;/item&gt;</PRE><P>
+The first item uses the 'aura' effect type, which means that it will
+give a bonus of 2 to Scouting while carried. The second item uses the
+'wielded' effect type, which means it only applies while the item (a
+weapon) is wielded; the sword is listed as <B>Jade Defender (C<FONT SIZE=2 STYLE="font-size: 9pt">OMBAT</FONT>
++3, Defence +3)</B>. The third item is one that can be used once to
+restore all Stamina (the <B>&lt;rest/&gt;</B> action, lacking all
+attributes, does this), and cures any poisons or diseases. The last
+item is one that can be used repeatedly to jump to section 410 of
+book 5. The <B>desc</B> tag here supplies the description of the
+effect, so that the item will be displayed as <B>Black Diptych (<I>Court
+of Hidden Faces</I> 410)</B>.</P>
+<H3>Curses</H3>
+<P>Curses are similar to items that have ability effects. Poisons,
+diseases and curses are the three types here, behaving the same way.
+To define a curse that will be added to the character, use one of
+these types as the tag name. For example:</P>
+<PRE>&lt;curse name=&quot;Curse of Donkey's Ears&quot;&gt;
+  &lt;effect ability=&quot;charisma&quot; bonus=&quot;-2&quot;/&gt;
+&lt;/curse&gt;
+&lt;disease name=&quot;Ghoulbite&quot;&gt;
+  &lt;effect ability=&quot;sanctity&quot; bonus=&quot;-1&quot;/&gt;
+  &lt;effect ability=&quot;combat&quot; bonus=&quot;-1&quot;/&gt;
+  &lt;effect ability=&quot;charisma&quot; bonus=&quot;-1&quot;/&gt;
+&lt;/disease&gt;</PRE><P>
+Like items, curses can be referred to by in other tags by using the
+type of the curse in place of the <B>name</B> attribute.</P>
+<H3>Books</H3>
+<P>I should explain how the overall file-system is organised. In the
+root directory of the program there is a file called 'books.ini',
+which contains details of all the known books. The first few lines
+are as follows:</P>
+<PRE>Books=1,2,3,4,5,6,7,8,9,10,11,12
+1.Path=book1.zip
+1.Title=The War-Torn Kingdom
+2.Path=book2.zip
+2.Title=Cities of Gold and Glory</PRE><P>
+Each known book has a <I>key</I> that is used to refer to that book.
+For the original books I've used the book number, though any name
+(comprised of letters, digits and underscores) would be OK. The books
+that the program is aware of are all listed by their keys in the
+'Books' line. The book keys are used in the XML whenever a <B>book</B>
+attribute is used; for example, the action <B>&lt;goto book=&rdquo;1&rdquo;
+section=&rdquo;100&rdquo;/&gt;</B> is shown as <U><I>The War-Torn
+Kingdom</I> <B>100</B></U>.</P>
+<P STYLE="font-style: normal">Then each book has two entries,
+combining the book key with '.Path' and '.Title'. The second
+obviously gives the book title; the first is the location of the
+files for that book. This can either be a zip-file, or a directory
+locating the files (more useful when developing the book).</P>
+<P STYLE="font-style: normal">For each book, there is a main
+'book.ini' file which gives further details about the book. The
+program will only decide that a book is available if this file can be
+found.</P>
+<PRE>Map=Violet Ocean.JPG
+Map.Title=The Ports &amp; Anchorages of the Violet Ocean
+Death=123
+Codewords=Cacogast,Calcium,Callid,Cancel,Catalyst,Cenotaph,Certain,Cerumen,Chance,\
+          Cheese,Cheops,Chill,Church,Cithara,Citrus,Civil,Clanger,Clutch,Colour,Coracle,\
+          Cosy,Covet,Crag,Crocus,Cruel,Cull,Curdle,Cushat,Cutlass,Cyclops,Cynosure</PRE><P STYLE="font-style: normal">
+The first two lines here give the filename of the regional map, and
+the title to use for that map. 'Death' is the section used when the
+character dies in that book. The list of official codewords is the
+last thing here; this is the list shown in the 'Codewords' window.
+Note that the backslash '\' can be used for a run-on line.</P>
+<P STYLE="font-style: normal">'Adventurers.xml' gives the details of
+the starting characters. Rather than describing this, it would
+probably easier to look through one of the existing ones, and
+changing the relevant parts. Book 5 has one in which each profession
+starts with a different weapon. Finally, there's a 'New.xml' file
+which is used when starting a game in that book, and a file for each
+of the starting characters giving their histories. Again, these
+should be self-explanatory.</P>
+<P ALIGN=CENTER><A HREF="index.htm">Home Page</A> | XML Format -
+Introduction | <A HREF="xmlformat.html">XML Format - List</A></P>
+</BODY>
+</HTML>

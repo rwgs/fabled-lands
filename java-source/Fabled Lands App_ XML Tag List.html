@@ -1,0 +1,1399 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0 Transitional//EN">
+<HTML>
+<HEAD>
+	<META HTTP-EQUIV="CONTENT-TYPE" CONTENT="text/html; charset=windows-1252">
+	<TITLE>Fabled Lands App: XML Tag List</TITLE>
+	<META NAME="GENERATOR" CONTENT="OpenOffice.org 2.0  (Win32)">
+	<META NAME="AUTHOR" CONTENT="Jonathan Mann">
+	<META NAME="CREATED" CONTENT="20060820;17010589">
+	<META NAME="CHANGEDBY" CONTENT="Jonathan Mann">
+	<META NAME="CHANGED" CONTENT="20080617;18414473">
+	<STYLE>
+	<!--
+		H1 { color: #ffffff }
+		P { color: #ffffff }
+		PRE { color: #ffffff }
+		A:link { color: #ffff00 }
+		A:visited { color: #93db70 }
+	-->
+	</STYLE>
+</HEAD>
+<BODY LANG="en-GB" TEXT="#ffffff" LINK="#ffff00" VLINK="#93db70" BGCOLOR="#42426f" DIR="LTR">
+<P ALIGN=CENTER><A HREF="index.htm">Home Page</A> | <A HREF="howto.html">XML
+Format - Introduction</A> | XML Format - List</P>
+<H1>FLApp - XML Format - Complete List</H1>
+<P>This is a long list of all the XML tags that the program uses.
+I've attempted to give them some semblance of order, rather than just
+listing them alphabetically. See the accompanying <A HREF="howto.html">HowTo</A>
+file for an introduction to the concepts involved. As I said there, I
+am available for clarification &ndash; there are things that may seem
+obvious to me and hence I haven't explained them clearly (or at all).</P>
+<P>For each tag, the list of recognised attributes is given. Square
+brackets indicate an optional attribute. For the attribute values, a
+character indicating the value type has been given. A 'B' indicates a
+boolean value (any string starting with a 't' or 'T' is interpreted
+as 'true'; any string starting with a 'f' or 'F' is interpreted as
+'false'). A 'N' indicates an integer. A 'V' indicates a value, which
+may be either an integer or the name of a (non-empty) variable. A 'S'
+indicates some sort of text string &ndash; if not explained, it's
+either an identifier or a description visible to the player.</P>
+<P STYLE="margin-top: 0.42cm; page-break-after: avoid"><FONT FACE="Albany, sans-serif"><FONT SIZE=4>Common
+tags</FONT></FONT></P>
+<UL>
+	<LI><P><B>&lt;section name=&quot;S&quot; [dock=&quot;S&quot;]
+	[boxes=&quot;N&quot;] [profession=&quot;S&quot;] [start=&quot;B&quot;]
+	[tag=&quot;S&quot;] [image=&rdquo;S&rdquo;] [todock=&rdquo;S&rdquo;]&gt;</B><BR>The
+	root element for most files.</P>
+	<UL>
+		<LI><P><B>name</B> &ndash; The title displayed at the top of the
+		document. Generally this matches the filename, though it may be
+		longer (eg. for the section describing a starting character)</P>
+		<LI><P><B>boxes</B> &ndash; The number of checkboxes displayed
+		after the section title.</P>
+		<LI><P><B>dock</B> &ndash; The dock location, if cargo is being
+		bought or sold at this location, or the character's current ship is
+		docking here, or a ship will be sailed from here. See <B>goto</B>
+		for related attributes. Any ships with a matching dock will be
+		enabled.</P>
+		<LI><P><B>image</B> &ndash; The filename of an image to be
+		displayed in this section. This should be found somewhere in the
+		path defined for this book.</P>
+		<LI><P><B>profession</B> &ndash; The profession of the starting
+		character being described in this section. This is only used when
+		starting a new game, before the character choice has been
+		finalised.</P>
+		<LI><P><B>start</B> &ndash; When true, signals the first section of
+		a new book. Whichever character the player has chosen will be
+		finalised.</P>
+		<LI><P><B>tag</B> &ndash; One or more tags that identify the 'type'
+		of section, comma-separated. If the player has an extra choice with
+		one of these tags, it will be activated.</P>
+		<LI><P><B>todock</B> &ndash; When the character leaves this
+		section, any ships at sea that the character isn't in will be moved
+		to the given dock. This is handy if the player has gained a ship
+		while at sea, since only one can be sailed at a time.</P>
+	</UL>
+	<LI><P><B>&lt;p&gt;</B><BR>Groups each paragraph of text. When a
+	section has only one paragraph, it isn't usually necessary.</P>
+	<LI><P><B>&lt;goto section=&quot;S&quot; [book=&quot;S&quot;]
+	[force=&quot;B&quot;] [sail=&quot;B&quot;] [visit=&quot;B&quot;]
+	[dead=&rdquo;B&rdquo;] [flee=&rdquo;B&rdquo;] [codeword=&rdquo;S&rdquo;]
+	[revisit=&rdquo;B&rdquo;] [price</B>/<B>flag=&rdquo;S&rdquo;]&gt;</B><BR>Jumps
+	to another section.</P>
+	<UL>
+		<LI><P><B>section</B> &ndash; The filename (without extension) of
+		the section to turn to. If <B>book</B> isn't present, the default
+		text is 'turn to <B>S</B>', where <B>S</B> is the new section. If
+		the section name is found in the content, it will be shown as bold.</P>
+		<LI><P><B>book</B> &ndash; The book containing the new section. If
+		this is present, the default text is '<I>book title</I> <B>S</B>',
+		where S is the new section. If this book isn't available, the
+		action will be disabled.</P>
+		<LI><P STYLE="font-style: normal"><B>force</B> &ndash; If true,
+		this action will block any later ones from execution; if false, the
+		action is optional. The default is <B>true</B>, unless <B>sail</B>
+		is also true.</P>
+		<LI><P STYLE="font-style: normal"><B>sail</B> &ndash; If true,
+		requires a ship to be present at this location to be sailed on.
+		Once a single ship is chosen and the action activated, its location
+		will become 'at large'.</P>
+		<LI><P STYLE="font-style: normal"><B>visit</B> &ndash; Whether the
+		section being jumped to is one that will be <B>return</B>ed from.
+		At the moment this is unnecessary, but is probably good practice.</P>
+		<LI><P STYLE="font-style: normal"><B>dead</B> &ndash; Enables the
+		action only if the character's state matches this (ie. if <B>true</B>,
+		the character must be dead to follow this). Defaults to false.</P>
+		<LI><P STYLE="font-style: normal"><B>flee</B> &ndash; Flees from
+		the current fight. When the character enters a fight, this will be
+		enabled (unless a <B>&lt;flee&gt;</B> node is also present); it
+		will disabled once the fight is won or lost.</P>
+		<LI><P STYLE="font-style: normal"><B>codeword</B> &ndash; The
+		codeword(s) that must be present for this action to be enabled.
+		Multiple codewords must be divided by '|' (meaning OR) or '&amp;'
+		(meaning AND).</P>
+		<LI><P STYLE="font-style: normal"><B>revisit</B> &ndash; If the
+		player may immediately &lt;return&gt; to this section, setting this
+		to true means that this goto will stay enabled. For an example, see
+		the docks in Yellowport and Marlock City.</P>
+		<LI><P STYLE="font-style: normal"><B>price</B> &ndash; If the
+		indicated price has been 'paid' (or set with a &lt;tick&gt;
+		element), this goto will be disabled. See sections 5.365 or 6.628
+		for examples.</P>
+		<LI><P STYLE="font-style: normal"><B>flag</B> &ndash; If the
+		indicated price has not been paid, this goto will be disabled.</P>
+	</UL>
+	<LI><P STYLE="font-style: normal; font-weight: medium">&lt;<B>item
+	[name=&quot;S&quot;] [bonus=&quot;N&quot;] [buy=&quot;N&quot;]
+	[sell=&quot;N&quot;] [tags=&quot;S&quot;] [buytags=&quot;S&quot;]
+	[group=&quot;S&quot;] [quantity=&quot;N&quot;] [replace=&rdquo;S&rdquo;]
+	[flag=&rdquo;S&rdquo;] [profession=&rdquo;S&rdquo;]&gt;<BR>&lt;weapon
+	...&gt;<BR>&lt;armour ...&gt;<BR>&lt;tool ... [ability=&quot;S&quot;]&gt;</B><BR>An
+	item that can be taken by the character. The default text is the
+	complete name of the item. A <B>weapon</B> is an item that can be
+	wielded, one at a time, with a bonus to Combat. A <B>tool</B> is an
+	item that adds a bonus to an ability; only the tool with the best
+	bonus for an ability will be used. A piece of <B>armour</B> can be
+	worn, and gives a bonus to Defence. An <B>item</B> is anything else.
+	If one of these tags is used within a <B>&lt;market&gt;</B> tag, it
+	will be displayed as a row in the market, allowing the item to be
+	bought and sold.</P>
+	<UL>
+		<LI><P STYLE="font-style: normal"><B>name</B> &ndash; The name of
+		the item. This will be capitalised as necessary, and the relevant
+		ability, bonus and effects will be added when printed. When <B>weapon</B>s
+		are bought or sold at a market, this attribute can be missing. A
+		'?' can be used to indicate a single item matching all other
+		supplied attributes; a '*' indicates <I>all</I> items matching the
+		supplied attributes. Occasionally more than one item can be
+		indicated by including multiple item names, each separated by a
+		'|'. For example, in the Aku market you can buy an</P>
+		<PRE STYLE="margin-bottom: 0.5cm">&lt;item name=&quot;fur cloak|wolf pelt&quot; buy=&quot;100&quot; sell=&quot;90&quot;/&gt;</PRE>
+	</UL>
+	<P>which is listed as a '<B>Fur cloak</B> or <B>wolf pelt</B>'. If
+	the name is of the form &ldquo;N &lt;thing&gt;s&rdquo;, where N is a
+	number, the item is treated as N units of the given currency, which
+	may stack with pre-existing amounts of the same currency (eg.
+	Mithrals).</P>
+	<UL>
+		<LI><P STYLE="font-style: normal"><B>bonus</B> &ndash; The bonus
+		that the item gives. This is either an integer, or a value of the
+		form 'X+' to indicate an item with a bonus greater than or equal to
+		X.</P>
+		<LI><P STYLE="font-style: normal"><B>ability</B> &ndash; The
+		ability that the bonus applies to.</P>
+		<LI><P STYLE="font-style: normal"><B>buy</B> &ndash; The money
+		required to buy the item.</P>
+		<LI><P STYLE="font-style: normal"><B>sell</B> &ndash; The money
+		that the item can be sold for.</P>
+		<LI><P STYLE="font-style: normal"><B>tags</B> &ndash; one or more
+		hidden attributes kept with this item, separated by commas. The tag
+		'keep' indicates that the item won't be removed by wild-card item
+		losses (though a specific name match will remove it).</P>
+		<LI><P STYLE="font-style: normal"><B>buytags</B> &ndash; one or
+		more of the usual <B>tags</B> that will be set on this item when
+		sold. An item being sold via this action does not need to possess
+		these tags, but any item bought will have these tags. This is used
+		to mark the free items bought at a market in book 3.</P>
+		<LI><P STYLE="font-style: normal"><B>quantity</B> &ndash; The
+		number of items that can be taken before disabling (defaults to 1).</P>
+		<LI><P STYLE="font-style: normal"><B>group</B> &ndash; Used with
+		the <B>items</B> tag, when only a limited number of objects can be
+		taken by the character.</P>
+		<LI><P STYLE="font-style: normal"><B>replace</B> &ndash; The name
+		of a possession of the character that should be replaced by this
+		item. May have an empty value, in which case the item replaced
+		should have the same name. This can be used to replace a 'harmless'
+		item collected by the player with one having good (or bad) effects.</P>
+		<LI><P STYLE="font-style: normal"><B>flag</B> &ndash; Taking this
+		item will clear the matching price flag (and the item cannot be
+		taken until the price flag is set). Sometimes combined with the
+		<B>quantity</B> attribute.</P>
+		<LI><P STYLE="font-style: normal"><B>profession</B> &ndash; Only
+		used in the 'Adventurers.xml' file, to indicate an item possessed
+		by the specified profession.</P>
+		<LI><P STYLE="font-style: normal"><B>using</B> &ndash; When used
+		within another element, matches only the weapon/armour being
+		wielded/worn by the character. See 2.267 for an example.</P>
+	</UL>
+	<LI><P STYLE="font-style: normal">An item can be indicated entirely
+	within the attributes of another element (like <B>&lt;if&gt;</B>,
+	<B>&lt;lose</B>&gt;, <B>&lt;choice&gt;</B> and others). In this case
+	the item type (item, weapon, tool or armour) is used to supply the
+	item's name. For example,</P>
+	<PRE STYLE="margin-bottom: 0.5cm"><B>&lt;lose weapon=&quot;?&quot; bonus=&quot;1&quot;/&gt;</B></PRE><P>
+	is an action that will remove a weapon with a bonus of +1 from the
+	character.</P>
+	<LI><P><B>&lt;choices&gt;, &lt;outcomes&gt;, &lt;table&gt;</B><BR>Groups
+	a set of choices or outcomes. Generally the elements within the
+	table can be mixed, as long as the number of columns matches up.</P>
+	<UL>
+		<LI><P><B>var</B> &ndash; Used only in the <B>&lt;outcomes&gt;</B>
+		element, for a set of outcomes that use the same <B>var</B> and may
+		be repeatedly enabled. See 6.731 for the only (buggy) example.</P>
+	</UL>
+	<LI><P><B>&lt;choice [box=&quot;S&quot;] [god=&quot;S&quot;] [</B><I>item
+	tags</I><B>] [pay=&rdquo;B&rdquo;] [profession=&quot;S&quot;]
+	[shards=&quot;V&quot; [currency=&quot;S&quot;]]&gt;</B><BR>One of a
+	set of available choices, arranged in a table. Each choice consists
+	of an automatic goto and a description (enclosed by the start and
+	end tag). All attributes used by <B>goto</B> can be present here.</P>
+	<UL>
+		<LI><P><B>box</B> &ndash; The codeword that must be present for
+		this option to be enabled. Changes to the codeword made within the
+		section will immediately affect this option. To show a checkbox as
+		part of the choice description, include the text '{box}'; this will
+		match the codeword state.</P>
+		<LI><P><B>currency</B> &ndash; The currency of the money indicated
+		by <B>shards</B>. Defaults to 'Shards'.</P>
+		<LI><P><B>flee</B> &ndash; If true, this option will be enabled
+		when a fight within the section commences, and disabled afterwards.</P>
+		<LI><P><B>god</B> &ndash; The god that the character must worship
+		to select this option.</P>
+		<LI><P STYLE="font-weight: medium"><I>item tags</I> &ndash; The
+		item that the character must possess to select this option.</P>
+		<LI><P><B>pay</B> &ndash; Whether the money/item will be removed if
+		the character takes this choice. If shards is present, defaults to
+		true; if an item is present, defaults to false.</P>
+		<LI><P><B>profession</B> &ndash; The profession that the character
+		must belong to to select this option.</P>
+		<LI><P STYLE="font-weight: medium"><B>shards</B> &ndash; The amount
+		of money the character must have to select this option.</P>
+	</UL>
+	<LI><P>Blessings are specified by the <B>blessing</B> attribute
+	(containing the name of the blessing). As usual, an '*' matches all
+	blessings, and a '?' matches a single one. The possible values:</P>
+	<UL>
+		<LI><P><B>defence</B> &ndash; Defence through Faith. The <B>bonus</B>
+		attribute optionally specifies the Defence bonus (defaults to 3).</P>
+		<LI><P><B>disease</B>/<B>poison</B> &ndash; Immunity to
+		Disease/Poison.</P>
+		<LI><P><B>injury</B> &ndash; Immunity to Injury.</P>
+		<LI><P><B>luck</B> &ndash; Luck.</P>
+		<LI><P><B>storm</B> &ndash; Safety from Storms.</P>
+	</UL>
+	<LI><P><B>&lt;outcome [blessing=&quot;S&quot;] [codeword=&quot;S&quot;]
+	[flag=&quot;S&quot;] [range=&quot;S&quot; [var=&quot;S&quot;]]
+	&gt;</B><BR>Usually one of a set after a dice roll has occurred,
+	with one being enabled. It can also be used to group a block of text
+	and actions, as if it were an <B>if</B> tag. All attributes used by
+	<B>goto</B> can be present here.</P>
+	<UL>
+		<LI><P><B>blessing</B> &ndash; A blessing that must be possessed
+		for this option to enable.</P>
+		<LI><P><B>codeword</B> &ndash; One or more codewords that must be
+		possessed for this option to enable. Multiple codewords may be
+		combined with '|' or '&amp;', to indicate a logical OR or AND
+		respectively. The default text will be the list of codewords,
+		separated by commas and the appropriate 'or'/'and' before the last
+		codeword.</P>
+		<LI><P><B>flag</B> &ndash; The flag that must be set for this
+		option to enable. Used in combination with other constraints (range
+		or codewords) for a set of outcomes that can be repeatedly
+		triggered.</P>
+		<LI><P><B>range</B> &ndash; A dice result range, specified as a
+		single number, a range (X-Y) or two numbers (X,Y). The dice result
+		is gotten from the anonymous variable, unless <B>var</B> is
+		specified.</P>
+		<LI><P><B>var</B> &ndash; The variable holding the dice result with
+		which <B>range</B> is compared.</P>
+	</UL>
+	<LI><P STYLE="font-weight: medium">Codewords are kept as a set of
+	strings mapping to integers. A codeword is 'present' if it is in the
+	set and maps to any integer other than 0. Tick counts are also kept
+	with the codewords, with a codeword in the form '<I>book</I>/<I>section</I>'
+	mapping to the number of ticks. An arbitrary 'count' is also kept
+	with the codewords (eg. your status at the Uttaku court).</P>
+	<LI><P><B>&lt;tick [ability=&quot;S&quot; [effect=&rdquo;S&rdquo;]]
+	[addbonus=&quot;V&quot;] [addtag=&quot;S&quot;] [amount=&quot;V&quot;]
+	[blessing=&quot;S&quot; [permanent=&rdquo;B&rdquo;]] [bonus=&quot;V&quot;]
+	[cache=&quot;S&quot;] [cargo=&quot;S&quot;] [codeword=&quot;S&quot;]
+	[crew=&quot;S&quot;] [flag=&quot;S&quot;] [force=&quot;B&quot;]
+	[god=&quot;S&quot;] [hidden=&quot;B&quot;] [</B><I>item tags</I><B>]
+	[name=&quot;S&quot;] [price=&quot;S&quot;] [profession=&rdquo;S&rdquo;]
+	[removetag=&quot;S&quot;] [shards=&quot;V&quot;] [special=&quot;S&quot;]
+	[ticks=&quot;N&quot;] [title=&quot;S&quot; [titlePattern=&quot;S&quot;
+	titleValue=&quot;N&quot; titleAdjust=&quot;N&quot;]]&gt;<BR>&lt;gain
+	...&gt;<BR></B>'Add' something to the character. There are many
+	possible actions here, so bear with me. Generally this action is
+	enabled, but the player is free to skip it. Note that only a
+	'single' action can be performed &ndash; such as adding an item, or
+	a codeword, or a title &ndash; rather than many actions. If you need
+	to perform multiple actions with one click, use the <B>&lt;group&gt;</B>
+	element.</P>
+	<UL>
+		<LI><P><B>ability</B> &ndash; The ability to add to (permanently).
+		The amount is given in the <B>amount</B> attribute.</P>
+		<LI><P><B>addbonus</B> &ndash; An upgrade to the indicated item's
+		main bonus.</P>
+		<LI><P><B>addtag</B> &ndash; A tag to add to an item.</P>
+		<LI><P><B>amount</B> &ndash; The value to add to an ability; this
+		may be in the form of a 'dice' expression, <I>i</I>d+<I>j</I>,
+		where <I>i</I> and <I>j</I> are both integers.</P>
+		<LI><P STYLE="font-style: normal"><B>blessing</B> &ndash; A
+		blessing to add the character's list of blessings. The name of the
+		blessing will provide default content for this element.</P>
+		<LI><P STYLE="font-style: normal"><B>bonus</B> &ndash; Modifies
+		either the <B>blessing</B> or the <B>special</B> attribute.</P>
+		<LI><P STYLE="font-style: normal"><B>cache</B> &ndash; The name of
+		the cache to add the item/money to.</P>
+		<LI><P STYLE="font-style: normal"><B>cargo</B> &ndash; The Cargo
+		Unit to add (to a present ship).</P>
+		<LI><P STYLE="font-style: normal"><B>codeword</B> &ndash; The
+		codeword to add to the character's list. If the element has no
+		content, the default text will be 'tick the codeword <I>C</I>'.
+		Note that if the codeword name is found in the action text, it will
+		be automatically italicised.</P>
+		<LI><P STYLE="font-style: normal"><B>crew</B> &ndash; A quality of
+		crew to set for a present ship (one of 'poor', 'average', 'good' or
+		'excellent'). To change the crew quality by one or more steps (in
+		either direction), use the <B>&lt;lose&gt;</B> element.</P>
+		<LI><P STYLE="font-style: normal"><B>effect</B> &ndash; Used with
+		<B>ability</B> to add to or remove an effect from one of the
+		character's abilities (a '-' prefix will remove the effect). The
+		current effects are &ldquo;fix&rdquo;, which locks that attribute
+		at a value of 1; and &ldquo;curse&rdquo;, which makes any ability
+		rolls against that ability automatically fail (and treats the
+		ability in other ways as if it were 0). Note that the Charisma
+		ability includes a special case: a mask, while possessed (and
+		presumably worn), will cancel these effects.</P>
+		<LI><P STYLE="font-style: normal"><B>flag</B> &ndash; The name of
+		the flag that must be set before this action can be activated.
+		Activating the action will clear the flag.</P>
+		<LI><P STYLE="font-style: normal"><B>force</B> &ndash; Whether this
+		action needs to be activated before execution can continue.
+		Defaults to true.</P>
+		<LI><P STYLE="font-style: normal"><B>god</B> &ndash; The name of
+		the god that the character will switch to. May be empty, if the
+		character is renouncing their existing god.</P>
+		<LI><P STYLE="font-style: normal"><B>hidden</B> &ndash; If true,
+		the action is hidden and is automatically activated when it is
+		reached.</P>
+		<LI><P STYLE="font-weight: medium"><I>item tags</I> &ndash; One of
+		the character's possessions to be modified. Note that this <I>does
+		not </I>add an item; use the &lt;item&gt;, &lt;weapon&gt;, etc.
+		tags for this purpose. See the <B>addbonus</B>, <B>addtag</B> and
+		<B>removetag</B> attributes.</P>
+		<LI><P STYLE="font-style: normal"><B>name</B> &ndash; The name of
+		the codeword to add <B>ticks</B> to. The <B>amount</B> attribute
+		can also be used instead of <B>ticks</B>.</P>
+		<LI><P STYLE="font-style: normal"><B>permanent</B> &ndash; If true,
+		indicates the blessing may be used repeatedly without being lost.</P>
+		<LI><P STYLE="font-style: normal"><B>price</B> &ndash; The name of
+		the flag that must be clear for this action to be enabled.
+		Activating the action will set the flag (and disable the action).</P>
+		<LI><P STYLE="font-style: normal"><B>profession</B> &ndash; A new
+		profession for the player (only the regular six are recognised);
+		more than one profession may be chosen from by using a
+		'|'-separated list.</P>
+		<LI><P STYLE="font-style: normal"><B>removetag</B> &ndash; A tag to
+		remove from an item.</P>
+		<LI><P STYLE="font-style: normal"><B>shards</B> &ndash; The number
+		of Shards that can be gained. This provides the default text 'X
+		Shards'.</P>
+		<LI><P STYLE="font-style: normal"><B>special</B> &ndash; An
+		unusual, 'game' action: one of {attack, defence, armourlock,
+		weaponlock, lock, unlock, difficultycurse, difficultyrestore,
+		godless}.</P>
+		<UL>
+			<LI><P STYLE="font-style: normal">'attack' gives a bonus to the
+			character's rolls in the next fight; 'defence' gives a bonus to
+			the character's Defence score during the next fight. Both of these
+			actions use the <B>bonus</B> attribute, although the defence bonus
+			defaults to 3.</P>
+			<LI><P STYLE="font-style: normal">'lock' (or 'freeze') and
+			'unlock' (or 'thaw') work on a cache, indicated by the <B>cache</B>
+			attribute; the cache will temporarily ignore user access, or
+			restore access.</P>
+			<LI><P STYLE="font-style: normal">'armourlock' stops the character
+			from changing the worn armour, for the duration of the section;
+			'weaponlock', similarly, locks in the currently wielded weapon.</P>
+			<LI><P STYLE="font-style: normal">'difficultycurse' changes all
+			difficulty rolls to be made with one die, while
+			'difficultyrestore' restores them to the usual two dice.</P>
+			<LI><P STYLE="font-style: normal">'godless' removes the
+			character's ability to worship a god (clearing the currently
+			worshipped god in the process).</P>
+		</UL>
+		<LI><P STYLE="font-style: normal"><B>ticks</B> &ndash; The number
+		of ticks to add to the checkboxes displayed with this section. If
+		no attributes are present, this defaults to 1, with default text of
+		'put a tick there now'. Also used by the <B>name</B> attribute.</P>
+		<LI><P STYLE="font-style: normal"><B>title</B> &ndash; The name of
+		the title to grant to the character. This can provide the default
+		text.</P>
+		<LI><P STYLE="font-style: normal"><B>titlePattern</B>, <B>titleValue</B>,
+		<B>titleAdjust</B> &ndash; Occasionally a title can be added that
+		contains a value which may rise or fall (eg. Circle 1 Bokh master).
+		In this case the form of the title is given by <B>titlePattern</B>,
+		with '{0}' in the pattern being replaced by the current value.
+		<B>titleValue</B> is the initial value displayed, if the character
+		doesn't already have this title. <B>titleAdjust</B> is the amount
+		to modify the value by, if the character does already have the
+		title.</P>
+	</UL>
+	<LI><P STYLE="font-style: normal"><B>&lt;lose [ability=&quot;S&quot;
+	amount=&quot;V&quot; [fatal=&quot;B&quot;]] [blessing=&quot;S&quot;
+	[permanent=&rdquo;B&rdquo;]] [cache=&quot;S&quot;] [cargo=&quot;S&quot;]
+	[codeword=&quot;S&quot;] [crew=&quot;N&quot;] [</B><I>curse
+	attributes</I><B>] [flag=&quot;S&quot;] [force=&quot;B&quot;]
+	[itemAt=&rdquo;V&rdquo;] [price=&quot;S&quot;] [resurrection=&quot;B&quot;]
+	[shards=&quot;V&quot;] [ship=&quot;B&quot;] [stamina=&quot;S&quot;]
+	[staminato=&quot;V&quot;] [</B><I>item attributes</I> <B>[chance=&quot;S&quot;]
+	[multiple=&quot;V&quot;]] [title=&rdquo;S&rdquo;]&gt;</B><BR>'Remove'
+	something from the character. Note that multiple actions can be
+	included here, and all will be executed (eg. <B>item=&quot;*&quot;
+	shards=&quot;*&quot;</B> will remove all shards and items). If the
+	action would do nothing, it remains disabled and execution
+	continues.</P>
+	<UL>
+		<LI><P STYLE="font-style: normal"><B>ability</B> &ndash; The
+		ability to deduct <B>amount</B> from. This may be one of the six
+		abilities, 'stamina', or 'rank'. A '?' lets the player choose which
+		of the six abilities will be affected; a '*' means it affects all
+		six abilities.</P>
+		<LI><P STYLE="font-style: normal"><B>amount</B> &ndash; The amount
+		to deduct from <B>ability</B>. This may be a number, a variable
+		name, or a dice expression. If an adjustment would reduce the
+		ability to 0 or less this will kill the character (depending on the
+		<B>fatal</B> attribute).</P>
+		<LI><P STYLE="font-style: normal"><B>blessing</B> &ndash; The
+		blessing(s) to remove from the character. This can be one of the
+		standard types, '?' or '*'. 
+		</P>
+		<LI><P STYLE="font-style: normal"><B>cache</B> &ndash; The name of
+		the money or item cache to remove money and items from.</P>
+		<LI><P STYLE="font-style: normal"><B>cargo</B> &ndash; The cargo
+		type to remove from the ship. If it's one of the known types,
+		removes all cargo of that type from the current ship. It can also
+		be '?', to remove a single cargo unit of the player's choice, or
+		'*' to remove all cargo.</P>
+		<LI><P STYLE="font-style: normal"><B>chance</B> &ndash; This is
+		only relevant if <B>item=&quot;*&quot;</B> is present; it gives the
+		probability (given as a fraction 'X/Y', between 0 and 1) for each
+		item's removal.</P>
+		<LI><P><B>codeword</B> &ndash; A codeword to remove from the
+		character. The default text if this is present is 'erase the
+		codeword <I>CODEWORD</I>'. If the codeword is found in the action
+		text, it will be automatically italicised.</P>
+		<LI><P STYLE="font-style: normal"><B>crew</B> &ndash; An integer
+		'step' to deduct from the current ship's crew. For example, a value
+		of 1 will downgrade the crew from excellent to good, good to
+		average, or average to poor. A negative value can also be used here
+		to upgrade the crew, which complements the <B>&lt;gain crew=&quot;S&quot;&gt;</B>
+		action nicely.</P>
+		<LI><P STYLE="font-weight: medium"><I>curse attributes</I> &ndash;
+		The curse, poison or disease to remove from the character. The name
+		of the curse will be used for the default text, if present.</P>
+		<LI><P STYLE="font-style: normal"><B>fatal</B> &ndash; Determines
+		whether an adjustment made by <B>ability</B> and <B>amount</B> can
+		kill the character. If true, and an ability would be reduced to 0,
+		current stamina is reduced to 0 instead. Either way, the ability
+		will only be reduced to 1.</P>
+		<LI><P STYLE="font-style: normal; font-weight: medium"><B>flag</B>
+		&ndash; The name of the flag that must be set before this action
+		can be activated. Activating the action will clear the flag.</P>
+		<LI><P STYLE="font-style: normal; font-weight: medium"><B>force</B>
+		&ndash; Whether this action needs to be activated before execution
+		can continue. Defaults to true.</P>
+		<LI><P STYLE="font-weight: medium"><I>item attributes</I> &ndash;
+		An item (or items) to remove from the character, or an item cache
+		if <B>cache</B> is present. See also the <B>chance</B> and <B>multiple</B>
+		attributes. If present, the default text will be the item
+		description.</P>
+		<LI><P><B>itemAt</B> &ndash; Removes the item at the given position
+		(from a cache or the character's possession). A '1' indicates the
+		first item, a '2' the second, and so on. Currency will be skipped
+		in this count; items with the 'keep' tag will remain.</P>
+		<LI><P STYLE="font-style: normal"><B>multiple</B> &ndash; The
+		number of items removed from the character, or an item cache.
+		Generally used with <B>item=&quot;?&quot;</B> (or another item
+		type).</P>
+		<LI><P STYLE="font-style: normal"><B>permanent</B> &ndash; If true,
+		a blessing can be removed even if permanent.</P>
+		<LI><P STYLE="font-style: normal; font-weight: medium"><B>price</B>
+		&ndash; The name of the flag that must be clear for this action to
+		be enabled. Activating the action will set the flag (and disable
+		the action).</P>
+		<LI><P STYLE="font-style: normal"><B>resurrection</B> &ndash; If
+		true, clears the character's resurrection arrangements.</P>
+		<LI><P STYLE="font-style: normal"><B>shards</B> &ndash; The number
+		of shards to remove from the character, or a cache if <B>cache</B>
+		is present. This may be a number, a variable name, or '*' to
+		indicate all available shards. If <B>cache</B> is present, the
+		shards will be removed from the cache instead. The default text if
+		this is present is '<I>X</I> Shards'.</P>
+		<LI><P STYLE="font-style: normal"><B>ship</B> &ndash; If true,
+		removes the 'current' ship (which the character is on, or is at the
+		same location).</P>
+		<LI><P STYLE="font-style: normal"><B>stamina</B> &ndash; The amount
+		to deduct from current stamina. This may be a number, a variable
+		name, or in the form '<I>X</I>d + <I>Y</I>', where <I>X</I> is the
+		number of dice to be rolled and <I>Y</I> is added to the result.
+		The default text if this is present is 'lose <I>X</I> Stamina
+		point(s)'.</P>
+		<LI><P STYLE="font-style: normal"><B>staminato</B> &ndash; The
+		value to set the current stamina to. This may be a number or a
+		variable name. This may actually restore stamina, if it is
+		currently lower than the value given.</P>
+		<LI><P STYLE="font-style: normal"><B>title</B> &ndash; The name of
+		a title that the character will lose. This will provide the default
+		text if present.</P>
+	</UL>
+	<LI><P STYLE="font-style: normal"><B>&lt;if [ability=&quot;S&quot;
+	[modifier=&quot;S&quot;]] [blessing=&quot;S&quot;] [book=&quot;S&quot;]
+	[cache=&quot;S&quot;] [cargo=&quot;S&quot;] [codeword=&quot;S&quot;]
+	[crew=&quot;S&quot;] [curse|poison|disease=&quot;S&quot;] [dead=&quot;B&quot;]
+	[docked=&quot;S&quot;] [equals=&quot;V&quot;] [gender=&quot;M/F&quot;]
+	[god=&quot;S&quot;] [greaterthan=&quot;V&quot;] [</B><I>item
+	attributes</I><B>] [lessthan=&quot;V&quot;] [name=&quot;S&quot;]
+	[not=&quot;B&quot;] [profession=&quot;S&quot;] [resurrection=&quot;B&quot;]
+	[shards=&quot;V&quot;] [ship=&quot;S&quot;] [ticks=&quot;N&quot;]
+	[title=&quot;S&quot;] [var=&quot;S&quot;]&gt;<BR>&lt;elseif ...
+	&gt;<BR>&lt;else&gt;</B><BR>Test whether any one of the conditions
+	defined by the attributes are met; if so, the text and actions
+	between the start and end tag will be activated. If the conditions
+	in a leading <B>&lt;if&gt;</B> tag are not met, any following
+	<B>&lt;elseif&gt;</B> tags will be tested until one matches. A final
+	<B>&lt;else&gt;</B> tag (without attributes) will match if all
+	preceding tags have failed to. <B>&lt;if&gt;</B>s may be nested,
+	though I'd advise keeping it simple.</P>
+	<UL>
+		<LI><P STYLE="font-style: normal"><B>ability</B> &ndash; An ability
+		value to be tested against (see <B>equals, lessthan</B> and
+		<B>greaterthan</B>). See also <B>modifier</B>, which affects the
+		ability value.</P>
+		<LI><P STYLE="font-style: normal"><B>blessing</B> &ndash; Test
+		whether the character possesses the given blessing.</P>
+		<LI><P STYLE="font-style: normal"><B>book</B> &ndash; Test whether
+		the system can find the given book.</P>
+		<LI><P STYLE="font-style: normal"><B>cache</B> &ndash; If present,
+		the name of the cache location of which any item or shards tested.</P>
+		<LI><P STYLE="font-style: normal"><B>cargo</B> &ndash; Test whether
+		a ship at the current location has the given cargo. A '?' may be
+		used to test for any cargo. See also <B>docked</B>.</P>
+		<LI><P STYLE="font-style: normal"><B>codeword</B> &ndash; Test
+		whether the character has the given codeword. Multiple codewords
+		may be given, separated by '|' or '&amp;', to indicate a logical OR
+		or AND respectively. If one of the codewords is found in the
+		enclosed text, it will rendered in italics.</P>
+		<LI><P STYLE="font-style: normal"><B>curse|poison|disease</B> &ndash;
+		Test whether the character has a curse with the given name. A '?'
+		will test for any curse of the given type.</P>
+		<LI><P STYLE="font-style: normal"><B>crew</B> &ndash; Test whether
+		a ship at the current location has a crew of this quality. See also
+		<B>docked</B>.</P>
+		<LI><P STYLE="font-style: normal"><B>dead</B> &ndash; If true, test
+		whether the character is dead (current stamina at zero, or natural
+		score of any ability at zero); if false, the opposite.</P>
+		<LI><P STYLE="font-style: normal"><B>docked</B> &ndash; Matches a
+		ship at the given location, rather than at the current location.
+		Used in combination with <B>cargo</B>, <B>crew</B> or <B>ship</B>
+		to match a ship at this location; if these are missing, tests for
+		the presence of any ship at this dock.</P>
+		<LI><P STYLE="font-style: normal"><B>equals</B> &ndash; Test
+		whether a number is equal to the value given by this attribute (a
+		number or variable). Only one of <B>equals</B>, <B>greaterthan</B>
+		or <B>lessthan</B> must be successful. The value being tested is
+		given by <B>ability</B>, <B>name</B> or <B>var</B>. The number of
+		items matched by the <I>item attributes</I> may also be tested
+		against.</P>
+		<LI><P STYLE="font-style: normal"><B>gender</B> &ndash; Test the
+		gender of the character ('m' or 'M' for male, 'f' or 'F' for
+		female).</P>
+		<LI><P STYLE="font-style: normal"><B>god</B> &ndash; Test whether
+		the character worships the given god. May be '*' to test whether
+		the character worships any god.</P>
+		<LI><P STYLE="font-style: normal"><B>greaterthan</B> &ndash; Tests
+		whether a number is greater than the value given by this attribute
+		(a number or variable). See <B>equals</B>.</P>
+		<LI><P STYLE="font-weight: medium"><I>item attributes</I> &ndash;
+		Tests whether the character possesses the given item. If <B>cache</B>
+		is present, the items matched must be in the named cache. See also
+		<B>equals</B>.</P>
+		<LI><P STYLE="font-style: normal"><B>lessthan</B> &ndash; Tests
+		whether a number is less than the value given by this attribute (a
+		number or variable). See <B>equals</B>.</P>
+		<LI><P STYLE="font-style: normal"><B>modifier</B> &ndash; A
+		modifier to any ability given by <B>ability</B>. This may be
+		'noweapon', 'noarmour', 'notool' or 'natural'; these exclude
+		(respectively) the ability bonuses of a weapon, armour, a tool, or
+		any of these things. The default is to include these bonuses.</P>
+		<LI><P STYLE="font-style: normal"><B>name</B> &ndash; Compares the
+		value held by the codeword of this name. See <B>equals</B>.</P>
+		<LI><P STYLE="font-style: normal"><B>not</B> &ndash; If true,
+		reverses the result of the tag; the tag will only match if all
+		tests fail.</P>
+		<LI><P STYLE="font-style: normal"><B>profession</B> &ndash; Tests
+		whether the character belongs to the given profession.</P>
+		<LI><P STYLE="font-style: normal"><B>resurrection</B> &ndash; Tests
+		whether the character has any resurrection arrangements.</P>
+		<LI><P STYLE="font-style: normal"><B>shards</B> &ndash; Tests
+		whether the character has at least this number of Shards. If <B>cache</B>
+		is present, the Shards must be in the named cache.</P>
+		<LI><P STYLE="font-style: normal"><B>ship</B> &ndash; Tests whether
+		there is a ship of the given type at the current location. See also
+		<B>docked</B>.</P>
+		<LI><P STYLE="font-style: normal"><B>ticks</B> &ndash; Tests
+		whether this section has this number of ticks.</P>
+		<LI><P STYLE="font-style: normal"><B>title</B> &ndash; Tests
+		whether the character has the given title. Multiple titles may be
+		tested for, separated by '|' or '&amp;' to test for logical OR or
+		AND respectively.</P>
+		<LI><P STYLE="font-style: normal"><B>var</B> &ndash; Tests whether
+		the value held in this variable matches any comparisons. See
+		<B>equals</B>.</P>
+	</UL>
+	<LI><P STYLE="font-style: normal"><B>&lt;random [dice=&quot;N&quot;]
+	[flag=&quot;S&quot;] [force=&quot;B&quot;] [type=&rdquo;S&rdquo;]
+	[var=&quot;S&quot;]&gt;</B><BR>Simulate the roll of a number of
+	dice. The result will be stored in a variable, and execution will
+	continue from this point. This tag may contain a number of <B>&lt;adjust&gt;</B>
+	tags, which modify the result.</P>
+	<UL>
+		<LI><P STYLE="font-style: normal"><B>dice</B> &ndash; The number of
+		dice to roll (defaults to 2). This determines the default text &ndash;
+		either 'roll one die', 'roll two dice', or 'roll X dice' for
+		numbers larger than two.</P>
+		<LI><P STYLE="font-style: normal"><B>flag</B> &ndash; The flag that
+		must be set for this action to enable. When activated, this action
+		doesn't clear the flag; this is usually done by a related <B>&lt;outcome&gt;</B>
+		tag.</P>
+		<LI><P STYLE="font-style: normal"><B>force</B> &ndash; Whether the
+		player must activate this action to continue; defaults to true.</P>
+		<LI><P STYLE="font-style: normal"><B>type</B> &ndash; If 'travel',
+		a blessing of Safe Travel may be used to reroll.</P>
+		<LI><P STYLE="font-style: normal"><B>var</B> &ndash; The variable
+		that the result will be stored in; if missing, the anonymous
+		variable is used.</P>
+	</UL>
+	<LI><P STYLE="font-style: normal"><B>&lt;difficulty ability=&quot;S&quot;
+	level=&quot;N&quot; [flag=&quot;S&quot;] [force=&quot;B&quot;]
+	[modifier=&quot;S&quot;] [var=&quot;S&quot;]&gt;</B><BR>Handle an
+	ability roll. This rolls two dice, adds the player's ability score,
+	and subtracts the Difficulty of the roll from this. The result is
+	stored in a variable, with a value greater than 0 being a success,
+	and a non-positive result being a failure. The default text is 'make
+	a A roll at Difficulty L', where A is the ability name and L is the
+	Difficulty level. This tag may contain a number of <B>&lt;adjust&gt;</B>
+	tags, which modify the result.</P>
+	<UL>
+		<LI><P STYLE="font-style: normal"><B>ability</B> &ndash; The
+		ability being tested. This can be one or more ability names
+		separated by a '|' character, or '?' to indicate a choice from all
+		six abilities. If only one ability is given, it will be stored in a
+		special variable so that the corresponding <B>&lt;success&gt;</B>
+		and <B>&lt;failure&gt;</B> tags can use it automatically.</P>
+		<LI><P STYLE="font-style: normal"><B>flag</B> &ndash; The flag that
+		must be set for this action to be enabled. When the action is
+		activated, the flag is cleared.</P>
+		<LI><P STYLE="font-style: normal"><B>force</B> &ndash; Whether the
+		player must activate this action to continue; defaults to true.</P>
+		<LI><P STYLE="font-style: normal"><B>level</B> &ndash; The
+		Difficulty level of the roll.</P>
+		<LI><P STYLE="font-style: normal"><B>modifier</B> &ndash; A
+		modifier to the ability used. This may be 'noweapon', 'noarmour',
+		'notool', or 'natural'; these exclude (respectively) the ability
+		bonuses of a weapon, armour, a tool, or any of these things. The
+		default is to include these bonuses. A final value, 'current', can
+		be used with ability=&rdquo;stamina&rdquo; to make a roll against
+		the current Stamina value.</P>
+		<LI><P STYLE="font-style: normal"><B>var</B> &ndash; The variable
+		that the result will be stored in; if missing, the anonymous
+		variable is used.</P>
+	</UL>
+	<LI><P STYLE="font-style: normal"><B>&lt;rankcheck [add=&quot;N&quot;]
+	[dice=&quot;N&quot;] [force=&quot;B&quot;] [var=&quot;S&quot;]&gt;</B><BR>Roll
+	one or more dice, comparing the result to the character's Rank
+	ability. 'Success' is counted as rolling less than or equal to Rank;
+	'failure' is rolling more than Rank. The result can be tested for
+	using the <B>&lt;success&gt;</B> and <B>&lt;failure&gt;</B> tags, as
+	with the <B>&lt;difficulty&gt;</B> action.</P>
+	<UL>
+		<LI><P STYLE="font-style: normal"><B>add</B> &ndash; The number to
+		be added to the dice roll.</P>
+		<LI><P STYLE="font-style: normal"><B>dice</B> &ndash; The number of
+		dice to roll; defaults to 1. The default text is 'roll one die',
+		'roll two dice', or 'roll X dice', depending on the value.</P>
+		<LI><P STYLE="font-style: normal"><B>force</B> &ndash; Whether this
+		action is forced; defaults to true.</P>
+		<LI><P STYLE="font-style: normal"><B>var</B> &ndash; The variable
+		into which the 'result' is stored. The result, in this case, is the
+		character's Rank plus 1, minus the result of the dice. This means
+		that success is indicated by the result being greater than zero,
+		failure being less than or equal to zero (as for the <B>&lt;difficulty</B>&gt;
+		action).</P>
+	</UL>
+	<LI><P STYLE="font-style: normal"><B>&lt;success [ability=&quot;S&quot;]
+	[section=&quot;S&quot; [book=&rdquo;S&rdquo;]] [var=&quot;S&quot;]&gt;<BR>&lt;failure
+	... &gt;</B><BR>Handle the results of a <B>&lt;difficulty&gt;</B> or
+	<B>&lt;rankcheck&gt;</B> action. This can either be used as part of
+	a group of choices (within a <B>&lt;outcomes&gt;</B> or <B>&lt;choices&gt;</B>
+	tag) or as an <B>&lt;if&gt;</B> node, containing a block of text and
+	actions. Success is defined by the variable (by default, the
+	anonymous one) containing a value greater than zero; a lower value
+	indicates failure.</P>
+	<UL>
+		<LI><P STYLE="font-style: normal"><B>ability</B> &ndash; The
+		ability that was being tested, used in describing the default text.
+		Usually unnecessary, since the previous <B>&lt;difficulty&gt;</B>
+		action will define the ability being tested.</P>
+		<LI><P STYLE="font-style: normal"><B>book</B> &ndash; Used with the
+		<B>section</B> attribute, as in a &lt;goto&gt; tag.</P>
+		<LI><P STYLE="font-style: normal"><B>section</B> &ndash; The
+		section to which the player is directed; used when the tag is part
+		of a group of outcomes.</P>
+		<LI><P STYLE="font-style: normal"><B>var</B> &ndash; The variable
+		tested for success.</P>
+	</UL>
+	<LI><P STYLE="font-style: normal"><B>&lt;group [force=&quot;B&quot;]&gt;</B><BR>Perform
+	a sequence of actions with one 'click'. The <B>&lt;group&gt;</B> tag
+	should contain one or more action tags, usually preceded by a <B>&lt;text&gt;</B>
+	tag giving the action text. Group tags are tricky; their initial
+	enabled/disabled state is gotten from their first action 'child'; a
+	reroll triggered after the group tag will backtrack to the last
+	child action of the group. Use with care!</P>
+	<UL>
+		<LI><P STYLE="font-style: normal; font-weight: medium"><B>force</B>
+		&ndash; whether this action must be clicked; defaults to false.</P>
+	</UL>
+	<LI><P STYLE="font-style: normal"><B>&lt;set [cache=&quot;S&quot;]
+	[codeword=&quot;S&quot;] [dock=&quot;S&quot;] [force=&quot;B&quot;]
+	[</B><I>item attributes</I><B>] [modifier=&quot;S&quot;] [value=&quot;S&quot;]
+	[var=&quot;S&quot;]&gt;</B><BR>Assign a value to one of the
+	variables held for this section. May also be used to dock a ship. If
+	this action has no text, it will be hidden and automatically
+	executed.</P>
+	<UL>
+		<LI><P STYLE="font-style: normal"><B>cache</B> &ndash; The name of
+		the cache that the indicated item is located in.</P>
+		<LI><P STYLE="font-style: normal"><B>codeword</B> &ndash; If <B>value</B>
+		is missing, the value of this codeword will be assigned to the
+		variable <B>var</B>.</P>
+		<LI><P STYLE="font-style: normal"><B>dock</B> &ndash; The name of
+		the dock at which a ship, in the current location, will be moved
+		to. The usual way to dock ships is via the <B>dock</B> attribute of
+		the root <B>section</B> tag.</P>
+		<LI><P STYLE="font-style: normal"><B>force</B> &ndash; Whether the
+		action must be executed by the player (if not hidden). Defaults to
+		true.</P>
+		<LI><P STYLE="font-weight: medium"><I>item attributes</I> &ndash;
+		An item which will be referred to by the <B>value</B> attribute.</P>
+		<LI><P STYLE="font-style: normal"><B>modifier</B> - A modifier to
+		any ability used in <B>value</B>. This may be 'noweapon',
+		'noarmour', 'notool' or 'natural'; these exclude (respectively) the
+		ability bonuses of a weapon, armour, a tool, or any of these
+		things. The default is to include these bonuses.</P>
+		<LI><P STYLE="font-style: normal"><B>value</B> &ndash; The value to
+		be assigned to <B>var</B>. This can be an expression including the
+		symbols '(', ')', '*', '/', '+', '-', integers, and variable names.
+		Other identifiers may also be used:</P>
+		<UL>
+			<LI><P STYLE="font-style: normal; font-weight: medium">armour &ndash;
+			The Defence bonus of the armour indicated by the <I>item
+			attributes</I>.</P>
+			<LI><P STYLE="font-style: normal; font-weight: medium">crew &ndash;
+			The value of the crew in the 'current' ship (poor = 1, average =
+			2, good = 3, excellent = 4).</P>
+			<LI><P STYLE="font-style: normal; font-weight: medium">shards &ndash;
+			The number of Shards held by the player, or in the 
+			</P>
+			<LI><P STYLE="font-style: normal; font-weight: medium">weapon &ndash;
+			The Combat bonus of the weapon indicated by the <I>item
+			attributes</I>.</P>
+			<LI><P STYLE="font-style: normal; font-weight: medium">an ability
+			name &ndash; the six standard ones, as well as 'rank', 'defence',
+			and 'stamina'. <B>modifier</B> affects all of these; if 'stamina'
+			and modifier is absent, the default is to use the current stamina.</P>
+		</UL>
+		<LI><P STYLE="font-style: normal"><B>var</B> &ndash; The variable
+		to assign the result of <B>value</B> to; if missing, the result
+		will be assigned to the anonymous variable.</P>
+	</UL>
+	<LI><P STYLE="font-style: normal"><B>&lt;training ability=&quot;S&quot;
+	[add=&quot;N&quot;] [dice=&quot;N&quot;] [var=&quot;S&quot;]&gt;</B><BR>Roll
+	the given number dice; if greater than the current value of the
+	given ability, raise that ability by one.</P>
+	<UL>
+		<LI><P STYLE="font-style: normal"><B>ability</B> &ndash; The
+		ability to be tested against and raised. Multiple abilities may be
+		selected from using '*', '?', or by separating a list of ability
+		names with '|'.</P>
+		<LI><P STYLE="font-style: normal"><B>add</B> &ndash; The value to
+		add to the dice roll.</P>
+		<LI><P STYLE="font-style: normal"><B>dice</B> &ndash; The number of
+		dice to be rolled; defaults to two. The default text is 'roll one
+		die', 'roll two dice', or 'roll X dice', depending on the value of
+		this attribute.</P>
+		<LI><P STYLE="font-style: normal"><B>var</B> &ndash; The variable
+		to store the result in. The result, in this case, is the result of
+		the dice roll plus <B>add</B>.</P>
+	</UL>
+</UL>
+<P STYLE="margin-top: 0.42cm; page-break-after: avoid"><FONT FACE="Albany, sans-serif"><FONT SIZE=4>Less
+Common Tags</FONT></FONT></P>
+<UL>
+	<LI><P STYLE="font-style: normal"><B>&lt;rest [once=&quot;B&quot;]
+	[shards=&quot;N&quot;] [stamina=&quot;V&quot;]&gt;</B><BR>Restore
+	some amount of the character's current Stamina. This can be as a
+	one-time Stamina restoration, or at inns and taverns where each paid
+	day of rest will restore some amount of Stamina.</P>
+	<UL>
+		<LI><P STYLE="font-style: normal"><B>once</B> &ndash; whether the
+		action can be triggered once only, or multiple times. Defaults to
+		true if <B>shards</B> is absent, false otherwise.</P>
+		<LI><P STYLE="font-style: normal"><B>shards</B> &ndash; the amount
+		of Shards to be paid for each 'unit' of Stamina restoration.</P>
+		<LI><P STYLE="font-style: normal"><B>stamina</B> &ndash; the amount
+		of Stamina to restore. If absent, restores Stamina to its full
+		amount. This may be an integer, a variable name, or a dice
+		expression.</P>
+	</UL>
+	<LI><P STYLE="font-style: normal"><B>&lt;adjust [ability=&quot;S&quot;
+	[modifier=&quot;S&quot;]] [amount=&quot;V&quot;] [codeword=&quot;S&quot;]
+	[crew=&quot;S&quot;] [god=&quot;S&quot;] [greaterthan=&quot;V&quot;]
+	[</B><I>item attributes</I><B>] [lessthan=&quot;V&quot;]
+	[modifier=&quot;S&quot;] [name=&quot;S&quot;] [profession=&quot;S&quot;]
+	[ship=&quot;S&quot;] [titleVal=&quot;S&quot; [default=&quot;N&quot;]]
+	[value=&quot;V&quot;]&gt;</B><BR>Modify a random result. One or more
+	of these can be contained within an action that simulates rolling
+	dice (<B>&lt;random&gt;</B>, <B>&lt;difficulty&gt;</B>, <B>&lt;lose&gt;</B>,
+	<B>&lt;rankcheck&gt;</B>). If the tag 'matches', the value is added
+	to the reuslt.</P>
+	<UL>
+		<LI><P STYLE="font-style: normal"><B>ability</B> &ndash; One of the
+		ability names. This can be used without <B>value</B> or <B>amount</B>
+		being present, in which case the value of the ability will be added
+		to the result.</P>
+		<LI><P STYLE="font-style: normal"><B>amount</B> &ndash; The amount
+		to add to the result if the tag matches. Identical to <B>value</B>.</P>
+		<LI><P STYLE="font-style: normal"><B>codeword</B> &ndash; A
+		codeword that must be possessed by the player.</P>
+		<LI><P STYLE="font-style: normal"><B>crew</B> &ndash; The type of
+		crew on the current ship ('poor', 'average', 'good' or
+		'excellent').</P>
+		<LI><P STYLE="font-style: normal"><B>default</B> &ndash; The value
+		to use if the character doesn't have the title given by <B>titleVal</B>.</P>
+		<LI><P STYLE="font-style: normal"><B>god</B> &ndash; The god that
+		must be worshipped by the character.</P>
+		<LI><P STYLE="font-style: normal"><B>greaterthan</B> &ndash; If the
+		value given by <B>ability</B> or <B>name</B> are greater than this
+		value, the tag is matched. May be a number or a variable name.</P>
+		<LI><P STYLE="font-weight: medium"><I>item attributes</I> &ndash;
+		An item (or items) that must be possessed by the character for this
+		tag to match.</P>
+		<LI><P STYLE="font-style: normal"><B>lessthan</B> &ndash; If the
+		value given by <B>ability</B> or <B>name</B> are less than this
+		value, the tag is matched. May be a number or a variable name.</P>
+		<LI><P STYLE="font-style: normal"><B>modifier</B> &ndash; A
+		modifier to the ability used. This may be 'noweapon', 'noarmour',
+		'notool' or 'natural'; these exclude (respectively) the ability
+		bonuses of a weapon, armour, a tool, or any of these things. The
+		default is to include these bonuses. 'current', with
+		ability=&rdquo;stamina&rdquo;, accesses the current Stamina value.</P>
+		<LI><P STYLE="font-style: normal"><B>name</B> &ndash; The name of a
+		field or codeword whose value we want to compare against, or use
+		directly.</P>
+		<LI><P STYLE="font-style: normal"><B>profession</B> &ndash; The
+		profession that the character must belong to.</P>
+		<LI><P STYLE="font-style: normal"><B>ship</B> &ndash; The type of
+		ship that must be at the current location.</P>
+		<LI><P STYLE="font-style: normal"><B>titleVal</B> &ndash; The name
+		of the title whose 'value' we want to use (see <B>&lt;tick&gt;</B>
+		for a discussion of title patterns).</P>
+	</UL>
+	<LI><P STYLE="font-style: normal"><B>&lt;itemcache name=&quot;S&quot;
+	text=&quot;S&quot; [itemlimit=&quot;N&quot;] [max=&quot;N&quot;]
+	[multiples=&quot;N&quot;] [withdrawCharge=&quot;F&quot;]&gt;<BR>&lt;moneycache
+	... &gt;</B><BR>Define a cache in which the player can leave items
+	and/or money. A <B>&lt;moneycache&gt;</B> can only contain money,
+	while an <B>&lt;itemcache&gt;</B> may contain both. The <B>name</B>
+	of the cache is used as a unique identifier &ndash; it may be reused
+	in another section to display the same cache. See also the <B>&lt;tick&gt;</B>
+	tag and its <B>special</B> actions, 'lock' and 'unlock'; also see
+	<B>&lt;exclude&gt;</B> and <B>&lt;include&gt;</B>, affecting which
+	items can be left in the cache.</P>
+	<UL>
+		<LI><P STYLE="font-style: normal"><B>name</B> &ndash; The unique
+		identifier of the cache. For example, 'MerchantBank' is used to
+		refer to the character's money deposited with the merchant's guild.</P>
+		<LI><P STYLE="font-style: normal"><B>text</B> &ndash; The
+		description of the cache, shown on-screen.</P>
+		<LI><P STYLE="font-style: normal"><B>itemlimit</B> &ndash; For item
+		caches, the maximum number of items that can be left there.</P>
+		<LI><P STYLE="font-style: normal"><B>max</B> &ndash; The maximum
+		amount of money that can be left in a cache. Use '0' to bar money
+		from this cache.</P>
+		<LI><P STYLE="font-style: normal"><B>multiples</B> &ndash; Money
+		can only be deposited in multiples of this amount; for example, a
+		merchant guild's investment uses a value of 100.</P>
+		<LI><P STYLE="font-style: normal"><B>withdrawCharge</B> &ndash;
+		When withdrawing money, this proportion of the withdrawal will be
+		removed. This is a floating point number (containing a decimal
+		point, between 0 and 1).</P>
+	</UL>
+	<LI><P STYLE="font-style: normal"><B>&lt;transfer [</B><I>item
+	attributes</I><B>] [</B><I>excluded item attributes</I><B>]
+	[force=&quot;B&quot;] [from=&quot;S&quot;] [hidden=&quot;B&quot;]
+	[limit=&quot;V&quot;] [price=&quot;S&quot;] [shards=&quot;V&quot;]
+	[to=&quot;S&quot;]&gt;</B><BR>Transfer items or money between caches
+	and the player. The caches referred to in <B>from </B>and <B>to</B>
+	do not have to exist elsewhere.</P>
+	<UL>
+		<LI><P STYLE="font-weight: medium"><I>item attributes</I> &ndash;
+		The item(s) to include in the transfer.</P>
+		<LI><P STYLE="font-weight: medium"><I>excluded item attributes</I>
+		&ndash; The item(s) to exclude from the transfer. The attributes
+		used here are the same as for regular item attributes, but with a
+		leading 'x'. For example, xweapon=&quot;*katana&quot; xbonus=&quot;1+&quot;
+		would exclude any katana with a bonus of 1 or greater from the
+		transfer. If one or more items are excluded, and no <I>item
+		attributes</I> are present, all items not excluded will be
+		transferred.</P>
+		<LI><P STYLE="font-style: normal"><B>force</B> &ndash; Whether this
+		action has to be clicked before execution continues. Default is
+		true.</P>
+		<LI><P STYLE="font-style: normal"><B>from</B> &ndash; The name of
+		the cache from which items should be taken. If absent, items will
+		be taken from the character's possession.</P>
+		<LI><P STYLE="font-style: normal"><B>hidden</B> &ndash; Whether
+		this action is hidden, and hence automatically activated.</P>
+		<LI><P STYLE="font-style: normal"><B>limit</B> &ndash; The maximum
+		number of items that can be transferred.</P>
+		<LI><P STYLE="font-style: normal"><B>price</B> &ndash; If present,
+		the action can only be activated when this flag is clear, and
+		clicking the action will set the flag.</P>
+		<LI><P STYLE="font-style: normal"><B>shards</B> &ndash; The amount
+		of shards to be transferred by the action.</P>
+		<LI><P STYLE="font-style: normal"><B>to</B> &ndash; The name of the
+		cache into which items should be deposited. If absent, items will
+		be added to the character's possessions.</P>
+	</UL>
+	<LI><P STYLE="font-style: normal"><B>&lt;adjustmoney [force=&quot;B&quot;]
+	[multiply=&quot;F&quot;] [name=&quot;S&quot;]&gt;</B><BR>Adjust the
+	money held by the character or in a cache.</P>
+	<UL>
+		<LI><P STYLE="font-style: normal"><B>force</B> &ndash; Whether this
+		action must be activated; defaults to true.</P>
+		<LI><P STYLE="font-style: normal"><B>multiply</B> &ndash; The
+		amount by which the money should be multiplied, rounding down. This
+		is a floating point number (a positive number, possibly having a
+		decimal point).</P>
+		<LI><P STYLE="font-style: normal"><B>name</B> &ndash; The name of
+		the cache being affected. If absent, affects the character's
+		Shards. The attribute <B>cache</B> can also be used for the same
+		purpose.</P>
+	</UL>
+	<LI><P STYLE="font-style: normal"><B>&lt;market [buy=&quot;B&quot;]
+	[currency=&quot;S&quot;] [sell=&quot;B&quot;]&gt;</B><BR>Group a set
+	of articles that can be bought or sold into a table. <SPAN STYLE="text-decoration: none">Usually
+	articles are grouped under a matching <B>&lt;header&gt;</B> tag.</SPAN></P>
+	<UL>
+		<LI><P STYLE="font-style: normal"><B>buy</B> &ndash; whether any
+		articles can be bought at this market; if so, a 'To buy' column
+		will be included.</P>
+		<LI><P STYLE="font-style: normal"><B>currency</B> &ndash; the
+		currency used at this market, in the singular. Defaults to Shards;
+		this has only been used with a value of 'Mithral', in book 2.</P>
+		<LI><P STYLE="font-style: normal"><B>sell</B> &ndash; whether any
+		articles can be sold at this market; if so, a 'To sell' column will
+		be included.</P>
+	</UL>
+	<LI><P STYLE="font-style: normal"><B>&lt;header [type=&quot;S&quot;]
+	[header1=&quot;S&quot; header2=&quot;S&quot; ...]&gt;</B><BR>Display
+	a row of column headers within a <B>&lt;market&gt;</B> tag. Either
+	the <B>type</B> attribute or a sequence of <B>headerN</B> attributes
+	must be present.</P>
+	<UL>
+		<LI><P STYLE="font-style: normal"><B>type</B> &ndash; One of the
+		predefined header types &ndash; one of &quot;ship&quot;, &quot;cargo&quot;,
+		&quot;armour&quot;, &quot;weapon&quot;, &quot;magic&quot;,
+		&quot;shipsale&quot;, or &quot;other&quot;.</P>
+		<LI><P STYLE="font-style: normal"><B>headerN</B> &ndash; Defines a
+		sequence of headers, starting with <B>header1</B> and increasing
+		the suffix for each subsequent header.</P>
+	</UL>
+	<LI><P STYLE="font-style: normal"><B>&lt;trade [buy=&quot;N&quot;]
+	[cargo=&quot;S&quot;] [sell=&quot;N&quot;] [ship=&quot;S&quot;
+	initialCrew=&quot;S&quot; [name=&quot;S&quot;]]&gt;</B><BR>Buy
+	and/or sell a ship or its cargo. This is used within a <B>&lt;market&gt;</B>
+	tag, and is arranged as a table with aligned columns. Using matching
+	<B>&lt;header&gt;</B> and <B>&lt;trade&gt;</B> tags is the
+	responsibility of the writer.</P>
+	<UL>
+		<LI><P STYLE="font-style: normal"><B>buy</B> &ndash; The money
+		required to buy the article. If missing, the article cannot be
+		bought; if any articles can be bought at this market, it will
+		display a '&ndash;' instead.</P>
+		<LI><P STYLE="font-style: normal"><B>cargo</B> &ndash; The type of
+		cargo unit that can be bought and sold.</P>
+		<LI><P STYLE="font-style: normal"><B>initialCrew</B> &ndash; The
+		crew quality of the ship being bought.</P>
+		<LI><P STYLE="font-style: normal"><B>name</B> &ndash; The name of
+		the ship being bought.</P>
+		<LI><P STYLE="font-style: normal"><B>sell</B> &ndash; The money
+		awarded if the article is sold. If missing, the article cannot be
+		sold; if any article can be sold at this market, it will display a
+		'&ndash;' instead.</P>
+		<LI><P STYLE="font-style: normal"><B>ship</B> &ndash; The type of
+		ship that can be bought and sold.</P>
+	</UL>
+	<LI><P STYLE="font-style: normal"><B>&lt;buy [cargo=&quot;S&quot;]
+	[crew=&quot;S&quot;] [force=&quot;B&quot;] [flag=&quot;S&quot;]
+	[</B><I>item attributes</I><B>] [quantity=&quot;N&quot;]
+	[shards=&quot;N&quot;] [ship=&quot;S&quot; [initialCrew=&quot;S&quot;]
+	[name=&quot;S&quot;]]&gt;</B><BR>Allow the player to buy an item,
+	cargo, crew or ship.</P>
+	<UL>
+		<LI><P STYLE="font-style: normal"><B>cargo</B> &ndash; The type of
+		cargo unit that can be bought.</P>
+		<LI><P STYLE="font-style: normal"><B>crew</B> &ndash; The quality
+		of crew that can be bought. The character must have a ship present
+		with crew of the next lowest quality.</P>
+		<LI><P STYLE="font-style: normal"><B>force</B> &ndash; Whether this
+		action must be executed; the default is false.</P>
+		<LI><P STYLE="font-style: normal"><B>flag</B> &ndash; The flag that
+		must be set before this action will be enabled; when the action is
+		clicked, this flag will be cleared.</P>
+		<LI><P STYLE="font-style: normal"><B>initialCrew</B> &ndash; The
+		crew quality of the ship being bought.</P>
+		<LI><P STYLE="font-weight: medium"><I>item attributes</I> &ndash;
+		The item being bought.</P>
+		<LI><P STYLE="font-style: normal"><B>name</B> &ndash; The name of
+		the ship being bought.</P>
+		<LI><P STYLE="font-style: normal"><B>quantity</B> &ndash; The
+		number of times this action may be used before being permanently
+		disabled.</P>
+		<LI><P STYLE="font-style: normal"><B>shards</B> &ndash; The price
+		to be paid, in Shards.</P>
+		<LI><P STYLE="font-style: normal"><B>ship</B> &ndash; The type of
+		ship that can be bought.</P>
+	</UL>
+	<LI><P STYLE="font-style: normal"><B>&lt;sell [cargo=&quot;S&quot;]
+	[</B><I>item attributes</I><B>] [price=&quot;S&quot;] [quantity=&quot;N&quot;]
+	[shards=&quot;N&quot;] [ship=&quot;S&quot;]&gt;</B><BR>Allow the
+	player to sell an item, cargo unit, or ship.</P>
+	<UL>
+		<LI><P STYLE="font-style: normal"><B>cargo</B> &ndash; The type of
+		cargo unit that can be sold.</P>
+		<LI><P STYLE="font-weight: medium"><I>item attributes</I> &ndash;
+		The item that can be sold; this match may be inexact, so that any
+		matching items can be sold for this price.</P>
+		<LI><P STYLE="font-style: normal"><B>price</B> &ndash; The flag
+		that must be clear for this action to be enabled; when the action
+		is clicked, this flag will be set.</P>
+		<LI><P STYLE="font-style: normal"><B>quantity</B> &ndash; The
+		number of articles that can be sold before the action becomes
+		permanently disabled.</P>
+		<LI><P STYLE="font-style: normal"><B>shards</B> &ndash; The price
+		that will be given, in Shards.</P>
+		<LI><P STYLE="font-style: normal"><B>ship</B> &ndash; The quality
+		of ship to be sold.</P>
+	</UL>
+	<LI><P STYLE="font-style: normal"><B>&lt;fight combat=&quot;N&quot;
+	defence=&quot;N&quot; name=&quot;N&quot; stamina=&quot;N&quot;
+	[abilityDamaged=&rdquo;S&rdquo;] [attackDice=&rdquo;N&rdquo;]
+	[fleeAt=&quot;N&quot;] [group=&quot;S&quot;] [playerDefence=&rdquo;V&rdquo;]
+	[playerFirst=&quot;B&quot;] [preDamage=&rdquo;V&rdquo;]
+	[staminaLost=&rdquo;S&rdquo;] [useCache=&rdquo;S&rdquo;]&gt;</B><BR>Set
+	up a fight for the character. This tag should be contained only by
+	the <B>&lt;section&gt;</B> tag, not a <B>&lt;p&gt;</B> tag. The tags
+	<B>&lt;fightround&gt;</B>, <B>&lt;fightdamage&gt;</B> and <B>&lt;flee&gt;</B>
+	all relate to a <B>&lt;fight&gt;</B> tag in the same section.</P>
+	<UL>
+		<LI><P STYLE="font-style: normal"><B>abilityDamaged</B> &ndash; If
+		present, specifies an ability of the character that will be
+		decreased by damage instead of Stamina.</P>
+		<LI><P STYLE="font-style: normal"><B>attackDice</B><SPAN STYLE="font-weight: medium">
+		&ndash; The number of dice which the player rolls to attack; the
+		defaults is 2, obviously.</SPAN></P>
+		<LI><P STYLE="font-style: normal"><B>combat</B> &ndash; The Combat
+		score of the opponent.</P>
+		<LI><P STYLE="font-style: normal"><B>defence</B> &ndash; The
+		Defence score of the opponent.</P>
+		<LI><P STYLE="font-style: normal"><B>fleeAt</B> &ndash; The Stamina
+		score at which the opponent will end the fight.</P>
+		<LI><P STYLE="font-style: normal"><B>group</B> &ndash; The group to
+		which this fight belongs. All fights in this section with the same
+		group will be simultaneous &ndash; that is, the character attacks
+		once, then defends against each attacker. Probably still buggy when
+		combined with other unusual attributes.</P>
+		<LI><P STYLE="font-style: normal"><B>name</B> &ndash; The name or
+		title of the opponent.</P>
+		<LI><P STYLE="font-style: normal"><B>playerDefence</B> &ndash; If
+		present, replaces the normal Defence value of the character.</P>
+		<LI><P STYLE="font-style: normal"><B>playerFirst</B> &ndash;
+		Whether the player has the first attack; defaults to true.</P>
+		<LI><P STYLE="font-style: normal"><B>preDamage</B> &ndash; An
+		amount of damage that should be immediately inflicted on the
+		opponent (which may kill them before the fight begins).</P>
+		<LI><P STYLE="font-style: normal"><B>stamina</B> &ndash; The
+		Stamina score of the opponent.</P>
+		<LI><P STYLE="font-style: normal"><B>staminaLost</B> &ndash; If
+		present, the total damage done to the opponent will be stored in
+		the given codeword.</P>
+		<LI><P STYLE="font-style: normal"><B>useCache</B><SPAN STYLE="font-weight: medium">
+		&ndash; The name of a cache which the opponent can use against the
+		character; specifcally, any weapons or armour in that cache. This
+		is useful if the opponent has temporarily taken items from the
+		character.</SPAN></P>
+	</UL>
+	<LI><P STYLE="font-style: normal"><B>&lt;fightround
+	[pre=&quot;B&quot;]&gt;</B><BR>Contains actions that will occur
+	between each round of the fight. After each attack and defence, all
+	text and actions contained by this tag will be activated in
+	sequence.</P>
+	<UL>
+		<LI><P STYLE="font-style: normal"><B>pre</B> &ndash; whether this
+		tag should be activated before the first round, or only after;
+		defaults to false.</P>
+	</UL>
+	<LI><P STYLE="font-style: normal"><B>&lt;fightdamage
+	[type=&quot;</B>add|replace&quot;<B>]&gt;</B><BR>Contains actions
+	that will occur whenever the opponent hits the character. Usually
+	this contains some action that will do damage of a different form to
+	the player (poison, ability loss, etc).</P>
+	<UL>
+		<LI><P STYLE="font-style: normal"><B>type</B> &ndash; whether the
+		actions occurring here are in <I>addition</I> to, or <I>replace</I>,
+		the regular damage.</P>
+	</UL>
+	<LI><P STYLE="font-style: normal"><B>&lt;flee&gt;</B><BR>Contains
+	text and actions that can be used in turn if the player chooses to
+	flee an ongoing fight. If one of these tags is present, it will be
+	activated and ready to use when a <B>&lt;fight&gt;</B> commences;
+	after the fight it will be disabled. If there is a <B>&lt;goto&gt;</B>
+	or <B>&lt;choice&gt;</B> tag in the same section with the <B>flee</B>
+	attribute, it will only be activated once all actions within the
+	<B>&lt;flee&gt;</B> tag have been performed.</P>
+	<LI><P STYLE="font-style: normal"><B>&lt;text&gt;<BR>&lt;desc&gt;</B><BR>Used
+	to define a description for an action or effect; between the start
+	and end tags there may be text and style tags. <B>&lt;text&gt;</B>
+	may be used by <B>&lt;group&gt;</B> to describe the whole action in
+	the text. Both tags may be present within an <B>&lt;effect&gt;</B>
+	tag - <B>&lt;text&gt;</B> will define what is shown in the section,
+	and <B>&lt;desc&gt;</B> will define what is shown in the list of the
+	item or curse's effects.</P>
+	<LI><P STYLE="font-style: normal"><B>&lt;resurrection [book=&quot;S&quot;
+	section=&quot;S&quot;] [flag=&quot;S&quot;] [god=&quot;S&quot;]
+	[shards=&quot;V&quot;] [supplemental=&rdquo;B&rdquo;]
+	[text=&quot;S&quot;]&gt;</B><BR>Either allow the character to make
+	or purchase resurrection arrangements, or trigger their existing
+	resurrection. In the former case, both <B>book</B> and <B>section</B>
+	must be present.</P>
+	<UL>
+		<LI><P STYLE="font-style: normal"><B>book</B> &ndash; The book
+		which the character will be sent to when the resurrection is
+		triggered.</P>
+		<LI><P STYLE="font-style: normal"><B>flag</B> &ndash; The flag that
+		must be set before this resurrection can be bought or triggered;
+		when activated, this flag will be cleared.</P>
+		<LI><P STYLE="font-style: normal"><B>god</B> &ndash; The god
+		granting this resurrection. If the character worships this god when
+		the resurrection is bought, the resurrection will only remain while
+		the character still worships the same god.</P>
+		<LI><P STYLE="font-style: normal"><B>section</B> &ndash; The
+		section (in <B>book</B>) which the character will be sent to when
+		the resurrection is triggered.</P>
+		<LI><P STYLE="font-style: normal"><B>shards</B> &ndash; The price
+		to be paid for the resurrection arrangements.</P>
+		<LI><P STYLE="font-style: normal"><B>supplemental</B><SPAN STYLE="font-weight: medium">
+		&ndash; If true, this won't replace any previous arrangement.</SPAN></P>
+		<LI><P STYLE="font-style: normal"><B>text</B> &ndash; A description
+		of the resurrection location; the complete description of the
+		resurrection, shown on the Adventure Sheet, includes this, the book
+		title and section.</P>
+	</UL>
+	<LI><P STYLE="font-style: normal"><B>&lt;curse [cumulative=&quot;B&quot;]
+	[lift=&quot;S&quot;] name=&quot;S&quot;&gt;<BR>&lt;disease
+	...&gt;<BR>&lt;poison ...&gt;</B><BR>A curse, disease or poison
+	inflicted on the character. It usually contains one or more <B>&lt;effect&gt;</B>
+	tags, which will apply while the curse is in place. Curses can be
+	tested for and removed with the <B>curse</B>, <B>disease</B>, or
+	<B>poison</B> attributes, which will define the name of the affected
+	curse (a '?' or '*' matches a single curse or all curses of that
+	type); see <B>&lt;if&gt;</B> and <B>&lt;lose</B>&gt;. A cursed item
+	is done by including a <B>&lt;curse&gt;</B> tag within a <B>&lt;item&gt;</B>
+	tag; the resulting item will remain until the curse is specifically
+	removed.</P>
+	<UL>
+		<LI><P STYLE="font-style: normal"><B>cumulative</B> &ndash; Whether
+		the curse is cumulative. If so, and the curse is added more than
+		once, the ability effect will increase in magnitude. See the
+		<B>&lt;effect&gt;</B> tag.</P>
+		<LI><P STYLE="font-style: normal"><B>lift</B> &ndash; If present,
+		the player can remove this curse by double-clicking the curse and
+		answering this question in the affirmative. Relies on player's
+		honesty. Currently only used in book 5, section 505.</P>
+		<LI><P STYLE="font-style: normal"><B>name</B> &ndash; The name of
+		the curse.</P>
+	</UL>
+	<LI><P STYLE="font-style: normal"><B>&lt;effect [ability=&quot;S&quot;]
+	[bonus=&quot;N&quot;] [divide=&quot;N&quot;] [multiplier=&quot;N&quot;]
+	[target=&quot;N&quot;] [text=&quot;S&quot;]
+	[type=&quot;</B>aura|wielded|use&quot;<B>] [uses=&quot;N&quot;]
+	[verb=&quot;S&quot;]&gt;</B><BR>Define an effect of an item or
+	curse. Effects may modify an ability, apply a temporary boost to an
+	ability, or perform some other action.</P>
+	<UL>
+		<LI><P STYLE="font-style: normal"><B>ability</B> &ndash; The
+		ability which is affected. Usually accompanied by one of <B>bonus</B>,
+		<B>divide</B> or <B>target</B>. Alternatively, if the <B>type</B>
+		is 'use', this may be used as the effect of a 'potion of
+		<I>attribute</I>', which will temporarily raise the ability by one.</P>
+		<LI><P STYLE="font-style: normal"><B>bonus</B> &ndash; The bonus to
+		apply to <B>ability</B>. This may be positive or negative.</P>
+		<LI><P STYLE="font-style: normal"><B>divide</B> &ndash; The amount
+		by which the <B>ability</B> is divided.</P>
+		<LI><P STYLE="font-style: normal"><B>multiplier</B> &ndash;
+		Multiplies the ability <B>bonus</B>. When part of a <B>cumulative</B>
+		curse, the curse may be repeatedly added to the player to increase
+		this value.</P>
+		<LI><P STYLE="font-style: normal"><B>target</B> &ndash; The value
+		to which the <B>ability</B> is set.</P>
+		<LI><P STYLE="font-style: normal"><B>text</B> &ndash; A description
+		of the effect, to be displayed with the item or curse.
+		Alternatively, the tag may contain a <B>&lt;desc&gt;</B> tag.</P>
+		<LI><P STYLE="font-style: normal"><B>type</B> &ndash; Used only on
+		items: the conditions under which the effect occurs. An 'aura' is
+		applied while the item is possessed; if 'wielded', the item must be
+		worn or wielded; otherwise, an item has to be 'used' for its effect
+		to be applied. In this last case the tag should contain one or more
+		actions that will occur.</P>
+		<LI><P STYLE="font-style: normal"><B>uses</B> &ndash; The number of
+		times that an item can be 'used' before it disappears. If absent,
+		there is no limit.</P>
+		<LI><P STYLE="font-style: normal"><B>verb</B> &ndash; The
+		description of the way in which an item will be 'used', displayed
+		in the popup menu eg. the character will 'Read' a book, or 'Drink'
+		a potion.</P>
+	</UL>
+	<LI><P STYLE="font-style: normal"><B>&lt;return [force=&quot;B&quot;]&gt;</B><BR>Return
+	to the last section. This reverses the effect of the last <B>&lt;goto&gt;</B>
+	called, returning to the previous section at the point at which it
+	was left, with all variables intact. Note that the program can't
+	handle two consecutive <B>&lt;return&gt;</B>s.</P>
+	<UL>
+		<LI><P STYLE="font-style: normal"><B>force</B> &ndash; Whether the
+		player must perform this action; defaults to true.</P>
+	</UL>
+	<LI><P STYLE="font-style: normal"><B>&lt;items group=&quot;S&quot;
+	limit=&quot;N&quot;&gt;</B><BR>A hidden tag that limits how many
+	items with a matching <B>group</B> attribute can be taken before
+	their actions are disabled.</P>
+	<UL>
+		<LI><P STYLE="font-style: normal"><B>group</B> &ndash; All items
+		with the same <B>group</B> attribute in this section will be
+		affected by the limit.</P>
+		<LI><P STYLE="font-style: normal"><B>limit</B> &ndash; The number
+		of matching items that can be taken.</P>
+	</UL>
+</UL>
+<P STYLE="margin-top: 0.42cm; page-break-after: avoid"><FONT FACE="Albany, sans-serif"><FONT SIZE=4>Rare
+&amp; Exotic Tags</FONT></FONT></P>
+<UL>
+	<LI><P STYLE="margin-bottom: 0cm; font-style: normal"><B>&lt;field
+	{label=&quot;S&quot;|text=&rdquo;S&rdquo;} name=&quot;S&quot;&gt;</B><BR>Displays
+	the value held in the codeword <B>name</B> (0 if the player doesn't
+	yet have that codeword). This value may be affected elsewhere, in
+	which case the value displayed will change. This is currently used
+	to display the player's status in the Uttaku court, or the current
+	bonus for some Difficulty rolls.</P>
+	<UL>
+		<LI><P STYLE="font-weight: medium"><B>label</B> &ndash; The
+		displayed label for the field. The attribute <B>text</B> is
+		equivalent.</P>
+		<LI><P STYLE="font-weight: medium"><B>name</B> &ndash; The codeword
+		to display.</P>
+	</UL>
+	<LI><P STYLE="margin-bottom: 0cm; font-style: normal"><B>&lt;bought
+	[</B><I>item attributes</I><B>]&gt;<BR>&lt;sold [</B><I>item
+	attributes</I><B>]&gt;</B><BR>These tags are used to perform a
+	hidden action when a matching article is bought or sold. They may be
+	contained within a <B>&lt;market&gt;</B> tag, in which case the <I>item
+	attributes</I> must be present, so that when a match is bought/sold
+	it will be activated. Alternatively, they may be contained within a
+	sub-tag of <B>&lt;market&gt;</B> - either a <B>&lt;trade&gt;</B> tag
+	or one of the <B>&lt;item&gt;</B> tags &ndash; in which case they
+	will be activated when the 'article' to which they are attached is
+	bought/sold. An action should be contained within this one; it will
+	be performed when this tag is activated.<BR>This functionality is
+	used to mark a codeword when a 'free' item is sold at a market in
+	book 3, or when a particular item is sold at the market in Smogmaw.</P>
+	<UL>
+		<LI><P STYLE="font-weight: medium"><I>item attributes</I> &ndash;
+		When an item is bought/sold matching these attributes, this tag
+		will be activated.</P>
+	</UL>
+	<LI><P STYLE="font-style: normal"><B>&lt;extrachoice [atbook=&quot;S&quot;]
+	[atsection=&quot;S&quot;] [book=&quot;S&quot;] [key=&quot;S&quot;]
+	[remove=&quot;S&quot;] [section=&quot;S&quot;] [tag=&quot;S&quot;]
+	[text=&rdquo;S&rdquo;]&gt;</B><BR>Set up (or remove) an extra choice
+	for the player. Extra choices will appear under the 'Extra Choices'
+	menu when at the appropriate section, and when activated will move
+	the character to a new section (as if it were a <B>&lt;goto&gt;</B>).</P>
+	<UL>
+		<LI><P STYLE="font-style: normal"><B>atbook</B> &ndash; The book
+		which the character must be in for this choice to be activated.
+		Used with <B>atsection</B>.</P>
+		<LI><P STYLE="font-style: normal"><B>atsection</B> &ndash; The
+		section (in <B>atbook</B>) which the character must be in for this
+		choice to be activated.</P>
+		<LI><P STYLE="font-style: normal"><B>book</B> &ndash; The book that
+		this choice will jump to. Used with <B>section</B>.</P>
+		<LI><P STYLE="font-style: normal"><B>key</B> &ndash; The key of
+		this extra choice. Use of a key allows for another choice with the
+		same key to replace it; the extra choice can also be removed with
+		this key.</P>
+		<LI><P STYLE="font-style: normal"><B>remove</B> &ndash; Remove an
+		existing extra choice. An extra choice with a <B>key</B> that
+		matches this value will be removed.</P>
+		<LI><P STYLE="font-style: normal"><B>section</B> &ndash; The
+		section (in <B>book</B>) that this choice will jump to.</P>
+		<LI><P STYLE="font-style: normal"><B>tag</B> &ndash; The section
+		tag that will activate this extra choice. When the character enters
+		a section that has this tag, the extra choice will be activated.</P>
+		<LI><P STYLE="font-style: normal"><B>text</B><SPAN STYLE="font-weight: medium">
+		&ndash; Used to define the text shown in the menu item.</SPAN></P>
+	</UL>
+	<LI><P STYLE="font-style: normal; font-weight: medium"><B>&lt;h1&gt;,
+	&lt;h2&gt;, &lt;h3&gt;, &lt;h4&gt;</B><BR>A heading within the text.
+	<B>&lt;h1&gt;</B> is the largest heading, <B>&lt;h4&gt;</B> the
+	smallest. Only used within the rule files (QuickRules.xml and
+	Rules.xml), though it could (theoretically) be used within a
+	section.</P>
+	<LI><P STYLE="font-style: normal"><B>&lt;image file=&quot;S&quot;
+	[book=&quot;S&quot;] [title=&quot;S&quot;]&gt;</B><BR>An action that
+	will display an image related to the current section. This is
+	usually a found map or diagram.</P>
+	<UL>
+		<LI><P STYLE="font-style: normal"><B>book</B> &ndash; The book in
+		which the image file is located.</P>
+		<LI><P STYLE="font-style: normal"><B>file</B> &ndash; The filename
+		of the image file, located within the directory of the current book
+		(or of the given <B>book</B>).</P>
+		<LI><P STYLE="font-style: normal; font-weight: medium"><B>title</B>
+		&ndash; The title of the popup window showing the image.</P>
+	</UL>
+	<LI><P STYLE="font-style: normal"><B>&lt;include </B><I>item
+	attributes</I><B>&gt;<BR>&lt;exclude </B><I>item attributes</I>
+	<B>[reason=&quot;S&quot;]&gt;</B><BR>Limit an item cache to allow
+	only certain item types. One or more of these tags can be used
+	within an <B>&lt;itemcache&gt;</B> tag. If no <B>&lt;include&gt;</B>
+	tag is present, it will allow all items not specifically excluded;
+	otherwise an item must match an <B>&lt;include&gt;</B> tag and not
+	match an <B>&lt;exclude&gt;</B> tag.</P>
+	<UL>
+		<LI><P STYLE="font-weight: medium"><I>item attributes</I> &ndash;
+		The type of item that can/cannot be left in this cache.</P>
+		<LI><P STYLE="font-style: normal; font-weight: medium"><B>reason</B>
+		&ndash; The reason that an item can't be left at this cache; this
+		will be displayed if the player attempts to move a matching
+		excluded item into the cache.</P>
+	</UL>
+	<LI><P STYLE="font-style: normal; font-weight: medium"><B>&lt;reroll&gt;</B><BR>Undo
+	the last dice roll that occurred. Equivalent to using a Luck
+	blessing; it must be the very next action that occurs after the dice
+	roll.</P>
+	<LI><P STYLE="font-style: normal"><B>&lt;sectionview title=&quot;S&quot;
+	random=&quot;B&quot;&gt;</B><BR>Show a window which will display a
+	random series of sections.</P>
+	<UL>
+		<LI><P STYLE="font-style: normal"><B>random</B> &ndash; The number
+		of random sections that will be shown.</P>
+		<LI><P STYLE="font-style: normal"><B>title</B> &ndash; The title of
+		the popup window.</P>
+	</UL>
+	<LI><P STYLE="font-style: normal"><B>&lt;while var=&quot;S&quot;&gt;</B><BR>Repeatedly
+	activate a block of text and actions, until a variable has been
+	assigned a value. Currently only used in two sections, so it's
+	somewhat under-tested.</P>
+	<UL>
+		<LI><P STYLE="font-style: normal"><B>var</B> &ndash; A variable
+		name. While no value has been assigned to this variable, the block
+		will keep looping.</P>
+	</UL>
+</UL>
+<P ALIGN=CENTER><A HREF="index.htm">Home Page</A> | <A HREF="howto.html">XML
+Format - Introduction</A> | XML Format - List</P>
+</BODY>
+</HTML>
