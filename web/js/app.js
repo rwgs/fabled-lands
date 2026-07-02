@@ -350,7 +350,7 @@ function buildGameScreen() {
   actions.appendChild(iconBtn('↩️', 'Undo last move', () => undo()));
   actions.appendChild(iconBtn('📖', 'Rules', () => showRules(true)));
   actions.appendChild(iconBtn('🗺', 'Maps', () => showMaps(state.data.book)));
-  // [TTS] narration play/stop button
+  // [TTS] narration controls: play/stop, auto-narrate toggle, and speed.
   if (narrator.supported) {
     narrateBtn = iconBtn('🔊', 'Read aloud', () => narrator.toggle(currentFlow()));
     narrator.onState = (playing) => {
@@ -359,6 +359,41 @@ function buildGameScreen() {
       narrateBtn.title = playing ? 'Stop reading' : 'Read aloud';
     };
     actions.appendChild(narrateBtn);
+
+    // Auto-narrate on/off — reads each new section automatically as you arrive.
+    const autoBtn = iconBtn('🔁', '', () => {
+      narrator.settings.autoplay = !narrator.settings.autoplay;
+      narrator.saveSettings();
+      syncAutoBtn();
+      if (narrator.settings.autoplay) { toast('Auto-narrate on'); narrator.play(currentFlow()); }
+      else { toast('Auto-narrate off'); narrator.stop(); }
+    });
+    const syncAutoBtn = () => {
+      autoBtn.classList.toggle('active', narrator.settings.autoplay);
+      autoBtn.title = narrator.settings.autoplay ? 'Auto-narrate: on' : 'Auto-narrate: off';
+      autoBtn.setAttribute('aria-label', autoBtn.title);
+    };
+    syncAutoBtn();
+    actions.appendChild(autoBtn);
+
+    // Narration speed — click to cycle through presets.
+    const RATES = [0.8, 1.0, 1.2, 1.5];
+    const fmtRate = (r) => `${+Number(r).toFixed(2)}×`;
+    const speedBtn = iconBtn('', 'Narration speed', () => {
+      const cur = narrator.settings.rate;
+      narrator.settings.rate = RATES.find((r) => r > cur + 0.001) ?? RATES[0];
+      narrator.saveSettings();
+      syncSpeedBtn();
+      toast(`Narration speed ${fmtRate(narrator.settings.rate)}`);
+    });
+    speedBtn.classList.add('speed-btn');
+    const syncSpeedBtn = () => {
+      speedBtn.textContent = fmtRate(narrator.settings.rate);
+      speedBtn.title = `Narration speed (${fmtRate(narrator.settings.rate)})`;
+      speedBtn.setAttribute('aria-label', speedBtn.title);
+    };
+    syncSpeedBtn();
+    actions.appendChild(speedBtn);
   }
   actions.appendChild(iconBtn('💾', 'Save & quit to title', () => { state.save(); showTitle(); }));
   actions.appendChild(sheetBtn); // sheet drawer toggle (mobile only)

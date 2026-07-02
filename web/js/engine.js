@@ -335,6 +335,16 @@ export function evalExpression(expr, state) {
   return acc;
 }
 
+// ---- rest ------------------------------------------------------------------
+/** Rest action: pay an optional shard cost, then heal `perUse` Stamina (a plain
+ *  number or a dice expression like "1d6"). Returns the amount healed. */
+export function applyRest(state, perUse, cost) {
+  if (cost) state.adjustMoney(-cost);
+  const amt = resolveValue(state, String(perUse));
+  state.healStamina(amt);
+  return amt;
+}
+
 // ---- roll resolution helpers ----------------------------------------------
 /** Total adjustment from <adjust> children of a roll node. */
 export function childAdjustment(el, state) {

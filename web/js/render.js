@@ -8,9 +8,11 @@
 
 import {
   evaluateCondition, applyEffect, boolAttr, resolveValue,
-  rollDifficulty, rollDice, matchRange, childAdjustment,
+  rollDifficulty, rollDice, matchRange, childAdjustment, applyRest,
 } from './engine.js';
-import { makeItem, normalize } from './state.js';
+import { makeFight, fightRound } from './combat.js';
+import { shopKind, goodsFrom, buyTrade, sellTrade, applyInlineBuy } from './market.js';
+import { normalize } from './state.js';
 import { bookTitle, availableBooks } from './data.js';
 import { animateDice } from './ui.js';
 
@@ -657,17 +659,7 @@ export class Story {
     const key = 'fight@' + path;
     let fight = this.ctx.fights.get(key);
     if (!fight) {
-      fight = {
-        name: node.getAttribute('name') || 'Enemy',
-        combat: parseInt(node.getAttribute('combat') || '0', 10),
-        defence: parseInt(node.getAttribute('defence') || '0', 10),
-        stamina: parseInt(node.getAttribute('stamina') || '1', 10),
-        maxStamina: parseInt(node.getAttribute('stamina') || '1', 10),
-        playerFirst: !(node.getAttribute('playerFirst') != null && !boolAttr(node.getAttribute('playerFirst'), true)),
-        fleeTo: null,
-        outcome: null, // 'win' | 'fled'
-        log: [],
-      };
+      fight = makeFight(node);
       this.ctx.fights.set(key, fight);
     }
     const dmgNode = this.findSibling(node, 'fightdamage');
@@ -727,7 +719,7 @@ export class Story {
     attack.addEventListener('click', async () => {
       controls.querySelectorAll('button').forEach((b) => (b.disabled = true));
       await animateDice(box, true);
-      this.fightRound(fight, node, dmgNode);
+      fightRound(this.state, fight, dmgNode);
       if (this.state.isDead()) { this.rerender(); return; }
       this.drawFight(box, fight, node, dmgNode, fleeNode, key);
     });
@@ -747,30 +739,6 @@ export class Story {
       controls.appendChild(flee);
     }
     box.appendChild(controls);
-  }
-
-  fightRound(fight, node, dmgNode) {
-    const order = fight.playerFirst ? ['player', 'enemy'] : ['enemy', 'player'];
-    for (const who of order) {
-      if (fight.outcome) break;
-      if (who === 'player') {
-        const r = rollDice(2);
-        const total = r.total + this.state.ability('combat');
-        const dmg = Math.max(0, total - fight.defence);
-        fight.stamina = Math.max(0, fight.stamina - dmg);
-        fight.log.push(`You roll ${r.total}+${this.state.ability('combat')}=${total} vs Def ${fight.defence} → ${dmg ? '−' + dmg + ' enemy Stamina' : 'miss'}`);
-        if (fight.stamina <= 0) { fight.outcome = 'win'; break; }
-      } else {
-        const r = rollDice(2);
-        const total = r.total + fight.combat;
-        const def = this.state.defence();
-        const dmg = Math.max(0, total - def);
-        this.state.damageStamina(dmg);
-        fight.log.push(`${fight.name} rolls ${r.total}+${fight.combat}=${total} vs your Def ${def} → ${dmg ? '−' + dmg + ' your Stamina' : 'miss'}`);
-        if (dmg > 0 && dmgNode) applyEffect(dmgNode.firstElementChild || dmgNode, this.state, {});
-        if (this.state.isDead()) break;
-      }
-    }
   }
 
   // ---- market --------------------------------------------------------------
@@ -804,25 +772,15 @@ export class Story {
     return box;
   }
 
-  shopKind(node) {
-    const tag = node.tagName.toLowerCase();
-    if (tag !== 'trade') return tag; // armour | weapon | tool | item | cargo
-    if (node.hasAttribute('ship')) return 'ship';
-    if (node.hasAttribute('cargo')) return 'cargo';
-    if (node.hasAttribute('weapon')) return 'weapon';
-    if (node.hasAttribute('armour')) return 'armour';
-    if (node.hasAttribute('tool')) return 'tool';
-    return 'item';
-  }
-
   renderShopRow(node, path) {
-    const kind = this.shopKind(node);
+    const kind = shopKind(node);
     const name = node.getAttribute('name') || node.getAttribute(kind) || node.getAttribute('item') || (kind === 'weapon' ? 'weapon' : kind);
     const bonus = node.getAttribute('bonus') ? parseInt(node.getAttribute('bonus'), 10) : 0;
     const ability = node.getAttribute('ability');
     const buy = node.getAttribute('buy');
     const sell = node.getAttribute('sell');
     const carryable = kind === 'weapon' || kind === 'armour' || kind === 'tool' || kind === 'item';
+    const goods = goodsFrom(node, kind, name, bonus);
 
     const row = document.createElement('div');
     row.className = 'trade';
@@ -846,20 +804,24 @@ export class Story {
       const noSlot = carryable && this.state.freeSlots() <= 0;
       b.disabled = this.state.data.shards < price || noSlot;
       b.title = this.state.data.shards < price ? 'Not enough Shards' : (noSlot ? 'No room (12-item limit)' : '');
-      b.addEventListener('click', () => this.buyTrade(kind, name, price, bonus, node));
+      b.addEventListener('click', () => {
+        const res = buyTrade(this.state, goods, price);
+        if (!res.ok) { if (res.note) this.notify(res.note, 'warn'); return; }
+        this.rerender();
+      });
       actions.appendChild(b);
     }
     if (sell != null) {
       const price = resolveValue(this.state, sell);
-      const owned = kind === 'ship' ? this.state.ships.some((sh) => sh.type === node.getAttribute('ship'))
-        : kind === 'cargo' ? this.state.ships.some((sh) => (sh.cargo || []).includes(node.getAttribute('cargo') || name))
+      const owned = kind === 'ship' ? this.state.ships.some((sh) => sh.type === goods.shipType)
+        : kind === 'cargo' ? this.state.ships.some((sh) => (sh.cargo || []).includes(goods.cargoName || name))
           : this.state.hasItem(name);
       const s = document.createElement('button');
       s.className = 'btn-mini';
       s.textContent = `Sell ${price}`;
       s.disabled = !owned;
       s.title = owned ? '' : 'You have none to sell';
-      s.addEventListener('click', () => this.sellTrade(kind, name, price, node));
+      s.addEventListener('click', () => { if (sellTrade(this.state, goods, price).ok) this.rerender(); });
       actions.appendChild(s);
     }
     if (buy == null && sell == null) {
@@ -870,46 +832,6 @@ export class Story {
     }
     row.appendChild(actions);
     return row;
-  }
-
-  buyTrade(kind, name, price, bonus, node) {
-    if (this.state.data.shards < price) return;
-    if (kind === 'ship') {
-      const type = node.getAttribute('ship');
-      this.state.adjustMoney(-price);
-      this.state.addShip({ type, name: 'Ship', crew: node.getAttribute('initialCrew') || 'average', cargo: [], docked: null });
-    } else if (kind === 'cargo') {
-      const ship = this.state.ships.find((s) => (s.cargo || []).length < (SHIP_CAP[s.type] || 1));
-      if (!ship) { this.notify('No cargo space.', 'warn'); return; }
-      this.state.adjustMoney(-price);
-      (ship.cargo ||= []).push(node.getAttribute('cargo'));
-      this.state.changed();
-    } else {
-      if (this.state.freeSlots() <= 0) { this.notify('You can carry only 12 items.', 'warn'); return; }
-      this.state.adjustMoney(-price);
-      const ability = node.getAttribute('ability');
-      this.state.addItem(makeItem(kind, name, bonus, ability));
-    }
-    this.rerender();
-  }
-
-  sellTrade(kind, name, price, node) {
-    if (kind === 'ship') {
-      const type = node.getAttribute('ship');
-      const i = this.state.ships.findIndex((s) => s.type === type);
-      if (i < 0) return;
-      this.state.ships.splice(i, 1); this.state.adjustMoney(price); this.state.changed();
-    } else if (kind === 'cargo') {
-      const c = node.getAttribute('cargo');
-      const ship = this.state.ships.find((s) => (s.cargo || []).includes(c));
-      if (!ship) return;
-      ship.cargo.splice(ship.cargo.indexOf(c), 1); this.state.adjustMoney(price); this.state.changed();
-    } else {
-      const it = this.state.findItems(name)[0];
-      if (!it) return;
-      this.state.removeItemById(it.id); this.state.adjustMoney(price);
-    }
-    this.rerender();
   }
 
   // Inline <buy> in prose (e.g. crew upgrades: "…it costs <buy crew=… shards=…/>…").
@@ -930,10 +852,11 @@ export class Story {
     if (crew) usable = !!ship && crewRank(ship.crew) < crewRank(crew);
     btn.disabled = (price > 0 && this.state.data.shards < price) || !usable;
     btn.addEventListener('click', () => {
-      if (price) this.state.adjustMoney(-price);
-      if (crew && ship) ship.crew = crew;
-      else if (item) this.state.addItem(makeItem('item', item, node.getAttribute('bonus') ? parseInt(node.getAttribute('bonus'), 10) : 0, node.getAttribute('ability')));
-      this.state.changed();
+      applyInlineBuy(this.state, {
+        price, crew, item,
+        bonus: node.getAttribute('bonus') ? parseInt(node.getAttribute('bonus'), 10) : 0,
+        ability: node.getAttribute('ability'),
+      });
       this.rerender();
     });
     container.appendChild(btn);
@@ -953,9 +876,7 @@ export class Story {
     btn.disabled = full || (cost > 0 && this.state.data.shards < cost);
     if (full) btn.title = 'Already at full Stamina';
     btn.addEventListener('click', () => {
-      if (cost) this.state.adjustMoney(-cost);
-      const amt = resolveValue(this.state, String(perUse));
-      this.state.healStamina(amt);
+      applyRest(this.state, perUse, cost);
       this.rerender();
     });
     box.appendChild(btn);
@@ -1021,6 +942,4 @@ const MARKET_TITLES = {
   ship: 'Ships for sale', shipsale: 'Sell a ship', cargo: 'Cargo', armour: 'Armour',
   weapon: 'Weapons', magic: 'Magical equipment', other: 'Goods for sale',
 };
-const SHIP_CAP = { barque: 1, brigantine: 2, galleon: 3 };
-
 function titleCase(s) { return (s || '').replace(/\b\w/g, (c) => c.toUpperCase()); }
