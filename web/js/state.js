@@ -362,6 +362,23 @@ export function deleteSlot(slot) {
   localStorage.setItem(META_KEY, JSON.stringify(meta));
 }
 
+/** Raw saved data for a slot (for export). */
+export function readSlotData(slot) {
+  const raw = localStorage.getItem(SAVE_PREFIX + slot);
+  return raw ? JSON.parse(raw) : null;
+}
+
+/** Import a save-data object into a new free slot. Returns {slot, meta}. Throws if invalid. */
+export function importSave(data) {
+  if (!data || typeof data !== 'object' || !data.abilities || data.stamina == null) {
+    throw new Error('That file is not a valid Fabled Lands save.');
+  }
+  const slot = nextFreeSlot();
+  const gs = new GameState(migrate(data), slot);
+  gs.save();
+  return { slot, meta: loadSlotMeta()[slot] };
+}
+
 export function nextFreeSlot() {
   const meta = loadSlotMeta();
   for (let i = 0; i < 20; i++) if (!meta[i]) return i;

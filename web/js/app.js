@@ -1,7 +1,7 @@
 // app.js — bootstrap, screens, routing, character creation, death handling.
 
 import * as data from './data.js';
-import { GameState, loadSlotMeta, deleteSlot, nextFreeSlot } from './state.js';
+import { GameState, loadSlotMeta, deleteSlot, nextFreeSlot, readSlotData, importSave } from './state.js';
 import { ABILITIES, ABILITY_LABEL, ABILITY_BLURB, PROFESSIONS, rankTitle, ordinal } from './rules.js';
 import { Story } from './render.js';
 import { renderSheet, modal, toast, escapeHtml } from './ui.js';
@@ -77,12 +77,16 @@ function showTitle() {
     menu.appendChild(bCont);
   }
 
+  const bImport = el('button', 'btn btn-lg', 'Import save…');
+  bImport.addEventListener('click', () => importSaveFile(() => showSaves()));
+  menu.appendChild(bImport);
+
   const bRules = el('button', 'btn btn-lg', 'Rules');
   bRules.addEventListener('click', showRules);
   menu.appendChild(bRules);
 
-  const bMap = el('button', 'btn btn-lg', 'World Map');
-  bMap.addEventListener('click', showMap);
+  const bMap = el('button', 'btn btn-lg', 'Maps');
+  bMap.addEventListener('click', () => showMaps(null));
   menu.appendChild(bMap);
 
   app.appendChild(menu);
@@ -181,6 +185,49 @@ function pickPregenName(adv, profession) {
   return p ? p.name : null;
 }
 
+// ---- Save import / export --------------------------------------------------
+function sanitizeFilename(s) { return (s || 'adventurer').replace(/[^\w -]+/g, '').trim().replace(/\s+/g, '-').slice(0, 40) || 'adventurer'; }
+
+function downloadJson(filename, obj) {
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+function exportSave(slot, meta) {
+  const dataObj = slot != null ? readSlotData(slot) : (state && state.data);
+  if (!dataObj) { toast('Nothing to export.', 'warn'); return; }
+  const name = sanitizeFilename((meta && meta.name) || dataObj.name);
+  const d = new Date(dataObj.updated || Date.now());
+  const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+  downloadJson(`fabled-lands-${name}-${stamp}.json`, dataObj);
+}
+
+function importSaveFile(after) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json,application/json';
+  input.addEventListener('change', () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const { meta } = importSave(JSON.parse(String(reader.result)));
+        toast(`Imported “${meta.name}”.`);
+        after && after();
+      } catch (e) {
+        modal({ title: 'Import failed', body: escapeHtml(e && e.message ? e.message : String(e)), buttons: [{ label: 'OK', value: null, primary: true }] });
+      }
+    };
+    reader.readAsText(file);
+  });
+  input.click();
+}
+
 // ---- Saves screen ----------------------------------------------------------
 function showSaves() {
   const app = $('#app');
@@ -202,18 +249,24 @@ function showSaves() {
     const btns = el('div', 'save-btns');
     const play = el('button', 'btn btn-primary', 'Play');
     play.addEventListener('click', () => { state = GameState.load(slot); if (state) { loadCurrent(); } });
+    const exp = el('button', 'btn', 'Export');
+    exp.title = 'Download this save as a file';
+    exp.addEventListener('click', () => exportSave(slot, m));
     const del = el('button', 'btn btn-danger', 'Delete');
     del.addEventListener('click', async () => {
       const ok = await modal({ title: 'Delete save?', body: `Delete <b>${escapeHtml(m.name)}</b>? This cannot be undone.`, buttons: [{ label: 'Cancel', value: false }, { label: 'Delete', value: true, primary: true }] });
       if (ok) { deleteSlot(slot); showSaves(); }
     });
-    btns.appendChild(play); btns.appendChild(del);
+    btns.appendChild(play); btns.appendChild(exp); btns.appendChild(del);
     card.appendChild(btns);
     list.appendChild(card);
   });
   wrap.appendChild(list);
+  const actions = el('div', 'create-actions');
   const back = el('button', 'btn', 'Back'); back.addEventListener('click', showTitle);
-  wrap.appendChild(back);
+  const imp = el('button', 'btn btn-primary', 'Import save…'); imp.addEventListener('click', () => importSaveFile(showSaves));
+  actions.appendChild(back); actions.appendChild(imp);
+  wrap.appendChild(actions);
   app.appendChild(wrap);
 }
 
@@ -361,8 +414,9 @@ async function showGameMenu() {
   add('Continue playing', () => {});
   add('Undo last move', () => undo());
   add('Rules', () => showRules(true));
-  add('World Map', () => showMap(true));
+  add('Maps', () => showMaps(state.data.book));
   if (narrator.supported) add('Narration…', () => showNarrationSettings()); // [TTS]
+  add('Export save…', () => exportSave(null, null));
   add('Save & quit to title', () => { state.save(); showTitle(); });
   const ver = el('div', 'menu-version', 'Version ' + VERSION);
   body.appendChild(ver);
@@ -393,7 +447,7 @@ function showNarrationSettings() {
 
   const rrow = el('div', 'tts-row');
   rrow.appendChild(el('label', null, 'Speed'));
-  const rng = document.createElement('input'); rng.type = 'range'; rng.min = '0.6'; rng.max = '1.4'; rng.step = '0.05'; rng.value = String(narrator.settings.rate);
+  const rng = document.createElement('input'); rng.type = 'range'; rng.min = '0.6'; rng.max = '1.5'; rng.step = '0.05'; rng.value = String(narrator.settings.rate);
   const rval = el('span', 'tts-rate', Number(narrator.settings.rate).toFixed(2) + '×');
   rng.addEventListener('input', () => { narrator.settings.rate = parseFloat(rng.value); rval.textContent = narrator.settings.rate.toFixed(2) + '×'; narrator.saveSettings(); });
   rrow.appendChild(rng); rrow.appendChild(rval); body.appendChild(rrow);
@@ -421,14 +475,47 @@ function showRules(fromGame) {
   modal({ title: 'Rules of the Fabled Lands', body, buttons: [{ label: 'Close', value: null }] });
 }
 
-function showMap(fromGame) {
-  const body = el('div', 'map-box');
-  const img = el('img', 'world-map');
-  img.src = 'assets/world-map.jpg';
-  img.alt = 'World map of the Fabled Lands';
-  img.onerror = () => { body.innerHTML = '<p>Map image not available.</p>'; };
-  body.appendChild(img);
-  modal({ title: 'The Fabled Lands', body, buttons: [{ label: 'Close', value: null }] });
+// Maps viewer: the world map plus each book's regional map. Regional maps are
+// optional drop-in files at web/assets/maps/book<N>.jpg — shown automatically if
+// present, with a friendly note where they are missing.
+function showMaps(activeBook) {
+  const body = el('div', 'maps-box');
+  const tabsEl = el('div', 'map-tabs');
+  const view = el('div', 'map-view');
+  const img = el('img', 'map-img');
+  const note = el('div', 'map-note');
+  view.appendChild(img); view.appendChild(note);
+
+  const targets = [{ key: 'world', label: 'World', src: 'assets/world-map.jpg', title: 'The Fabled Lands', missing: 'World map not available.' }];
+  data.availableBooks().forEach((n) => {
+    targets.push({ key: 'b' + n, label: 'Book ' + n, src: `assets/maps/book${n}.jpg`, title: data.bookTitle(n), missing: `Regional map for Book ${n} not installed.\nAdd it as web/assets/maps/book${n}.jpg` });
+  });
+
+  let current = null;
+  function select(t, btn) {
+    current = t;
+    tabsEl.querySelectorAll('.map-tab').forEach((b) => b.classList.toggle('active', b === btn));
+    note.textContent = t.title;
+    note.classList.remove('missing');
+    img.style.display = '';
+    img.alt = t.title;
+    img.onload = () => { note.textContent = t.title; note.classList.remove('missing'); };
+    img.onerror = () => { img.style.display = 'none'; note.textContent = t.missing; note.classList.add('missing'); };
+    img.src = t.src;
+  }
+
+  targets.forEach((t) => {
+    const btn = el('button', 'map-tab', t.label);
+    btn.addEventListener('click', () => select(t, btn));
+    tabsEl.appendChild(btn);
+    t._btn = btn;
+  });
+
+  body.appendChild(tabsEl); body.appendChild(view);
+  // default: the active book's region if given, else the world
+  const initial = (activeBook != null && targets.find((t) => t.key === 'b' + activeBook)) || targets[0];
+  select(initial, initial._btn);
+  modal({ title: 'Maps of Harkuna', body, buttons: [{ label: 'Close', value: null }] });
 }
 
 // Minimal read-only renderer for the rules section XML.

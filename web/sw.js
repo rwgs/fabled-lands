@@ -3,7 +3,7 @@
 // once loaded/installed. Progress lives in localStorage (per-origin), so it
 // survives offline and reloads.
 
-const VERSION = 'fl-v7';
+const VERSION = 'fl-v8';
 const SHELL = [
   './',
   './index.html',
@@ -21,6 +21,12 @@ const SHELL = [
   './assets/icon.svg',
   './assets/icon-maskable.svg',
   './assets/world-map.jpg',
+  './assets/maps/book1.jpg',
+  './assets/maps/book2.jpg',
+  './assets/maps/book3.jpg',
+  './assets/maps/book4.jpg',
+  './assets/maps/book5.jpg',
+  './assets/maps/book6.jpg',
   './data/meta.json',
   './data/book1.json',
   './data/book2.json',

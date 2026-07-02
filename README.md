@@ -27,7 +27,8 @@ the browser, on any device, with progress saved locally.
 - **Mobile, tablet & desktop** — responsive; the sheet becomes a slide-in drawer on phones.
 - **Installable PWA** — works fully **offline** after first load; add it to your home screen.
 - **Read-aloud narration** — optional text-to-speech of the story prose (see below).
-- **Saved in your browser** — multiple save slots via `localStorage`; autosaves as you go.
+- **Saved in your browser** — multiple save slots via `localStorage`; autosaves as you go, with **import/export** of individual saves as files (back up or move a character between devices).
+- **Maps** — the world map plus each book's regional map, in an in-game viewer.
 - **No backend, no build toolchain, no dependencies** — plain HTML/CSS/ES modules.
 
 ---
@@ -184,9 +185,12 @@ rolls are memoised per-visit by a stable node path, which guarantees that:
 - **Books 1–6** are fully playable. Links to **Books 7–12** (never digitised here) are
   detected and shown as a friendly “not included in this edition” message rather than a
   dead end.
-- **Illustrations** are not part of this repository, so section art is skipped gracefully.
-  If you obtain the illustration files, drop them in `web/assets/illus/` named as the XML
-  references them (e.g. `142.jpg`) and they will appear automatically.
+- **Regional maps** for all six books are included (each book folder's `<Region>-Map.jpg`,
+  copied to `web/assets/maps/book<N>.jpg` by the build) and shown in the in-game **Maps**
+  viewer alongside the world map.
+- **Section illustrations** are not part of this repository, so inline art is skipped
+  gracefully. If you obtain the illustration files, drop them in `web/assets/illus/` named as
+  the XML references them (e.g. `142.jpg`) and they will appear automatically.
 - The engine covers the full common rule set. A handful of very rare, bespoke section
   mechanics degrade gracefully (text still shows; unknown tags render their prose).
 - New games begin at **Book 1, §1** with that book's starting profile (1st Rank, 9 Stamina,

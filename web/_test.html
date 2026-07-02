@@ -2,7 +2,7 @@
 <body><pre id="results">running…</pre>
 <script type="module">
 import * as data from './js/data.js';
-import { GameState } from './js/state.js';
+import { GameState, readSlotData, importSave, loadSlotMeta, deleteSlot } from './js/state.js';
 import * as eng from './js/engine.js';
 import { Story } from './js/render.js';
 import { Narrator } from './js/tts.js';
@@ -211,6 +211,20 @@ async function run() {
     const joined = narrator.chunks.map(c => c.text).join(' ');
     ok('narration excludes control labels', !/\b20\b/.test(joined));
     ok('narration includes prose', /dawn|sea|boat|Spider/i.test(joined));
+
+    // --- save import/export round-trip ---
+    const ge = GameState.create({ name:'Exportia', gender:'f', profession:'Mage', book:1, adv });
+    ge.slot = 15; ge.data.shards = 777; ge.addCodeword('Exported'); ge.save();
+    const exported = readSlotData(15);
+    ok('export reads saved data', exported && exported.shards === 777 && exported.name === 'Exportia');
+    const serialized = JSON.stringify(exported);            // what a downloaded file contains
+    const { slot: impSlot, meta: impMeta } = importSave(JSON.parse(serialized));
+    ok('import lands in a new slot', impSlot !== 15);
+    ok('import preserves data', readSlotData(impSlot).shards === 777 && readSlotData(impSlot).codewords.Exported === true);
+    ok('import meta name', impMeta.name === 'Exportia');
+    let threw = false; try { importSave({ foo: 1 }); } catch { threw = true; }
+    ok('import rejects invalid file', threw === true);
+    deleteSlot(15); deleteSlot(impSlot); // cleanup
 
   } catch (e) {
     out.push('FATAL ' + (e.stack || e.message));
