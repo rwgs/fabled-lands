@@ -1,26 +1,24 @@
 <#
   build-data.ps1
   ---------------
-  Bundles the Fabled Lands source data (the book section XML files, the
-  per-book starting-character definitions, and the rules) into a small set of
-  JSON files that the web app loads at runtime.
+  Bundles the Fabled Lands source data (book section XML, per-book starting
+  characters, and the rules) into the JSON files the web app loads at runtime,
+  copies the world + regional maps, and refreshes the build stamp.
 
   Source of truth is left untouched:
-    books/book1..book6/<n>.xml   -> web/data/book<n>.json   ( { "<section>": "<xml>" } )
+    books/book1..book6/<n>.xml    -> web/data/book<n>.json  ( { "<section>": "<xml>" } )
     books/book<n>/Adventurers.xml -> folded into web/data/meta.json
     rules/*.xml                   -> folded into web/data/meta.json
     books/books.ini               -> book titles in meta.json
     images/world-map.jpg          -> web/assets/world-map.jpg
-
-  Non-numeric section files (*temp.xml, *old.xml, pregen character files, etc.)
-  are intentionally skipped -- they are editing leftovers / not real sections.
+    books/book<n>/<Region>-Map.*  -> web/assets/maps/book<n>.jpg
 
   Run from the repository root:
-      powershell -ExecutionPolicy Bypass -File tools/build-data.ps1
+      powershell -ExecutionPolicy Bypass -File build/build-data.ps1
 #>
 
 $ErrorActionPreference = 'Stop'
-$root   = Split-Path -Parent $PSScriptRoot   # repo root (parent of tools/)
+$root   = Split-Path -Parent $PSScriptRoot   # repo root (parent of build/)
 $books  = Join-Path $root 'books'
 $rules  = Join-Path $root 'rules'
 $images = Join-Path $root 'images'
@@ -31,8 +29,6 @@ New-Item -ItemType Directory -Force -Path $out    | Out-Null
 New-Item -ItemType Directory -Force -Path $assets | Out-Null
 
 function Read-Xml([string]$path) {
-    # Read raw, drop the XML prolog (the browser DOMParser does not need it and
-    # a stray BOM/encoding declaration can trip fragment parsing).
     $raw = Get-Content -Raw -Encoding UTF8 $path
     return ($raw -replace '(?s)^\s*<\?xml.*?\?>\s*', '').Trim()
 }
@@ -45,7 +41,6 @@ if (Test-Path $iniPath) {
         if ($line -match '^\s*(\d+)\.Title\s*=\s*(.+?)\s*$') {
             $num = [int]$Matches[1]
             $t   = $Matches[2]
-            # decode \uXXXX escapes found in the ini (e.g. the curly apostrophe)
             $t = [regex]::Replace($t, '\\u([0-9A-Fa-f]{4})', { param($m) [char][int]('0x' + $m.Groups[1].Value) })
             $titles[$num] = $t
         }
@@ -68,14 +63,13 @@ for ($b = 1; $b -le 6; $b++) {
     $bookFile = Join-Path $out ("book{0}.json" -f $b)
     [System.IO.File]::WriteAllText($bookFile, $json, (New-Object System.Text.UTF8Encoding($false)))
 
-    # starting-character data for this book
     $advPath = Join-Path $dir 'Adventurers.xml'
     $advXml  = if (Test-Path $advPath) { Read-Xml $advPath } else { $null }
 
     $bookMeta += [ordered]@{
-        number    = $b
-        title     = if ($titles.ContainsKey($b)) { $titles[$b] } else { "Book $b" }
-        sections  = $map.Count
+        number      = $b
+        title       = if ($titles.ContainsKey($b)) { $titles[$b] } else { "Book $b" }
+        sections    = $map.Count
         adventurers = $advXml
     }
     Write-Host ("book{0}: {1} sections -> {2:N0} bytes" -f $b, $map.Count, $json.Length)
@@ -85,7 +79,7 @@ for ($b = 1; $b -le 6; $b++) {
 $rulesXml      = if (Test-Path (Join-Path $rules 'Rules.xml'))      { Read-Xml (Join-Path $rules 'Rules.xml') }      else { $null }
 $quickRulesXml = if (Test-Path (Join-Path $rules 'QuickRules.xml')) { Read-Xml (Join-Path $rules 'QuickRules.xml') } else { $null }
 
-# ---- All 12 canonical titles (books 7-12 have no data but may be linked to) --
+# ---- All 12 canonical titles ------------------------------------------------
 $allTitles = [ordered]@{}
 foreach ($k in ($titles.Keys | Sort-Object)) { $allTitles["$k"] = $titles[$k] }
 
@@ -118,10 +112,10 @@ New-Item -ItemType Directory -Force -Path $mapsOut | Out-Null
 for ($b = 1; $b -le 6; $b++) {
     $dir = Join-Path $books ("book{0}" -f $b)
     if (-not (Test-Path $dir)) { continue }
-    $map = Get-ChildItem -Path $dir -File | Where-Object { $_.BaseName -match '-Map$' } | Select-Object -First 1
-    if ($map) {
-        Copy-Item $map.FullName (Join-Path $mapsOut ("book{0}.jpg" -f $b)) -Force
-        Write-Host ("book{0} map: {1}" -f $b, $map.Name)
+    $rmap = Get-ChildItem -Path $dir -File | Where-Object { $_.BaseName -match '-Map$' } | Select-Object -First 1
+    if ($rmap) {
+        Copy-Item $rmap.FullName (Join-Path $mapsOut ("book{0}.jpg" -f $b)) -Force
+        Write-Host ("book{0} map: {1}" -f $b, $rmap.Name)
     }
 }
 $mapsSrc = Join-Path $images 'maps'

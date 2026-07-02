@@ -43,8 +43,9 @@ fabled-lands/
 ├── rules/            Rules.xml, QuickRules.xml
 ├── images/           world-map.jpg (+ icons). Section illustrations are NOT included.
 ├── source/           The original Java engine (JaFL) — kept for reference, UNTOUCHED
-├── tools/
-│   └── build-data.ps1 Bundles books/ + rules/ → web/data/*.json
+├── build/            Build scripts (PowerShell)
+│   ├── build-data.ps1  Bundles books/ + rules/ + maps → web/data & web/assets
+│   └── stamp-version.ps1  Writes the in-game version stamp
 └── web/              ← the web app (this is what you deploy)
     ├── index.html
     ├── manifest.webmanifest, sw.js       PWA shell + offline service worker
@@ -100,7 +101,7 @@ sharing a spot, e.g. `…/index.html?demo=1.10`.
 rebuild it (Windows PowerShell — no Node required):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/build-data.ps1
+powershell -ExecutionPolicy Bypass -File build/build-data.ps1
 ```
 
 This reads every numeric `books/book<n>/<section>.xml`, each book's `Adventurers.xml`
@@ -116,7 +117,7 @@ A build version in the form `yy.MM.dd.HH.mm` is shown at the bottom of the in-ga
 modified file under `web/`. After changing anything in `web/`, refresh it with:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/stamp-version.ps1
+powershell -ExecutionPolicy Bypass -File build/stamp-version.ps1
 ```
 
 (`build-data.ps1` runs this automatically at the end.)

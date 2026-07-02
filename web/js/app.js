@@ -25,7 +25,7 @@ async function boot() {
   // Deep-link / preview hook: ?demo=<book>.<section> starts a default Warrior at
   // that section (handy for testing and shareable previews).
   const demo = new URLSearchParams(location.search).get('demo');
-  if (demo) { await startDemo(demo); if (new URLSearchParams(location.search).get('open') === 'menu') showGameMenu(); return; } // TEMP
+  if (demo) { startDemo(demo); return; }
   showTitle();
 }
 
