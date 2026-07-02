@@ -116,8 +116,9 @@ img { max-width: 100%; }
   color: var(--parchment); padding: calc(env(safe-area-inset-top) + 0.5rem) 0.75rem 0.5rem;
   border-bottom: 2px solid var(--gold); box-shadow: 0 2px 8px rgba(0,0,0,0.4); z-index: 20;
 }
-.header-title { flex: 1; text-align: center; font-family: var(--display); color: var(--gold-bright); font-size: 1.2rem; letter-spacing: 0.03em; }
-.icon-btn { background: rgba(255,255,255,0.06); border: 1px solid rgba(200,150,42,0.4); color: var(--gold-bright); font-size: 1.3rem; width: 2.5rem; height: 2.5rem; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
+.header-title { flex: 1; text-align: center; font-family: var(--display); color: var(--gold-bright); font-size: 1.2rem; letter-spacing: 0.03em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.header-actions { display: flex; align-items: center; gap: 0.3rem; }
+.icon-btn { flex: none; background: rgba(255,255,255,0.06); border: 1px solid rgba(200,150,42,0.4); color: var(--gold-bright); font-size: 1.25rem; width: 2.5rem; height: 2.5rem; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
 .icon-btn:hover { background: rgba(200,150,42,0.18); }
 .icon-btn.active { background: rgba(200,150,42,0.3); border-color: var(--gold-bright); }
 
@@ -290,6 +291,13 @@ img { max-width: 100%; }
 @media (min-width: 900px) {
   .icon-btn.sheet-toggle { display: none; }
 }
+/* Narrow screens: make room for the action icons by dropping the decorative title. */
+@media (max-width: 600px) {
+  .game-header { gap: 0.25rem; padding-left: 0.4rem; padding-right: 0.4rem; }
+  .header-title { display: none; }
+  .header-actions { gap: 0.15rem; }
+  .icon-btn { width: 2.2rem; height: 2.2rem; font-size: 1.1rem; }
+}
 
 /* ---- Modal ---------------------------------------------------------------- */
 .modal-overlay { position: fixed; inset: 0; background: rgba(20,12,4,0.62); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 1rem; }
@@ -298,6 +306,8 @@ img { max-width: 100%; }
 .modal-body { line-height: 1.6; }
 .modal-buttons { display: flex; justify-content: flex-end; gap: 0.6rem; margin-top: 1.2rem; flex-wrap: wrap; }
 .menu-list { display: flex; flex-direction: column; }
+.menu-item { display: flex; align-items: center; gap: 0.7rem; text-align: left; }
+.menu-icon { width: 1.6rem; text-align: center; font-size: 1.15rem; flex: none; }
 .menu-version { text-align: center; margin-top: 0.9rem; color: #9c885f; font-size: 0.8rem; font-variant: small-caps; letter-spacing: 0.05em; }
 .title-version { margin-top: 0.6rem; color: #8a744f; font-size: 0.75rem; letter-spacing: 0.05em; }
 .static-doc { font-size: 1rem; line-height: 1.65; }

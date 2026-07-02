@@ -25,7 +25,7 @@ async function boot() {
   // Deep-link / preview hook: ?demo=<book>.<section> starts a default Warrior at
   // that section (handy for testing and shareable previews).
   const demo = new URLSearchParams(location.search).get('demo');
-  if (demo) { startDemo(demo); return; }
+  if (demo) { await startDemo(demo); if (new URLSearchParams(location.search).get('open') === 'menu') showGameMenu(); return; } // TEMP
   showTitle();
 }
 
@@ -277,11 +277,17 @@ function buildGameScreen() {
   app.innerHTML = '';
 
   const header = el('header', 'game-header');
-  const menuBtn = iconBtn('☰', 'Menu', showGameMenu);
+  const menuBtn = iconBtn('☰', 'More…', showGameMenu);
   const title = el('div', 'header-title', 'Fabled Lands');
   const sheetBtn = iconBtn('📜', 'Adventure Sheet', () => toggleSheet());
   sheetBtn.classList.add('sheet-toggle');
   header.appendChild(menuBtn); header.appendChild(title);
+
+  // Quick-access action icons in the top bar (mirrors the menu).
+  const actions = el('div', 'header-actions');
+  actions.appendChild(iconBtn('↩️', 'Undo last move', () => undo()));
+  actions.appendChild(iconBtn('📖', 'Rules', () => showRules(true)));
+  actions.appendChild(iconBtn('🗺', 'Maps', () => showMaps(state.data.book)));
   // [TTS] narration play/stop button
   if (narrator.supported) {
     narrateBtn = iconBtn('🔊', 'Read aloud', () => narrator.toggle(currentFlow()));
@@ -290,9 +296,11 @@ function buildGameScreen() {
       narrateBtn.classList.toggle('active', playing);
       narrateBtn.title = playing ? 'Stop reading' : 'Read aloud';
     };
-    header.appendChild(narrateBtn);
+    actions.appendChild(narrateBtn);
   }
-  header.appendChild(sheetBtn);
+  actions.appendChild(iconBtn('💾', 'Save & quit to title', () => { state.save(); showTitle(); }));
+  actions.appendChild(sheetBtn); // sheet drawer toggle (mobile only)
+  header.appendChild(actions);
   app.appendChild(header);
 
   const main = el('div', 'game-main');
@@ -409,15 +417,22 @@ async function handleDeath() {
 // ---- Game menu -------------------------------------------------------------
 async function showGameMenu() {
   const body = el('div', 'menu-list');
-  const add = (label, fn) => { const b = el('button', 'btn btn-block', label); b.addEventListener('click', () => { close(); fn(); }); body.appendChild(b); };
+  const add = (icon, label, fn) => {
+    const b = el('button', 'btn btn-block menu-item');
+    b.appendChild(el('span', 'menu-icon', icon));
+    b.appendChild(el('span', null, label));
+    b.addEventListener('click', () => { close(); fn(); });
+    body.appendChild(b);
+  };
   let close = () => {};
-  add('Continue playing', () => {});
-  add('Undo last move', () => undo());
-  add('Rules', () => showRules(true));
-  add('Maps', () => showMaps(state.data.book));
-  if (narrator.supported) add('Narration…', () => showNarrationSettings()); // [TTS]
-  add('Export save…', () => exportSave(null, null));
-  add('Save & quit to title', () => { state.save(); showTitle(); });
+  add('▶️', 'Continue playing', () => {});
+  add('↩️', 'Undo last move', () => undo());
+  add('📖', 'Rules', () => showRules(true));
+  add('🗺', 'Maps', () => showMaps(state.data.book));
+  if (narrator.supported) add('⚙️', 'Narration settings', () => showNarrationSettings()); // [TTS]
+  add('📤', 'Export this save', () => exportSave(null, null));
+  add('📥', 'Import a save', () => importSaveFile());
+  add('💾', 'Save & quit to title', () => { state.save(); showTitle(); });
   const ver = el('div', 'menu-version', 'Version ' + VERSION);
   body.appendChild(ver);
   const p = modal({ title: 'Menu', body, buttons: [{ label: 'Close', value: null }] });

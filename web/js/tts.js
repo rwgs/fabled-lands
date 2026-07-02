@@ -13,7 +13,7 @@ const SUPPORTED = typeof window !== 'undefined' && 'speechSynthesis' in window &
 const CONTROL_SEL = '.goto, .group-action, .choice, .btn-roll, .btn-secondary, .btn-mini, .roll, .fight, .market, button';
 
 function loadSettings() {
-  const def = { autoplay: true, voiceURI: null, rate: 0.95, pitch: 1 };
+  const def = { autoplay: false, voiceURI: null, rate: 0.95, pitch: 1 };
   try { return { ...def, ...JSON.parse(localStorage.getItem(LS_KEY) || '{}') }; } catch { return def; }
 }
 
