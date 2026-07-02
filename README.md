@@ -3,7 +3,7 @@
 A faithful, offline-capable **web port** of the *Fabled Lands* gamebook series. It
 renders the original book text and **automates all of the game rules** — dice rolls,
 ability checks, combat, markets, ships, and a live Adventure Sheet — the same way the
-original Java application ([JaFL](https://sourceforge.net/projects/flapp/)) did, but in
+original Java application ([JaFL](https://flapp.sourceforge.net/)) did, but in
 the browser, on any device, with progress saved locally.
 
 > *Fabled Lands* is an open-world gamebook: you roam a fantasy world freely, in any

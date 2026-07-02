@@ -65,7 +65,7 @@ function creditsHtml() {
     'Maps & Illustrations ©  <strong>Russ Nicholson</strong>.<br>' +
     'Original rules engine from <em>Java Fabled Lands</em> © 2005 <strong>Jonathan Mann</strong><br>' +
     '<em>Fabled Lands</em> and its text and artwork remain the property of their respective rights holders.<br>' +
-    '<a href="https://amzn.to/4ve469x" target="_blank" class="inherit-style">Please support by purchasing the official releases on Amazon here.</a>'
+    '<a href="https://amzn.to/4ve469x" target="_blank" class="inherit-style">Please support the series by purchasing the official releases on Amazon here.</a>'
   );
 }
 
