@@ -248,8 +248,8 @@ The first line of the dumped `#results` reads `RESULT ALL PASS …` when healthy
 
 This project has two layers of rights — see [`NOTICE`](NOTICE) for the full breakdown.
 
-**Software** — licensed **GPL-2.0** (see [`LICENSE`](LICENSE)). This *Progressive Web App Fabled Lands* (WebFL) design &
-implementation are © 2026 **Robert Southgate**. The rules automation is a clean-room
+**Software** — licensed **GPL-2.0** (see [`LICENSE`](LICENSE)). This *Progressive Web App Fabled Lands*
+(WebFL) design & implementation are © 2026 **Robert Southgate**. The rules automation is a clean-room
 JavaScript reimplementation using *Java Fabled Lands* (JaFL) © 2005 **Jonathan Mann** as the
 reference; JaFL is published under GPL-2.0, and the bundled section data was obtained from
 that project — hence GPL-2.0 here too (JaFL is v2-only, incompatible with v3).
