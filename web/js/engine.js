@@ -184,7 +184,16 @@ function applyLose(el, state, opts) {
     const pattern = get('item');
     if (pattern === '*') { /* lose all-ish: skip destructive auto-clear */ }
     else {
-      const matches = state.findItems(pattern);
+      // "?" is the books' wildcard for "any possession" (the §521/§248/§373 thefts);
+      // a real name matches by name/tag. A tags= filter narrows the wildcard, but
+      // awarded items carry no tags in this engine, so a tag-filtered "?" harmlessly
+      // matches nothing (e.g. candle-burning), while a bare "?" matches every item.
+      let matches = pattern === '?' ? state.data.items.slice() : state.findItems(pattern);
+      const tags = get('tags');
+      if (pattern === '?' && tags) {
+        const want = tags.split(/[,|]/).map((t) => normalize(t));
+        matches = matches.filter((it) => want.every((t) => (it.tags || []).map(normalize).includes(t)));
+      }
       const count = get('multiple') ? resolveValue(state, get('multiple')) : 1;
       let toLose = matches;
       if (matches.length > count) {

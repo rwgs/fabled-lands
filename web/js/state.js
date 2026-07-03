@@ -7,6 +7,16 @@ const SAVE_PREFIX = 'fl_save_';
 const META_KEY = 'fl_meta';
 const SCHEMA = 3;
 
+// Some books spell the sea-safety blessing "storms" (book 1) and others "storm"
+// (books 2–6); they are the same blessing. Canonicalise so a grant in one book
+// satisfies an <if blessing="…"> check in another and the "only one at a time"
+// rule holds across the whole campaign. Match is case-insensitive.
+const BLESSING_ALIASES = { storms: 'storm' };
+function canonBlessing(b) {
+  const k = String(b).trim().toLowerCase();
+  return BLESSING_ALIASES[k] || k;
+}
+
 function freshData() {
   return {
     schema: SCHEMA,
@@ -181,6 +191,20 @@ export class GameState {
     return null;
   }
 
+  // Reorder a possession by swapping it with its neighbour (delta -1 up / +1 down).
+  // The list order is meaningful — thefts that take "the possessions listed first"
+  // (§521/§248) remove from the top — so letting the player reorder mirrors being
+  // able to choose the order items are written down on a paper Adventure Sheet.
+  moveItem(id, delta) {
+    const i = this.data.items.findIndex((x) => x.id === id);
+    const j = i + delta;
+    if (i < 0 || j < 0 || j >= this.data.items.length) return false;
+    const [it] = this.data.items.splice(i, 1);
+    this.data.items.splice(j, 0, it);
+    this.changed();
+    return true;
+  }
+
   findItems(pattern) {
     if (!pattern) return [];
     const pats = pattern.split('|').map((p) => normalize(p));
@@ -255,10 +279,13 @@ export class GameState {
   hasVar(name) { return Object.prototype.hasOwnProperty.call(this.data.vars, name); }
 
   // ---- blessings / curses ---------------------------------------------
-  hasBlessing(b) { return this.data.blessings.includes(b); }
-  addBlessing(b) { if (!this.hasBlessing(b)) { this.data.blessings.push(b); this.changed(); } }
+  // Compared/stored canonically so "storm"/"storms" (and any casing) are one
+  // blessing — this also repairs legacy saves that stored the alias spelling.
+  hasBlessing(b) { const c = canonBlessing(b); return this.data.blessings.some((x) => canonBlessing(x) === c); }
+  addBlessing(b) { if (!this.hasBlessing(b)) { this.data.blessings.push(canonBlessing(b)); this.changed(); } }
   removeBlessing(b) {
-    const i = this.data.blessings.indexOf(b);
+    const c = canonBlessing(b);
+    const i = this.data.blessings.findIndex((x) => canonBlessing(x) === c);
     if (i >= 0) { this.data.blessings.splice(i, 1); this.changed(); return true; }
     return false;
   }

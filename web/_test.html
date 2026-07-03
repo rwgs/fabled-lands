@@ -2,11 +2,12 @@
 <body><pre id="results">running…</pre>
 <script type="module">
 import * as data from './js/data.js';
-import { GameState, readSlotData, importSave, loadSlotMeta, deleteSlot } from './js/state.js';
+import { GameState, readSlotData, importSave, loadSlotMeta, deleteSlot, makeItem } from './js/state.js';
 import * as eng from './js/engine.js';
 import { fightRound } from './js/combat.js';
 import { Story } from './js/render.js';
 import { Narrator } from './js/tts.js';
+import { renderSheet } from './js/ui.js';
 
 const out = [];
 let pass = 0, fail = 0;
@@ -210,6 +211,85 @@ async function run() {
     const storyH = new Story(ch, gh, { navigate(){}, onDeath(){}, notify(){} });
     const s10b = await data.getSection(1,'10'); storyH.begin(s10b,1,'10');
     ok('§10 does NOT auto-buy townhouse', !gh.hasCodeword('1.10.1') && gh.data.shards === 300, `cw=${gh.hasCodeword('1.10.1')} sh=${gh.data.shards}`);
+
+    // --- blessing purchase: "only one at a time" gate + storm/storms unify ----
+    // §202 (Safety from Storms) / §271 (Luck) are temple buys via the price/flag
+    // idiom: charge only on click, and refuse a re-buy once the blessing is held
+    // (otherwise Shards are spent for nothing, as addBlessing dedupes).
+    const gb = GameState.create({ name:'B', gender:'m', profession:'Warrior', book:2, adv });
+    gb.data.shards = 100;
+    const cb = document.createElement('div');
+    const storyB = new Story(cb, gb, { navigate(){}, onDeath(){}, notify(){} });
+    const s202 = await data.getSection(2,'202'); storyB.begin(s202,2,'202');
+    ok('§202 shows a pay button', !!cb.querySelector('.pay-action'));
+    ok('§202 does NOT auto-charge/grant', gb.data.shards === 100 && !gb.hasBlessing('storm'), `sh=${gb.data.shards}`);
+    cb.querySelector('.pay-action').click();
+    ok('§202 charged 20 (non-initiate) on click', gb.data.shards === 80, String(gb.data.shards));
+    ok('§202 granted a single storm blessing', gb.hasBlessing('storm') && gb.data.blessings.length === 1, JSON.stringify(gb.data.blessings));
+    // storm/storms are the same blessing — a book-1 <if blessing="storms"> must see it.
+    ok('storm grant satisfies <if blessing="storms">', eng.evaluateCondition(parse('<if blessing="storms"/>'), gb));
+    // Re-visit while owned → pay button disabled; no double-spend.
+    const s202b = await data.getSection(2,'202'); storyB.begin(s202b,2,'202');
+    const pay202 = cb.querySelector('.pay-action');
+    ok('§202 re-buy blocked when owned', !!pay202 && pay202.disabled === true && /already have/i.test(pay202.title), pay202 ? `disabled=${pay202.disabled} title="${pay202.title}"` : 'no button');
+
+    // §690: four blessings share one flag ("choose one") — never over-block just
+    // because the player already holds one of the four abilities.
+    const gm = GameState.create({ name:'M', gender:'m', profession:'Warrior', book:6, adv });
+    gm.data.shards = 100; gm.addBlessing('combat');
+    const cm = document.createElement('div');
+    const storyM = new Story(cm, gm, { navigate(){}, onDeath(){}, notify(){} });
+    const s690 = await data.getSection(6,'690'); storyM.begin(s690,6,'690');
+    const pay690 = cm.querySelector('.pay-action');
+    ok('§690 multi-blessing buy stays enabled', !!pay690 && pay690.disabled === false, pay690 ? `disabled=${pay690.disabled}` : 'no button');
+
+    // --- §521: possession theft — item="?" wildcard + defer until the die rolls --
+    // The thief steals 1-6 possessions; the count comes from a <random var="x"> that
+    // must be rolled first. Before the fix, item="?" matched nothing AND the loss
+    // auto-applied with x=0, so nothing was ever stolen.
+    const g521 = GameState.create({ name:'T', gender:'m', profession:'Warrior', book:2, adv });
+    for (const nm of ['rope','lantern','flask','gem','scroll','cloak']) g521.addItem(makeItem('item', nm));
+    const initCount = g521.itemCount();
+    const c521 = document.createElement('div');
+    const story521 = new Story(c521, g521, { navigate(){}, onDeath(){}, notify(){} });
+    const s521 = await data.getSection(2,'521'); story521.begin(s521,2,'521');
+    ok('§521 steals nothing before the roll', g521.itemCount() === initCount, `count=${g521.itemCount()} init=${initCount}`);
+    ok('§521 shows a roll button', !!c521.querySelector('.btn-roll'));
+    c521.querySelector('.btn-roll').click();
+    await new Promise(r => setTimeout(r, 1000));
+    const stolen = g521.getVar('x');
+    ok('§521 rolls 1-6 for the theft count', stolen >= 1 && stolen <= 6, 'x='+stolen);
+    ok('§521 steals exactly the rolled number', g521.itemCount() === initCount - Math.min(stolen, initCount), `count=${g521.itemCount()} init=${initCount} x=${stolen}`);
+
+    // --- possessions can be reordered (decides what a "listed first" theft takes) --
+    const go = GameState.create({ name:'O', gender:'m', profession:'Warrior', book:1, adv });
+    go.data.items = [];
+    for (const nm of ['alpha','beta','gamma']) go.addItem(makeItem('item', nm));
+    const order = () => go.data.items.map((i) => i.name).join(',');
+    ok('reorder: initial order', order() === 'alpha,beta,gamma', order());
+    ok('reorder: move up swaps with neighbour', (go.moveItem(go.data.items[2].id, -1), order() === 'alpha,gamma,beta'), order());
+    ok('reorder: cannot move the first item up', go.moveItem(go.data.items[0].id, -1) === false && order() === 'alpha,gamma,beta');
+    ok('reorder: cannot move the last item down', go.moveItem(go.data.items[2].id, 1) === false && order() === 'alpha,gamma,beta');
+    ok('reorder: move down swaps with neighbour', (go.moveItem(go.data.items[0].id, 1), order() === 'gamma,alpha,beta'), order());
+    const csheet = document.createElement('div');
+    renderSheet(go, csheet);
+    ok('sheet renders up/down controls per item', csheet.querySelectorAll('.item-move').length === go.data.items.length * 2, String(csheet.querySelectorAll('.item-move').length));
+    ok('sheet disables the top-up and bottom-down controls', csheet.querySelectorAll('.item-move:disabled').length === 2, String(csheet.querySelectorAll('.item-move:disabled').length));
+
+    // --- selling the starting "leather jerkin" at an armourer that lists "leather" --
+    // Armour is valued by Defence tier, so the tier-1 jerkin sells at the "leather" row.
+    const gsell = GameState.create({ name:'S', gender:'m', profession:'Warrior', book:1, adv });
+    const startShards = gsell.data.shards;
+    const hadJerkin = gsell.findItems('leather jerkin').length === 1;
+    const csell = document.createElement('div');
+    const storySell = new Story(csell, gsell, { navigate(){}, onDeath(){}, notify(){} });
+    const s30 = await data.getSection(1,'30'); storySell.begin(s30,1,'30');
+    const leatherRow = Array.from(csell.querySelectorAll('.trade')).find((r) => /^leather\b/i.test((r.querySelector('.trade-name')?.textContent || '')));
+    const sellBtn = leatherRow && Array.from(leatherRow.querySelectorAll('button')).find((b) => /^Sell/.test(b.textContent));
+    ok('§30 leather sell enabled for the starting jerkin', hadJerkin && !!sellBtn && !sellBtn.disabled, sellBtn ? `disabled=${sellBtn.disabled}` : 'no btn');
+    sellBtn.click();
+    ok('§30 selling removes the jerkin', gsell.findItems('leather jerkin').length === 0);
+    ok('§30 selling credits 45 Shards', gsell.data.shards === startShards + 45, `sh=${gsell.data.shards} start=${startShards}`);
 
     // --- narration (TTS): sentence wrapping preserves interactivity ---
     const narrator = new Narrator();

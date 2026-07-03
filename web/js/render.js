@@ -7,7 +7,7 @@
 //   * revealed branches only appear (and only apply their effects) once resolved.
 
 import {
-  evaluateCondition, applyEffect, boolAttr, resolveValue,
+  evaluateCondition, applyEffect, boolAttr, resolveValue, isDiceExpr,
   rollDifficulty, rollRankCheck, rollTraining, rollDice, matchRange, childAdjustment,
   applyRest, buyResurrectionDeal,
 } from './engine.js';
@@ -381,6 +381,20 @@ export class Story {
       return null;
     }
 
+    // Defer an effect whose magnitude depends on a variable that a roll in this
+    // section has not filled yet (e.g. §521 "<lose multiple="x">" sitting above its
+    // "<random var="x">"). Applying now would use x=0 and then memoise that no-op;
+    // instead show the words and let the post-roll rerender apply the real count.
+    if (this.pendingRollVar(node)) {
+      if (!hidden) {
+        const span = document.createElement('span');
+        span.className = 'fx';
+        this.appendChildren(span, node, path);
+        if (span.textContent.trim()) container.appendChild(span);
+      }
+      return null;
+    }
+
     const price = node.getAttribute('price');
     const flag = node.getAttribute('flag');
 
@@ -423,6 +437,23 @@ export class Story {
       span.className = 'fx';
       this.appendChildren(span, node, path);
       if (span.textContent.trim()) container.appendChild(span);
+    }
+    return null;
+  }
+
+  // The name of a not-yet-set variable that this effect's magnitude depends on and
+  // that a roll in this section will fill — or null. Only such vars defer (see
+  // renderPassive): a literal, a dice expression, or an already-set var applies now,
+  // and a var no roll here fills is left to apply (harmlessly as 0) rather than hang.
+  pendingRollVar(node) {
+    const QTY = ['multiple', 'shards', 'stamina', 'staminato', 'amount', 'count'];
+    for (const a of QTY) {
+      const v = node.getAttribute(a);
+      if (v == null) continue;
+      const s = String(v).trim();
+      if (/^-?\d/.test(s) || isDiceExpr(s)) continue; // numeric literal or dice expr
+      if (this.state.hasVar(s)) continue;             // already set (e.g. by an earlier <set>)
+      if (this.sectionEl && this.sectionEl.querySelector(`random[var="${s}"], rankcheck[var="${s}"], difficulty[var="${s}"]`)) return s;
     }
     return null;
   }
@@ -490,6 +521,10 @@ export class Story {
     btn.textContent = (done ? '☑ ' : '') + (label.textContent.trim() || (cost ? `Pay ${cost} Shards` : 'Confirm'));
     if (done) {
       btn.disabled = true;
+    } else if (this.ownsSoleLinkedBlessing(node, key)) {
+      // "You can have only one X blessing at a time" — refuse the re-buy so the
+      // Shards aren't spent for a blessing that addBlessing would just dedupe away.
+      btn.disabled = true; btn.title = 'You already have this blessing';
     } else if (cost && this.state.data.shards < cost) {
       btn.disabled = true; btn.title = 'Not enough Shards';
     } else {
@@ -502,6 +537,19 @@ export class Story {
     }
     container.appendChild(btn);
     return btn;
+  }
+
+  // The "only one at a time" blessing rule for a price/flag purchase: true when the
+  // buy grants exactly one blessing and the player already holds it. Multi-blessing
+  // "choose one" temples (e.g. §690: charisma/scouting/combat/magic on one flag) are
+  // deliberately excluded — there the player buys a different ability each visit.
+  ownsSoleLinkedBlessing(node, key) {
+    const nodes = [node];
+    if (this.sectionEl) nodes.push(...this.sectionEl.querySelectorAll(`[flag="${key}"]`));
+    const blessings = new Set();
+    nodes.forEach((el) => { const b = el.getAttribute && el.getAttribute('blessing'); if (b) blessings.add(b); });
+    if (blessings.size !== 1) return false;
+    return this.state.hasBlessing([...blessings][0]);
   }
 
   // ---- navigation ----------------------------------------------------------

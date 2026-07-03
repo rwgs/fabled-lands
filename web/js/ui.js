@@ -123,7 +123,7 @@ export function renderSheet(state, container) {
   container.appendChild(sectionTitle(`Possessions (${state.itemCount()}/12)`));
   const items = el('ul', 'item-list');
   if (!d.items.length) items.appendChild(el('li', 'empty', 'Nothing carried.'));
-  d.items.forEach((it) => {
+  d.items.forEach((it, idx) => {
     const li = el('li', 'item');
     let tag = '';
     if (it.kind === 'weapon') tag = ` (Combat +${it.bonus})`;
@@ -133,13 +133,28 @@ export function renderSheet(state, container) {
     if (it.wielded) nm.classList.add('wielded');
     if (it.worn) nm.classList.add('worn');
     li.appendChild(nm);
+
+    // Reorder controls: the list order decides what a "possessions listed first"
+    // theft (§521/§248) takes, so the player can move valuables down out of reach.
+    const controls = el('span', 'item-controls');
+    const up = el('button', 'item-move', '▲');
+    up.title = 'Move up (taken first if robbed)';
+    up.disabled = idx === 0;
+    up.addEventListener('click', () => state.moveItem(it.id, -1));
+    const down = el('button', 'item-move', '▼');
+    down.title = 'Move down';
+    down.disabled = idx === d.items.length - 1;
+    down.addEventListener('click', () => state.moveItem(it.id, 1));
     const drop = el('button', 'item-drop', '✕');
     drop.title = 'Drop';
     drop.addEventListener('click', async () => {
       const ok = await modal({ title: 'Drop item?', body: `Drop <b>${escapeHtml(it.name)}</b>?`, buttons: [{ label: 'Cancel', value: false }, { label: 'Drop', value: true, primary: true }] });
       if (ok) state.removeItemById(it.id);
     });
-    li.appendChild(drop);
+    controls.appendChild(up);
+    controls.appendChild(down);
+    controls.appendChild(drop);
+    li.appendChild(controls);
     items.appendChild(li);
   });
   container.appendChild(items);

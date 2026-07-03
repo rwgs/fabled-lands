@@ -295,6 +295,10 @@ img { max-width: 100%; }
 .item-txt.worn::after { content: ' 🛡'; }
 .item-drop { background: none; border: none; color: #c9704f; font-size: 0.9rem; opacity: 0.6; padding: 0 0.2rem; }
 .item-drop:hover { opacity: 1; }
+.item-controls { display: inline-flex; align-items: center; gap: 0.1rem; flex: none; }
+.item-move { background: none; border: none; color: var(--gold-bright, #c8962a); font-size: 0.66rem; line-height: 1; opacity: 0.55; padding: 0 0.12rem; cursor: pointer; }
+.item-move:hover:not(:disabled) { opacity: 1; }
+.item-move:disabled { opacity: 0.12; cursor: default; }
 .chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
 .chip { background: rgba(200,150,42,0.14); border: 1px solid rgba(200,150,42,0.35); color: #ecdcb8; border-radius: 20px; padding: 0.15rem 0.6rem; font-size: 0.8rem; }
 

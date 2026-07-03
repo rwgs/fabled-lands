@@ -6,7 +6,7 @@
 		If you have already adventured using other books in the series, you will know your entry point into this book. Turn to that section now.
 	</p>
 	<p>
-		If this is your first <i>Fabled Lands</i> book, read the rest of the rules before starting at section 1. You will keep the same adventuring persona throughout the books - starting out as a 5th Rank wanderer in <i>The Court of Hidden Faces</i>, but gradually gaining in power, wealth and experience throughout the series.
+		If this is your first <i>Fabled Lands</i> book, read the rest of the rules before starting at section 1. You will keep the same adventuring persona throughout the books, gradually gaining in power, wealth and experience throughout the series. Which book you begin in sets how seasoned your character starts out: the first book, <i>The War-Torn Kingdom</i>, starts you as a lowly 1st Rank adventurer, while each later book assumes a more experienced hero - starting at a higher Rank, with more Stamina and different starting money and equipment. See the table under RANK below for the full breakdown.
 	</p>
 	
 	<h4>ABILITIES</h4>
@@ -46,15 +46,30 @@
 		Lost Stamina can be recovered by various means, but your Stamina cannot goes above its initial score until you advance in Rank.
 	</p>
 	<p>
-		You start with 23 Stamina points. Record your Stamina in pencil on the Adventure Sheet.
+		Your starting Stamina depends on which book you begin in - see the table under RANK below. (In <i>The Court of Hidden Faces</i>, Book 5, you start with 23 Stamina points.) Record your Stamina in pencil on the Adventure Sheet.
 	</p>
 
 	<h4>RANK</h4>
 	<p>
-		You start at 5th Rank, so note this on the Adventure Sheet now. By completing quests and overcoming enemies, you have the chance to go up in Rank.
+		Your starting Rank depends on which book you begin your adventure in - the first book starts you at 1st Rank, and each later book starts you at a higher Rank to reflect a more seasoned hero. Note your starting Rank on the Adventure Sheet now. By completing quests and overcoming enemies, you have the chance to go up in Rank.
 	</p>
 	<p>
 		You will be told during the course of your adventures when you are entitled to advance in Rank. Characters of higher Rank are tougher, luckier and generally better able to deal with trouble.
+	</p>
+	<p>
+		The Rank, Stamina and Shards you begin with, depending on the book you start in:
+	</p>
+	<table>
+		<tr><td><i>Starting book</i></td><td><i>Rank</i></td><td><i>Stamina</i></td><td><i>Shards</i></td></tr>
+		<tr><td>Book 1: The War-Torn Kingdom</td><td>1st</td><td>9</td><td>16</td></tr>
+		<tr><td>Book 2: Cities of Gold and Glory</td><td>2nd</td><td>13</td><td>16</td></tr>
+		<tr><td>Book 3: Over the Blood-Dark Sea</td><td>3rd</td><td>16</td><td>40</td></tr>
+		<tr><td>Book 4: Devils &amp; Howling Darkness</td><td>4th</td><td>20</td><td>65</td></tr>
+		<tr><td>Book 5: The Court of Hidden Faces</td><td>5th</td><td>23</td><td>65</td></tr>
+		<tr><td>Book 6: Lords of the Rising Sun</td><td>6th</td><td>27</td><td>0</td></tr>
+	</table>
+	<p>
+		Your starting weapon, armour and other possessions vary from book to book too. However you begin, your Adventure Sheet is filled in with the correct Rank, Stamina, Shards and equipment for the book you start in. The Rank titles below apply whichever book you begin in:
 	</p>
 	<table>
 		<tr><td><i>Rank</i></td><td><i>Title</i></td></tr>
@@ -73,7 +88,7 @@
 
 	<h4>POSSESSIONS</h4>
 	<p>
-		You can carry up to 12 possessions on your person. All characters begin with 65 Shards in cash and the following possessions, which you can record on the Adventure Sheet: <b>sword</b> and <b>chain mail (Defence +3)</b>.
+		You can carry up to 12 possessions on your person. The money and equipment you begin with depend on which book you start in (the starting Shards for each book are listed in the table under RANK). For example, a character beginning in <i>The Court of Hidden Faces</i> (Book 5) starts with 65 Shards in cash and the following possessions: <b>sword</b> and <b>chain mail (Defence +3)</b>. Your Adventure Sheet is filled in with the correct starting money and equipment for your chosen book.
 	</p>
 	<p>
 		Possessions are always marked in bold text, like this: <b>gold compass</b>. Anything marked in this way is an item which can be picked up and added to your list of possessions.
@@ -93,7 +108,7 @@
 		Every suit of armour you find will have a Defence bonus listed for it. The higher the bonus, the better the armour. You can carry several suits of armour if you wish - but because you can wear only one at a time, you only get the Defence bonus of the best armour you are carrying.
 	</p>
 	<p>
-		Write your Defence score on the Adventure Sheet now. To start with it is just your COMBAT score plus 8 (because you are 5th Rank and have +3 armour). Remember to update it if you get better armour or increase in Rank or COMBAT ability.
+		Write your Defence score on the Adventure Sheet now. To start with it is your COMBAT score plus your starting Rank plus your starting armour bonus. (In <i>The Court of Hidden Faces</i>, for instance, that comes to COMBAT + 8, being 5th Rank with +3 armour.) Remember to update it if you get better armour or increase in Rank or COMBAT ability.
 	</p>
 
 	<h4>FIGHTING</h4>

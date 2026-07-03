@@ -43,9 +43,12 @@ export function ownsGoods(state, goods) {
   const { kind, name, bonus, named, shipType, cargoName } = goods;
   if (kind === 'ship') return state.ships.some((s) => s.type === shipType);
   if (kind === 'cargo') return state.ships.some((s) => (s.cargo || []).includes(cargoName || name));
-  // A generic weapon/armour is sold by its bonus, so you must own one of that bonus —
-  // not merely any weapon (else a +0 weapon could be sold at the +3 price).
-  if ((kind === 'weapon' || kind === 'armour') && !named) {
+  // Armour is valued purely by its Defence bonus (its tier), so any owned armour of
+  // that bonus can be sold at a named row's price — the starting "leather jerkin", a
+  // "leather armour", and an armourer's "leather" are all the same bonus-1 leather.
+  // A generic (unnamed) weapon is likewise sold by bonus, so you must own one of that
+  // bonus — not merely any weapon (else a +0 weapon could be sold at the +3 price).
+  if (kind === 'armour' || (kind === 'weapon' && !named)) {
     return state.data.items.some((it) => it.kind === kind && (it.bonus || 0) === bonus);
   }
   return state.hasItem(name);
@@ -83,8 +86,8 @@ export function sellTrade(state, goods, price) {
     const ship = state.ships.find((s) => (s.cargo || []).includes(cargoName));
     if (!ship) return { ok: false };
     ship.cargo.splice(ship.cargo.indexOf(cargoName), 1); state.adjustMoney(price); state.changed();
-  } else if ((kind === 'weapon' || kind === 'armour') && !named) {
-    // generic weapon/armour: sell one of the matching bonus
+  } else if (kind === 'armour' || (kind === 'weapon' && !named)) {
+    // Armour (any name) and generic weapons are valued by bonus: sell one of that tier.
     const it = state.data.items.find((x) => x.kind === kind && (x.bonus || 0) === bonus);
     if (!it) return { ok: false };
     state.removeItemById(it.id); state.adjustMoney(price);
