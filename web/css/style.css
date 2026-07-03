@@ -157,11 +157,15 @@ img { max-width: 100%; }
 
 /* ---- Story content -------------------------------------------------------- */
 .section-num { text-align: center; font-variant: small-caps; letter-spacing: 0.08em; color: var(--gold); font-size: 0.85rem; border-bottom: 1px solid var(--parchment-edge); padding-bottom: 0.6rem; margin-bottom: 1rem; }
+.section-boxes { text-align: center; font-size: 1.25rem; letter-spacing: 0.25rem; color: var(--gold); margin: -0.4rem 0 0.8rem; }
+.section-boxes .tick-box.ticked { color: var(--crimson); }
+.take-item, .pay-action { font-style: normal; }
 .flow { font-size: 1.12rem; line-height: 1.72; }
 .flow p { margin: 0 0 1rem; }
 .flow .item-name { font-weight: 700; color: #5a3410; }
 .flow .caps { font-variant: small-caps; letter-spacing: 0.03em; font-weight: 600; }
 .flow .fx { }
+.flow .fx.paid { color: var(--crimson); font-style: italic; opacity: 0.85; }
 .illus { margin: 0 0 1.2rem; text-align: center; }
 .illus img { border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,0.25); }
 

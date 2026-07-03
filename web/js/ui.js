@@ -1,6 +1,6 @@
 // ui.js — reusable UI: dice animation, Adventure Sheet, modals, toasts.
 
-import { ABILITIES, ABILITY_LABEL, rankTitle, ordinal } from './rules.js';
+import { ABILITIES, ABILITY_LABEL, rankTitle, ordinal, SHIP_TYPES } from './rules.js';
 
 // ---- dice animation --------------------------------------------------------
 export function animateDice(container, small = false) {
@@ -161,7 +161,10 @@ export function renderSheet(state, container) {
     const ul = el('ul', 'item-list');
     d.ships.forEach((s) => {
       const li = el('li', 'item');
-      li.appendChild(el('span', 'item-txt', `${titleCase(s.name || s.type)} — ${titleCase(s.type)}, ${titleCase(s.crew)} crew, cargo ${(s.cargo || []).length}`));
+      const cap = SHIP_TYPES[s.type]?.capacity ?? (s.cargo || []).length;
+      const cargo = (s.cargo || []).map(titleCase).join(', ');
+      const cargoTxt = `cargo ${(s.cargo || []).length}/${cap}${cargo ? `: ${cargo}` : ''}`;
+      li.appendChild(el('span', 'item-txt', `${titleCase(s.name || s.type)} — ${titleCase(s.type)}, ${titleCase(s.crew)} crew · ${cargoTxt}`));
       ul.appendChild(li);
     });
     container.appendChild(ul);

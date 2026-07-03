@@ -30,11 +30,25 @@ export function goodsFrom(node, kind, name, bonus) {
     kind,
     name,
     bonus: bonus || 0,
+    named: node.getAttribute('name') != null, // false => generic goods sold by COMBAT/Defence bonus
     ability: node.getAttribute('ability') || null,
     shipType: node.getAttribute('ship') || null,
     cargoName: node.getAttribute('cargo') || null,
     initialCrew: node.getAttribute('initialCrew') || null,
   };
+}
+
+/** Does the player own an item matching this goods descriptor (for selling)? */
+export function ownsGoods(state, goods) {
+  const { kind, name, bonus, named, shipType, cargoName } = goods;
+  if (kind === 'ship') return state.ships.some((s) => s.type === shipType);
+  if (kind === 'cargo') return state.ships.some((s) => (s.cargo || []).includes(cargoName || name));
+  // A generic weapon/armour is sold by its bonus, so you must own one of that bonus —
+  // not merely any weapon (else a +0 weapon could be sold at the +3 price).
+  if ((kind === 'weapon' || kind === 'armour') && !named) {
+    return state.data.items.some((it) => it.kind === kind && (it.bonus || 0) === bonus);
+  }
+  return state.hasItem(name);
 }
 
 /** Buy `goods` for `price`. Mutates state. Returns { ok, note? }. */
@@ -60,7 +74,7 @@ export function buyTrade(state, goods, price) {
 
 /** Sell `goods` for `price`. Mutates state. Returns { ok }. */
 export function sellTrade(state, goods, price) {
-  const { kind, name, shipType, cargoName } = goods;
+  const { kind, name, bonus, named, shipType, cargoName } = goods;
   if (kind === 'ship') {
     const i = state.ships.findIndex((s) => s.type === shipType);
     if (i < 0) return { ok: false };
@@ -69,6 +83,11 @@ export function sellTrade(state, goods, price) {
     const ship = state.ships.find((s) => (s.cargo || []).includes(cargoName));
     if (!ship) return { ok: false };
     ship.cargo.splice(ship.cargo.indexOf(cargoName), 1); state.adjustMoney(price); state.changed();
+  } else if ((kind === 'weapon' || kind === 'armour') && !named) {
+    // generic weapon/armour: sell one of the matching bonus
+    const it = state.data.items.find((x) => x.kind === kind && (x.bonus || 0) === bonus);
+    if (!it) return { ok: false };
+    state.removeItemById(it.id); state.adjustMoney(price);
   } else {
     const it = state.findItems(name)[0];
     if (!it) return { ok: false };

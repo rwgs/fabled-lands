@@ -12,15 +12,19 @@ import {
   applyRest, buyResurrectionDeal,
 } from './engine.js';
 import { makeFight, fightRound } from './combat.js';
-import { shopKind, goodsFrom, buyTrade, sellTrade, applyInlineBuy } from './market.js';
-import { normalize } from './state.js';
+import { shopKind, goodsFrom, ownsGoods, buyTrade, sellTrade, applyInlineBuy } from './market.js';
+import { normalize, makeItem } from './state.js';
 import { bookTitle, availableBooks } from './data.js';
 import { animateDice } from './ui.js';
 
 const INLINE_STYLE = { b: 'strong', i: 'em', u: 'u', caps: 'span' };
 const BRANCH_TAGS = new Set(['success', 'failure', 'outcomes']);
 const ROLL_TAGS = new Set(['difficulty', 'random', 'rankcheck', 'training']);
-const PASSIVE_TAGS = new Set(['lose', 'tick', 'gain', 'adjust', 'set', 'curse']);
+// Note: <adjust> is deliberately NOT here. In this corpus it is always a die-roll
+// MODIFIER (a child of <difficulty>/<random>/<rankcheck>, consumed by
+// childAdjustment) — never a passive effect. Auto-applying it on view would
+// silently upgrade the crew ("<adjust crew='good'>") or bump codeword counters.
+const PASSIVE_TAGS = new Set(['lose', 'tick', 'gain', 'set', 'curse']);
 
 export class Story {
   constructor(rootEl, state, opts) {
@@ -58,18 +62,43 @@ export class Story {
     label.textContent = `${bookTitle(this.book)} · ${this.section}`;
     this.root.appendChild(label);
 
+    // Tick boxes for this section (the empty boxes printed beside the number in
+    // the books). Filled ones reflect how many times the box has been ticked.
+    const nBoxes = parseInt(el.getAttribute('boxes') || '0', 10);
+    if (nBoxes > 0) {
+      const ticked = this.state.tickCount(this.book, this.section);
+      const boxRow = document.createElement('div');
+      boxRow.className = 'section-boxes';
+      for (let i = 0; i < nBoxes; i++) {
+        const b = document.createElement('span');
+        b.className = 'tick-box' + (i < ticked ? ' ticked' : '');
+        b.textContent = i < ticked ? '☑' : '☐';
+        boxRow.appendChild(b);
+      }
+      this.root.appendChild(boxRow);
+    }
+
     const flow = document.createElement('div');
     flow.className = 'flow';
     // The most-recent roll in document order. Persists across nesting so that
     // `<outcomes>`/`<success>` at section level can attach to a `<difficulty>`
     // nested inside a preceding `<p>` (a very common structure).
     this.activeRoll = null;
+    this.blocked = false; // set true by an unresolved forced economic payment
+    // An economic <lose> is treated as an opt-in *payment* only when the section
+    // offers a way to avoid it — an optional (force="f") "turn back"/decline goto.
+    // Without such an escape the loss is unavoidable (e.g. §106 "buy the pearls"),
+    // so it auto-applies as a plain effect rather than gating behind a click.
+    this.hasDecline = !!el && Array.from(el.querySelectorAll('goto')).some((g) => {
+      const f = g.getAttribute('force');
+      return f != null && !boolAttr(f, true);
+    });
     this.appendChildren(flow, el, 'r');
     this.root.appendChild(flow);
 
     // Dead-end fallback: a fully-resolved section offering no way forward is a
     // narrative death (the original game exposed an "Extra Choice: Death" for this).
-    const controls = flow.querySelectorAll('.goto, .choice, .btn-roll, .btn-secondary, .btn-mini, .fight');
+    const controls = flow.querySelectorAll('.goto, .choice, .btn-roll, .btn-secondary, .btn-mini, .fight, .group-action, .pay-action');
     if (!controls.length && !this.state.isDead()) {
       const end = document.createElement('button');
       end.className = 'goto goto-primary end-fate';
@@ -100,6 +129,11 @@ export class Story {
     let chainActive = false, chainDone = false; // if/elseif/else chain state
 
     nodes.forEach((node, idx) => {
+      // A forced economic payment (see renderPayment) blocks the rest of the
+      // section — nothing after it renders until the player resolves it. This
+      // mirrors JaFL's forced-action model so an optional exit shown *before*
+      // the payment (e.g. "turn back to 142") costs nothing.
+      if (this.blocked) return;
       const path = basePath + '.' + idx;
       if (node.nodeType === Node.TEXT_NODE) {
         this.appendText(container, node.nodeValue);
@@ -186,6 +220,13 @@ export class Story {
 
       case 'goto':
         return this.renderGoto(container, node, path);
+      case 'return':
+        return this.renderReturn(container, node, path);
+      case 'item':
+      case 'weapon':
+      case 'armour':
+      case 'tool':
+        return this.renderItemAward(container, node, path);
       case 'choices':
         return this.renderChoices(container, node, path);
       case 'choice':
@@ -257,8 +298,14 @@ export class Story {
   // <text> label. These must NOT auto-apply — the player opts in by clicking.
   renderGroup(container, node, path) {
     const label = (node.textContent || '').replace(/\s+/g, ' ').trim();
-    const effects = Array.from(node.querySelectorAll('lose, tick, gain, adjust, set, curse'));
-    if (!label || !effects.length) {
+    // <adjust> is excluded: inside a group it is a modifier for a nested roll
+    // (e.g. "Difficulty 15 if you have climbing gear"), not a group effect.
+    const effects = Array.from(node.querySelectorAll('lose, tick, gain, set, curse'));
+    // A group may also carry navigation (e.g. "cross off 30 Shards and turn to 99
+    // in that book"): apply the effects and then follow the goto/return on click.
+    const gotoNode = node.querySelector('goto');
+    const returnNode = node.querySelector('return');
+    if (!label || (!effects.length && !gotoNode && !returnNode)) {
       // no visible action (or nothing to apply) — plain inline wrapper
       const span = document.createElement('span');
       this.appendChildren(span, node, path);
@@ -275,7 +322,14 @@ export class Story {
       btn.addEventListener('click', () => {
         effects.forEach((fx) => applyEffect(fx, this.state, {}));
         this.ctx.applied.add(key);
-        this.rerender();
+        if (gotoNode) {
+          const b = gotoNode.getAttribute('book') ? Number(gotoNode.getAttribute('book')) : this.book;
+          this.navigate(b, gotoNode.getAttribute('section'));
+        } else if (returnNode) {
+          this.goBack();
+        } else {
+          this.rerender();
+        }
       });
     }
     container.appendChild(btn);
@@ -303,6 +357,15 @@ export class Story {
       return null;
     }
 
+    // Economic payment (Shards/item/cargo/ship) in a section with an escape route:
+    // follows JaFL's forced-action model — click-to-apply, and blocks the rest of
+    // the section until resolved, so the optional exit shown before it (e.g. "turn
+    // back to 142") costs nothing. Narrative losses (Stamina, codewords, blessings…)
+    // and unavoidable payments fall through and auto-apply.
+    if (tag === 'lose' && !hidden && this.hasDecline && this.isEconomicPayment(node)) {
+      return this.renderPayment(container, node, path);
+    }
+
     const key = 'fx@' + path;
     // An absolute <set value="…"> is a pure function of current state, so it is
     // re-evaluated on every render — this keeps variables derived from a roll
@@ -321,6 +384,56 @@ export class Story {
       if (span.textContent.trim()) container.appendChild(span);
     }
     return null;
+  }
+
+  // Is this <lose> a "spend" the player commits to (Shards/item/cargo/ship), as
+  // opposed to a narrative penalty (Stamina, codeword, blessing…)? Forced only —
+  // an explicit force="f" loss, or a "*" catastrophe (lose all), is not gated.
+  isEconomicPayment(node) {
+    if (node.getAttribute('force') != null && !boolAttr(node.getAttribute('force'), true)) return false;
+    const shards = node.getAttribute('shards');
+    const item = node.getAttribute('item');
+    const hasShards = shards != null && shards !== '*';
+    const hasItem = item != null && item !== '*';
+    const hasCargo = node.getAttribute('cargo') != null && node.getAttribute('cargo') !== '*';
+    const hasShip = boolAttr(node.getAttribute('ship'));
+    // Mixed with a narrative penalty (rare) → let it auto-apply, don't gate.
+    if (node.getAttribute('stamina') != null || node.getAttribute('ability') != null) return false;
+    return hasShards || hasItem || hasCargo || hasShip;
+  }
+
+  // A forced economic payment: click-to-apply, and (until applied) blocks the rest
+  // of the section. Once paid it renders as a quiet "done" note and no longer blocks.
+  renderPayment(container, node, path) {
+    const memo = 'pay@' + path;
+    const cost = node.getAttribute('shards') ? resolveValue(this.state, node.getAttribute('shards')) : 0;
+    const label = document.createElement('span');
+    this.appendChildren(label, node, path);
+    const text = label.textContent.trim() || (cost ? `Pay ${cost} Shards` : 'Pay');
+
+    if (this.ctx.applied.has(memo)) {
+      const span = document.createElement('span');
+      span.className = 'fx paid';
+      span.textContent = text;
+      container.appendChild(span);
+      return null;
+    }
+
+    const btn = document.createElement('button');
+    btn.className = 'btn-mini pay-action';
+    btn.textContent = text;
+    if (cost && this.state.data.shards < cost) {
+      btn.disabled = true; btn.title = 'Not enough Shards';
+    } else {
+      btn.addEventListener('click', () => {
+        applyEffect(node, this.state, {});
+        this.ctx.applied.add(memo);
+        this.rerender();
+      });
+    }
+    container.appendChild(btn);
+    this.blocked = true; // hide the rest of the section until this is resolved
+    return btn;
   }
 
   // Optional purchase via the price/flag idiom. The cost node becomes a click-to-apply
@@ -383,6 +496,64 @@ export class Story {
     });
     container.appendChild(link);
     return link;
+  }
+
+  // Navigate back to the section the player came from (the last history entry).
+  goBack() {
+    const hist = this.state.data.history || [];
+    const prev = hist.length ? hist[hist.length - 1] : null;
+    if (prev) this.navigate(Number(prev.book), prev.section);
+  }
+
+  // <return> — a "go back to where you came from" link.
+  renderReturn(container, node, path) {
+    const hist = this.state.data.history || [];
+    const link = document.createElement('button');
+    link.className = 'goto goto-primary';
+    const inner = document.createElement('span');
+    this.appendChildren(inner, node, path);
+    link.appendChild(inner.textContent.trim() ? inner : document.createTextNode('Go back'));
+    if (hist.length) link.addEventListener('click', () => this.goBack());
+    else { link.disabled = true; link.title = 'Nowhere to return to'; }
+    container.appendChild(link);
+    return link;
+  }
+
+  // A standalone item/weapon/armour/tool award in prose (e.g. "Catch a smoulder
+  // fish. Note it on your Adventure Sheet."). Shows the item and lets you take it
+  // once, respecting the 12-item carry limit.
+  renderItemAward(container, node, path) {
+    const kind = node.tagName.toLowerCase();
+    const name = node.getAttribute('name') || (kind === 'weapon' ? 'weapon' : kind);
+    const bonus = node.getAttribute('bonus') ? parseInt(node.getAttribute('bonus'), 10) : 0;
+    const ability = node.getAttribute('ability') || null;
+    let tag = '';
+    if (kind === 'weapon') tag = ` (Combat +${bonus})`;
+    else if (kind === 'armour') tag = ` (Defence +${bonus})`;
+    else if (kind === 'tool' && ability) tag = ` (${titleCase(ability)} +${bonus})`;
+    else if (bonus) tag = ` (+${bonus})`;
+    const display = titleCase(name) + tag;
+    const key = 'take@' + path;
+    const taken = this.ctx.applied.has(key);
+    const btn = document.createElement('button');
+    btn.className = 'btn-mini take-item' + (taken ? ' done' : '');
+    if (taken) {
+      btn.disabled = true;
+      btn.textContent = '☑ ' + display;
+    } else if (this.state.freeSlots() <= 0) {
+      btn.disabled = true;
+      btn.textContent = display;
+      btn.title = 'No room (12-item carry limit)';
+    } else {
+      btn.textContent = 'Take ' + display;
+      btn.addEventListener('click', () => {
+        this.state.addItem(makeItem(kind, name, bonus, ability));
+        this.ctx.applied.add(key);
+        this.rerender();
+      });
+    }
+    container.appendChild(btn);
+    return btn;
   }
 
   // ---- choices -------------------------------------------------------------
@@ -850,9 +1021,7 @@ export class Story {
     }
     if (sell != null) {
       const price = resolveValue(this.state, sell);
-      const owned = kind === 'ship' ? this.state.ships.some((sh) => sh.type === goods.shipType)
-        : kind === 'cargo' ? this.state.ships.some((sh) => (sh.cargo || []).includes(goods.cargoName || name))
-          : this.state.hasItem(name);
+      const owned = ownsGoods(this.state, goods);
       const s = document.createElement('button');
       s.className = 'btn-mini';
       s.textContent = `Sell ${price}`;
@@ -886,7 +1055,9 @@ export class Story {
     const crewRank = (c) => ['poor', 'average', 'good', 'excellent'].indexOf(c);
     const ship = this.state.ships[0];
     let usable = true;
-    if (crew) usable = !!ship && crewRank(ship.crew) < crewRank(crew);
+    // Crew upgrades are one grade at a time (poor→average→good→excellent), so a
+    // "buy crew=X" offer is only usable when your crew is exactly the grade below X.
+    if (crew) usable = !!ship && crewRank(ship.crew) === crewRank(crew) - 1;
     btn.disabled = (price > 0 && this.state.data.shards < price) || !usable;
     btn.addEventListener('click', () => {
       applyInlineBuy(this.state, {

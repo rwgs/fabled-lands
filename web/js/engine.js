@@ -353,22 +353,46 @@ export function buyResurrectionDeal(state, { book, section, text, god, cost = 0 
 }
 
 // ---- roll resolution helpers ----------------------------------------------
-/** Total adjustment from <adjust> children of a roll node. */
+/** Total die-roll adjustment from the <adjust> children of a roll node.
+ *  Each <adjust> is a conditional modifier ("add N if you have a good crew");
+ *  only those whose condition the player meets contribute their amount. */
 export function childAdjustment(el, state) {
   let sum = 0;
   el.querySelectorAll(':scope > adjust').forEach((a) => {
-    // Only meets-conditions adjustments count.
-    if (adjustApplies(a, state)) sum += resolveValue(state, a.getAttribute('value') ?? a.getAttribute('amount') ?? '0');
+    if (adjustApplies(a, state)) sum += adjustAmount(a, state);
   });
   return sum;
 }
 
+/** The signed amount a roll-modifier <adjust> contributes. An explicit
+ *  value=/amount= wins; otherwise <adjust ability="X"/> adds X's current value
+ *  (e.g. "Add your Rank to the roll"), and <adjust name="V"/> adds a stored var. */
+function adjustAmount(el, state) {
+  const v = el.getAttribute('value') ?? el.getAttribute('amount');
+  if (v != null) return resolveValue(state, v);
+  const ab = el.getAttribute('ability');
+  if (ab != null) {
+    const key = ab.split('|')[0].trim().toLowerCase();
+    if (key === 'rank') return state.data.rank;
+    if (ABILITIES.includes(key)) return state.ability(key);
+  }
+  const nm = el.getAttribute('name');
+  if (nm != null) return state.codewordValue(nm);
+  return 0;
+}
+
+/** Does a roll-modifier <adjust> apply in the current state? Modifiers gated on
+ *  crew grade / ship type / god / profession / item / codeword count only when
+ *  the player meets that condition; an unconditional modifier always counts.
+ *  Crew/ship match is exact (a "good crew" bonus does not fire for excellent). */
 function adjustApplies(el, state) {
   const get = (a) => el.getAttribute(a);
   if (get('god') != null) return state.hasGod(get('god'));
   if (get('profession') != null) return normalize(state.data.profession) === normalize(get('profession'));
-  if (get('item') != null) return state.hasItem(get('item'));
-  if (get('codeword') != null) return state.hasCodeword(get('codeword'));
+  if (get('item') != null) return get('item').split(/[|,]/).some((n) => state.hasItem(n.trim()));
+  if (get('codeword') != null) return get('codeword').split(/[|,]/).some((c) => state.hasCodeword(c.trim()));
+  if (get('crew') != null) return state.ships.some((s) => s.crew === get('crew'));
+  if (get('ship') != null) return state.ships.some((s) => s.type === get('ship'));
   return true;
 }
 
