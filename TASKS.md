@@ -1,7 +1,19 @@
 # Fabled Lands — Web Edition · Engineering TODO
 
-Backlog of recommended improvements. Ordered roughly by impact. Items marked
-**done** were completed while auditing the engine; the rest are open.
+Backlog of recommended improvements, ordered roughly by impact. Work the first
+open (`- [ ]`) item; the numbered sections below hold the detail for each.
+
+- [x] 1. Gate combat progression / model fight outcomes
+- [x] 2. Finish the logic/view split (combat/market/rest)
+- [ ] 3. Implement `<items group … limit="N">` "choose up to N" pickup — MEDIUM
+- [ ] 4. Centralise tag dispatch into a registry — LOW
+- [ ] 5. Dice RNG quality / reproducibility — LOW
+- [ ] 6. Harden the per-visit memoization assumption — LOW
+- [ ] 7. Add headless unit tests for the extracted rules — LOW
+- [ ] 8. Optional: build-time XML validation — LOW
+
+Separate review findings (not yet promoted into the ordered list above) are at
+the bottom of this file.
 
 ---
 
@@ -103,3 +115,47 @@ and rest healing (fixed + dice).
 `build/build-data.ps1` bundles section XML unchecked. A lightweight schema/lint
 pass (or wiring the render-every-section smoke test into the build) would catch
 malformed sections before deploy. The smoke test already covers most of this.
+
+---
+
+## Separate repo review recommendations — 2026-07-03
+
+These are separate recommendations from a repo review pass. They have not been
+promoted into the ordered backlog above.
+
+- **Fix multi-attribute `<if>` conditions — HIGH.** `engine.evaluateCondition`
+  currently uses an `else if` chain, so a node such as `<if codeword="Dove"
+  title="Arena Champion">` checks only the first recognized attribute instead of
+  requiring both. Examples include `books/book4/122.xml`,
+  `books/book1/184.xml`, `books/book3/222.xml`, `books/book6/160.xml`, and
+  `books/book1/460.xml`. Change condition evaluation to combine all recognized
+  condition attributes as an AND expression, then apply `not="t"` to the final
+  result. Add targeted tests for at least one codeword+item/title case and one
+  item+profession case.
+
+- **Prevent silent save-slot overwrite — HIGH.** `state.nextFreeSlot()` returns
+  `0` when all 20 slots are occupied, so starting a new game, opening a demo
+  link, or importing a save can overwrite slot 0. Return `null`/throw when full
+  and have the UI ask the player to delete/export a save before continuing. Demo
+  mode should also avoid creating a persistent save unless the player chooses to
+  keep it.
+
+- **Harden save import and migration — MEDIUM.** `importSave()` only checks for
+  an object with `abilities` and `stamina`; malformed imported JSON can still
+  create saves with wrong array/object shapes that later break rendering or
+  sheet logic. Validate/clamp the imported schema deeply (`items`, `ships`,
+  `titles`, `curses`, `resurrections`, numeric fields, current book/section) and
+  reject unsupported shapes with a clear import error.
+
+- **Surface persistence failures to the player — MEDIUM.** `GameState.save()`
+  catches `localStorage` failures and logs them, but gameplay continues as if
+  progress was saved. Return a success/failure signal or expose `lastSaveError`
+  so the UI can warn when storage is unavailable, full, or blocked by browser
+  privacy settings.
+
+- **Make service-worker upgrades atomic — MEDIUM.** `sw.js` catches individual
+  precache misses, then `skipWaiting()`/`clients.claim()` activates the new
+  worker and deletes all old caches. A partial install could discard the last
+  complete offline cache. Split required shell/data assets from optional maps,
+  fail installation if required assets miss, and delete older caches only after
+  the new required cache is complete.
