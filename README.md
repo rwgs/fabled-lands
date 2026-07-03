@@ -113,9 +113,11 @@ whole book in a single request and cache it for offline play.
 
 ### Build stamp / version
 
-A build version in the form `yy.MM.dd.HH` is shown at the bottom of the in-game menu
-(and on the title screen). It is generated into `web/js/version.js` from the most recently
-modified file under `web/`. After changing anything in `web/`, refresh it with:
+A build version in the form `yy.MM.dd.HH.<sha>` (hourly date + the HEAD commit's short
+SHA) is shown at the bottom of the in-game menu (and on the title screen). It is generated
+into `web/js/version.js`. The commit SHA makes it change on **every commit** — so returning
+visitors' service workers always see a fresh cache key — while keeping hourly date
+granularity. After changing anything in `web/`, refresh it with:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File build/stamp-version.ps1

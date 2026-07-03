@@ -93,7 +93,13 @@ export class Story {
       const f = g.getAttribute('force');
       return f != null && !boolAttr(f, true);
     });
+    // Fight gating: while an unresolved <fight> exists, the navigation that
+    // follows it must not be clickable (else the player skips the fight). See
+    // computeFightGate / applyFightGate.
+    this.fightGate = this.computeFightGate(el);
+    this.sectionFight = null; // the fight rendered this pass (set in renderFight)
     this.appendChildren(flow, el, 'r');
+    this.applyFightGate(flow);
     this.root.appendChild(flow);
 
     // Dead-end fallback: a fully-resolved section offering no way forward is a
@@ -110,7 +116,11 @@ export class Story {
     }
 
     this.onRender();
-    if (this.state.isDead()) this.onDeath();
+    // If a lost fight offers a non-death "if you lose…" branch (e.g. §570 → §195
+    // restores you), don't trigger death: the player takes that branch instead.
+    const deathDeferred = this.sectionFight && this.sectionFight.outcome === 'lose'
+      && this.fightGate && this.fightGate.hasLosePath;
+    if (this.state.isDead() && !deathDeferred) this.onDeath();
   }
 
   makeIllustration(name) {
@@ -583,6 +593,7 @@ export class Story {
       if (!bookAvailable) { this.notify(`“${bookTitle(targetBook)}” (Book ${targetBook}) isn’t included in this edition.`, 'warn'); return; }
       this.navigate(targetBook, section);
     });
+    this.tagFightNav(node, link);
     container.appendChild(link);
     return link;
   }
@@ -604,6 +615,7 @@ export class Story {
     link.appendChild(inner.textContent.trim() ? inner : document.createTextNode('Go back'));
     if (hist.length) link.addEventListener('click', () => this.goBack());
     else { link.disabled = true; link.title = 'Nowhere to return to'; }
+    this.tagFightNav(node, link);
     container.appendChild(link);
     return link;
   }
@@ -716,6 +728,7 @@ export class Story {
         this.navigate(targetBook, section);
       });
     }
+    this.tagFightNav(node, btn);
     return btn;
   }
 
@@ -951,6 +964,70 @@ export class Story {
     container.appendChild(box);
   }
 
+  // ---- fight gating --------------------------------------------------------
+  // Identify the navigation that follows a <fight> and which of it is the
+  // "if you lose…" branch. While the fight is unresolved these controls are
+  // disabled; on a win the lose-branch is disabled; on a loss only it is enabled.
+  // Returns { navNodes:Set, loseNodes:Set, hasLosePath } or null when no fight.
+  computeFightGate(sectionEl) {
+    if (!sectionEl || !sectionEl.querySelector('fight')) return null;
+    const navNodes = new Set(), loseNodes = new Set();
+    // Conservative: only clear "you lose / are beaten / reduced to 0" cues mark a
+    // lose-branch. WIN cues merely veto a lose-mark (so "…dead. If you win…" stays
+    // a win). Under-marking just falls back to normal death — never strands a win.
+    const LOSE = /(you lose|if you lose|are beaten|are defeated|reduced to \d|pass out|knocked (out|unconscious)|battered into|lose the (fight|combat|battle)|you are killed|you are slain)/i;
+    const WIN = /(you win|if you win|defeat|reduce the|kill the|slay|victor|survive|beat the|overcome the|are victorious)/i;
+    let seenFight = false, recent = '';
+    const walk = (n, skip) => {
+      for (const ch of Array.from(n.childNodes)) {
+        if (ch.nodeType === Node.TEXT_NODE) { if (seenFight) recent = (recent + ' ' + (ch.nodeValue || '')).slice(-220); continue; }
+        if (ch.nodeType !== Node.ELEMENT_NODE) continue;
+        const tag = ch.tagName.toLowerCase();
+        if (tag === 'fight') { seenFight = true; recent = ''; walk(ch, true); continue; }
+        const childSkip = skip || tag === 'flee' || tag === 'fightdamage'; // Flee/fightdamage own gotos aren't gated
+        if (seenFight && !skip && (tag === 'goto' || tag === 'choice' || tag === 'return')) {
+          navNodes.add(ch);
+          if (LOSE.test(recent) && !WIN.test(recent)) loseNodes.add(ch);
+          recent = '';
+        }
+        walk(ch, childSkip);
+      }
+    };
+    walk(sectionEl, false);
+    if (!navNodes.size) return null;
+    return { navNodes, loseNodes, hasLosePath: loseNodes.size > 0 };
+  }
+
+  // Tag a rendered nav button with its fight role, for applyFightGate to act on.
+  tagFightNav(node, btn) {
+    if (this.fightGate && this.fightGate.navNodes.has(node)) {
+      btn.dataset.fightnav = '1';
+      if (this.fightGate.loseNodes.has(node)) btn.dataset.loserole = '1';
+    }
+  }
+
+  // Disable/enable post-fight navigation from the section's fight state.
+  applyFightGate(flow) {
+    const fight = this.sectionFight;
+    if (!fight) return;
+    const navs = Array.from(flow.querySelectorAll('[data-fightnav]'));
+    const nonLoseEnabled = navs.filter((b) => b.dataset.loserole !== '1' && !b.disabled);
+    navs.forEach((btn) => {
+      let disable;
+      if (!fight.outcome) disable = true;                         // unresolved: nothing yet
+      else if (fight.outcome === 'lose') disable = btn.dataset.loserole !== '1'; // only the lose-branch
+      else disable = btn.dataset.loserole === '1';                // won/fled: hide the lose-branch
+      // Safety: never strand a win — if disabling lose-branches would leave no
+      // enabled way forward, leave them all as-is.
+      if (disable && fight.outcome && fight.outcome !== 'lose' && btn.dataset.loserole === '1' && !nonLoseEnabled.length) return;
+      if (disable) {
+        btn.disabled = true;
+        btn.classList.add('gated');
+        if (!fight.outcome) btn.title = `Defeat the ${fight.name} first.`;
+      }
+    });
+  }
+
   // ---- fight ---------------------------------------------------------------
   renderFight(container, node, path) {
     const key = 'fight@' + path;
@@ -959,6 +1036,7 @@ export class Story {
       fight = makeFight(node);
       this.ctx.fights.set(key, fight);
     }
+    this.sectionFight = fight; // the section's fight, for the gate + death guard
     const dmgNode = this.findSibling(node, 'fightdamage');
     const fleeNode = this.findSibling(node, 'flee');
 
@@ -1017,8 +1095,13 @@ export class Story {
       controls.querySelectorAll('button').forEach((b) => (b.disabled = true));
       await animateDice(box, true);
       fightRound(this.state, fight, dmgNode);
-      if (this.state.isDead()) { this.rerender(); return; }
-      this.drawFight(box, fight, node, dmgNode, fleeNode, key);
+      // Reduced to 0 Stamina: if the section has an "if you lose…" branch, that's
+      // a (non-death) loss — route to it; otherwise it's death.
+      if (this.state.isDead() && this.fightGate && this.fightGate.hasLosePath) fight.outcome = 'lose';
+      // On any resolution (win/lose/fled) or death, re-render the whole section so
+      // the fight gate re-evaluates which onward links are enabled.
+      if (fight.outcome || this.state.isDead()) { this.rerender(); return; }
+      this.drawFight(box, fight, node, dmgNode, fleeNode, key); // fight continues
     });
     controls.appendChild(attack);
 

@@ -5,39 +5,28 @@ Backlog of recommended improvements. Ordered roughly by impact. Items marked
 
 ---
 
-## 1. Gate combat progression / model fight outcomes  ⚠️ gameplay bug — HIGH
+## 1. Gate combat progression / model fight outcomes  — **done**
 
-**Problem.** A fight's continuation is written in prose as a bare link —
-`<fight .../> … If you win, <goto section="X"/>. If you lose, …` — and the
-renderer draws that `<goto>` as an immediately-clickable button. Nothing ties it
-to the fight being won, so **the player can skip essentially any fight** by
-clicking the "if you win" link without attacking. First spotted in
-`books/book1/570.xml`; it affects fight sections generally.
+Fights no longer let the player skip past them, and win/loss now route correctly
+(first spotted in `books/book1/570.xml`; fixed engine-wide). In `render.js` +
+`combat.js`:
+1. **`flee="N"` win threshold** — `makeFight` reads it as `winThreshold`;
+   `fightRound` wins when enemy Stamina ≤ N (not only 0). Fixes 570's "reduce the
+   Tree Guard to 5". (The 4 `flee="N"` sections; distinct from the 20 `<flee>`
+   *child* Flee buttons, which already worked.)
+2. **Gating** — `computeFightGate` finds the navigation that follows a `<fight>`;
+   `applyFightGate` disables it (tooltip "Defeat the … first") while the fight is
+   unresolved, then on a win enables everything **except** the lose-branch.
+3. **Win vs lose branch** — the "if you lose…" goto is detected by conservative
+   prose cues (WIN cues veto, so under-marking just falls back to death — never
+   strands a win). On a loss it's the only branch enabled.
+4. **Non-death loss** — reaching 0 Stamina in a fight that has a lose-branch sets
+   `outcome='lose'` and **defers death**, so the player takes that branch (e.g.
+   570 → 195, which restores Stamina) instead of dying. No lose-branch ⇒ death.
 
-**Scope (measured across all six books):**
-- **166** sections contain a `<fight>`.
-- **50** have an explicit `if you lose … <goto>` (a *non-death* loss path). A
-  naive "disable all gotos until you win" would break these.
-- **4** use a `flee="N"` attribute — a win/knock-out threshold (win by reducing
-  the enemy to N Stamina, not 0). The engine currently **ignores** this
-  attribute, so e.g. 570's "reduce the Tree Guard to 5" never triggers.
-  (Sections: grep `books/*/[0-9]*.xml` for `<fight[^>]*flee="`.)
-- **20** use a `<flee>` *child element* — the Flee button, which already works.
-
-**Fix (proper, not naive).** In `render.js` + `combat.js`:
-1. Give a fight an explicit resolved/unresolved state and a `win`/`lose`/`fled`
-   outcome (combat.js already has `fight.outcome`).
-2. While an unresolved fight exists in the section, **disable subsequent
-   navigation controls** (`.goto`, `.choice`) with a tooltip ("Defeat the enemy
-   first"); re-enable on resolution.
-3. Distinguish the **win-goto** from the **lose-goto**. The books put them in
-   `if you win … <goto A>` / `if you lose … <goto B>` prose — parse/associate,
-   or (cleaner) wrap them so the renderer knows which is which.
-4. Honour `flee="N"`: winning threshold = enemy Stamina ≤ N (not 0), and model
-   the resulting knock-out loss as a branch rather than death.
-
-**Do not** ship the naive gate alone — verify against the 50 lose-goto sections
-and the 4 `flee="N"` sections (esp. `book1/570`) before/after.
+Verified: 18 targeted fight assertions (570 initial-gate / win / threshold, a
+synthetic non-death loss with death-deferral, a no-lose-path death, flee child) +
+the full render-every-section smoke test (all 165 fight sections render clean).
 
 ---
 

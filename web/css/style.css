@@ -170,6 +170,8 @@ img { max-width: 100%; }
    but greyed and non-interactive. Its buttons are also disabled in JS. */
 .flow .cond-inactive, .flow .cond-inactive * { color: #9a9186 !important; }
 .flow .cond-inactive button { pointer-events: none; background: transparent; border-color: #cfc7ba; box-shadow: none; cursor: default; text-decoration: underline; }
+/* A navigation link gated behind an unresolved/lost fight (see applyFightGate). */
+.flow .goto.gated, .flow .choice.gated { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
 .illus { margin: 0 0 1.2rem; text-align: center; }
 .illus img { border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,0.25); }
 
