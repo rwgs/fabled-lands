@@ -166,6 +166,10 @@ img { max-width: 100%; }
 .flow .caps { font-variant: small-caps; letter-spacing: 0.03em; font-weight: 600; }
 .flow .fx { }
 .flow .fx.paid { color: var(--crimson); font-style: italic; opacity: 0.85; }
+/* An untaken conditional branch: shown for context (like the printed book / JaFL)
+   but greyed and non-interactive. Its buttons are also disabled in JS. */
+.flow .cond-inactive, .flow .cond-inactive * { color: #9a9186 !important; }
+.flow .cond-inactive button { pointer-events: none; background: transparent; border-color: #cfc7ba; box-shadow: none; cursor: default; text-decoration: underline; }
 .illus { margin: 0 0 1.2rem; text-align: center; }
 .illus img { border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,0.25); }
 

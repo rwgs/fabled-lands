@@ -15,7 +15,7 @@ import { makeFight, fightRound } from './combat.js';
 import { shopKind, goodsFrom, ownsGoods, buyTrade, sellTrade, applyInlineBuy } from './market.js';
 import { normalize, makeItem } from './state.js';
 import { bookTitle, availableBooks } from './data.js';
-import { animateDice } from './ui.js';
+import { animateDice, modal } from './ui.js';
 
 const INLINE_STYLE = { b: 'strong', i: 'em', u: 'u', caps: 'span' };
 const BRANCH_TAGS = new Set(['success', 'failure', 'outcomes']);
@@ -98,7 +98,9 @@ export class Story {
 
     // Dead-end fallback: a fully-resolved section offering no way forward is a
     // narrative death (the original game exposed an "Extra Choice: Death" for this).
-    const controls = flow.querySelectorAll('.goto, .choice, .btn-roll, .btn-secondary, .btn-mini, .fight, .group-action, .pay-action');
+    // Controls inside an untaken (grayed) branch don't count — they're disabled.
+    const controls = Array.from(flow.querySelectorAll('.goto, .choice, .btn-roll, .btn-secondary, .btn-mini, .fight, .group-action, .pay-action'))
+      .filter((c) => !c.closest('.cond-inactive'));
     if (!controls.length && !this.state.isDead()) {
       const end = document.createElement('button');
       end.className = 'goto goto-primary end-fate';
@@ -143,21 +145,23 @@ export class Story {
       if (node.nodeType !== Node.ELEMENT_NODE) return;
       const tag = node.tagName.toLowerCase();
 
-      // if / elseif / else chain: only one branch renders
+      // if / elseif / else chain: exactly one branch is "active". Like JaFL, the
+      // others are still shown — grayed out and non-interactive — rather than
+      // hidden, so the reader keeps the full context ("If you have codeword X…").
       if (tag === 'if' || tag === 'elseif' || tag === 'else') {
-        let render = false;
+        let active = false;
         if (tag === 'if' || !chainActive) {
           chainActive = true;
-          render = tag === 'else' ? true : evaluateCondition(node, this.state);
-          chainDone = render;
+          active = tag === 'else' ? true : evaluateCondition(node, this.state);
+          chainDone = active;
         } else if (chainDone) {
-          render = false; // a previous branch already matched
+          active = false; // a previous branch already matched
         } else if (tag === 'else') {
-          render = true; chainDone = true;
+          active = true; chainDone = true;
         } else { // elseif with no prior match
-          render = evaluateCondition(node, this.state); chainDone = render;
+          active = evaluateCondition(node, this.state); chainDone = active;
         }
-        if (render) this.appendChildren(container, node, path);
+        this.renderConditionalBranch(container, node, path, active);
         return;
       }
       chainActive = false; chainDone = false;
@@ -167,8 +171,29 @@ export class Story {
         return;
       }
       this.renderElement(container, node, path);
-      if (ROLL_TAGS.has(tag)) this.activeRoll = { node, path };
+      // An inactive branch's roll must not become the section's active roll.
+      if (ROLL_TAGS.has(tag) && !this.inactive) this.activeRoll = { node, path };
     });
+  }
+
+  // Render one branch of an if/elseif/else chain. The taken branch renders
+  // normally; an untaken branch renders grayed and non-interactive (JaFL's model):
+  // its words show, but effects are not applied and its links/buttons are disabled.
+  renderConditionalBranch(container, node, path, active) {
+    if (active && !this.inactive) {
+      this.appendChildren(container, node, path);
+      return;
+    }
+    const span = document.createElement('span');
+    span.className = 'cond-inactive';
+    const prev = this.inactive;
+    this.inactive = true;              // suppress effects (see renderPassive)
+    this.appendChildren(span, node, path);
+    this.inactive = prev;
+    // Neutralise any interactive controls the branch produced (gotos, choices,
+    // roll/market/group buttons). Effects already skipped via this.inactive.
+    span.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+    if (span.textContent.trim() || span.querySelector('*')) container.appendChild(span);
   }
 
   appendText(container, raw) {
@@ -245,6 +270,8 @@ export class Story {
         return this.renderMarket(container, node, path);
       case 'buy':
         return this.renderInlineBuy(container, node, path);
+      case 'sell':
+        return this.renderInlineSell(container, node, path);
       case 'rest':
         return this.renderRest(container, node, path);
       case 'resurrection':
@@ -340,6 +367,20 @@ export class Story {
   renderPassive(container, node, path) {
     const tag = node.tagName.toLowerCase();
     const hidden = boolAttr(node.getAttribute('hidden'));
+
+    // Inside an untaken conditional branch: show the words (the wrapper grays
+    // them), but never apply the effect, gate a payment, or memoize — the branch
+    // isn't taken, and a later state change re-renders it live if it becomes active.
+    if (this.inactive) {
+      if (!hidden) {
+        const span = document.createElement('span');
+        span.className = 'fx';
+        this.appendChildren(span, node, path);
+        if (span.textContent.trim()) container.appendChild(span);
+      }
+      return null;
+    }
+
     const price = node.getAttribute('price');
     const flag = node.getAttribute('flag');
 
@@ -1046,6 +1087,39 @@ export class Story {
     const price = shards != null ? resolveValue(this.state, shards) : 0;
     const crew = node.getAttribute('crew');
     const item = node.getAttribute('item');
+    const cargo = node.getAttribute('cargo');
+    const flag = node.getAttribute('flag');
+
+    // A flag-linked buy is the *reward* side of a barter whose cost is a matching
+    // [price=flag] <sell> elsewhere in the section (e.g. §538 "exchange a cargo
+    // unit for minerals"). It's applied when that cost is taken, so here we only
+    // show its words — the <sell> click adds the cargo (see applyLinkedCargoBuys).
+    if (flag != null && this.sectionEl && this.sectionEl.querySelector(`[price="${flag}"]`)) {
+      const span = document.createElement('span');
+      span.className = 'fx';
+      this.appendChildren(span, node, path);
+      if (span.textContent.trim()) container.appendChild(span);
+      return null;
+    }
+
+    // Add a Cargo Unit to the ship (many sections grant free cargo, shards="0").
+    if (cargo != null) {
+      const btn = document.createElement('button');
+      btn.className = 'btn-mini';
+      const inner = document.createElement('span');
+      this.appendChildren(inner, node, path);
+      btn.textContent = inner.textContent.trim() || (price ? `Buy ${price} Shards` : `Take a Cargo Unit of ${titleCase(cargo)}`);
+      const hasShip = this.state.ships.length > 0;
+      btn.disabled = !hasShip || (price > 0 && this.state.data.shards < price);
+      btn.title = !hasShip ? 'You need a ship to carry cargo.' : (price > 0 && this.state.data.shards < price ? 'Not enough Shards' : '');
+      btn.addEventListener('click', () => {
+        const res = buyTrade(this.state, { kind: 'cargo', cargoName: cargo, name: cargo }, price);
+        if (!res.ok) { if (res.note) this.notify(res.note, 'warn'); return; }
+        this.rerender();
+      });
+      container.appendChild(btn);
+      return btn;
+    }
     const btn = document.createElement('button');
     btn.className = 'btn-mini';
     const inner = document.createElement('span');
@@ -1069,6 +1143,73 @@ export class Story {
     });
     container.appendChild(btn);
     return btn;
+  }
+
+  // Inline <sell> in prose: sell a Cargo Unit for Shards, or (when price="<flag>"
+  // is a name rather than a number) barter it — give up a cargo unit and receive
+  // the linked [flag=<name>] <buy> reward atomically (e.g. §538 swap for minerals).
+  renderInlineSell(container, node, path) {
+    const cargo = node.getAttribute('cargo');
+    const priceAttr = node.getAttribute('price');
+    const isFlag = priceAttr != null && !/^\d/.test(String(priceAttr).trim());
+    const shardsGain = (priceAttr != null && !isFlag) ? resolveValue(this.state, priceAttr) : 0;
+    const memo = 'sell@' + path;
+
+    const inner = document.createElement('span');
+    this.appendChildren(inner, node, path);
+    const label = inner.textContent.trim() || (shardsGain ? `Sell for ${shardsGain} Shards` : 'Give a Cargo Unit');
+
+    if (this.ctx.applied.has(memo)) {
+      const span = document.createElement('span');
+      span.className = 'fx paid';
+      span.textContent = label;
+      container.appendChild(span);
+      return null;
+    }
+    if (cargo == null) { // non-cargo sells are unused in this corpus — show as prose
+      const span = document.createElement('span');
+      this.appendChildren(span, node, path);
+      container.appendChild(span);
+      return null;
+    }
+
+    const btn = document.createElement('button');
+    btn.className = 'btn-mini';
+    btn.textContent = label;
+    const shipWithCargo = this.state.ships.find((s) => (s.cargo || []).length > 0);
+    btn.disabled = !shipWithCargo;
+    btn.title = shipWithCargo ? '' : 'You have no cargo to give.';
+    btn.addEventListener('click', async () => {
+      const ship = this.state.ships.find((s) => (s.cargo || []).length > 0);
+      if (!ship) return;
+      let type = cargo;
+      if (cargo === '?') { // give any one commodity — let the player choose which
+        const kinds = [...new Set(ship.cargo)];
+        type = kinds.length === 1 ? kinds[0]
+          : await modal({ title: 'Give which cargo?', body: 'Choose a Cargo Unit to give up:', buttons: kinds.map((k) => ({ label: titleCase(k), value: k })) });
+        if (!type) return; // cancelled
+      }
+      const idx = ship.cargo.indexOf(type);
+      if (idx < 0) return;
+      ship.cargo.splice(idx, 1);
+      if (shardsGain) this.state.adjustMoney(shardsGain);
+      if (isFlag) this.applyLinkedCargoBuys(priceAttr); // the barter reward (minerals)
+      this.ctx.applied.add(memo);
+      this.state.changed();
+      this.rerender();
+    });
+    container.appendChild(btn);
+    return btn;
+  }
+
+  // Apply the reward side of a barter: every [flag=key] <buy cargo> in the section
+  // (the commodity received in exchange for the cargo just given up).
+  applyLinkedCargoBuys(key) {
+    this.sectionEl.querySelectorAll(`[flag="${key}"]`).forEach((b) => {
+      if (b.tagName.toLowerCase() === 'buy' && b.getAttribute('cargo') != null) {
+        buyTrade(this.state, { kind: 'cargo', cargoName: b.getAttribute('cargo'), name: b.getAttribute('cargo') }, 0);
+      }
+    });
   }
 
   // ---- rest ----------------------------------------------------------------

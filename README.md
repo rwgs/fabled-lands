@@ -152,7 +152,7 @@ structure of the books is preserved exactly.
 | `data.js` | Loads the bundled JSON, parses section XML, exposes `getSection(book, n)`. |
 | `state.js` | The **Adventure Sheet** model + derived stats (affected abilities, Defence) + `localStorage` save slots. |
 | `rules.js` | Static constants: abilities, professions, rank titles, limits. |
-| `engine.js` | The headless rules core: dice, `<if>` condition evaluation, passive effects (`lose`/`tick`/`gain`/`adjust`/`set`), and roll resolution (ability/difficulty, rank check, training), rest, and resurrection deals. No DOM. |
+| `engine.js` | The headless rules core: dice, `<if>` condition evaluation, passive effects (`lose`/`tick`/`gain`/`set`/`curse`), die-roll modifiers (`<adjust>`, conditional on crew/ship/god/item/codeword/rank), and roll resolution (ability/difficulty, rank check, training), rest, and resurrection deals. No DOM. |
 | `combat.js` | Headless combat resolution — building an enemy, attack rounds, initiative, damage, `<fightdamage>`. No DOM. |
 | `market.js` | Headless economy — buying/selling goods, weapons, armour, ships, cargo, and crew upgrades. No DOM. |
 | `render.js` | Turns a `<section>` tree into interactive DOM and wires all interactions, delegating the actual rules to `engine.js` / `combat.js` / `market.js`. |
@@ -174,6 +174,19 @@ rolls are memoised per-visit by a stable node path, which guarantees that:
 - a roll's `<success>`/`<failure>`/`<outcome>` branch only appears — and only applies its
   effects — once the roll is actually made.
 
+Two behaviours follow the original Java app rather than a simpler "hide it" approach:
+
+- **Conditionals are shown, not hidden.** An `<if>`/`<elseif>`/`<else>` branch whose
+  condition isn't met is **greyed out and disabled** rather than removed — so
+  "*If you have the codeword X…*" stays on screen for context and the following "If not…"
+  still reads correctly. Its effects don't apply and its links are inert until (a later
+  state change makes) the condition hold.
+- **Money is spent by choice.** A `<lose>` of Shards/goods in a section that lets the
+  player decline (it offers an optional "turn back" link) is **not** deducted on arrival;
+  it becomes a **click-to-pay** action that blocks the rest of the section until resolved —
+  mirroring the original's forced-action model, so turning back costs nothing. Unavoidable
+  payments and narrative losses (Stamina, codewords, blessings…) still apply automatically.
+
 ### Rules implemented (from the original engine)
 
 - **Ability check** — `2d6 + affected ability > Difficulty` ⇒ success.
@@ -183,7 +196,9 @@ rolls are memoised per-visit by a stable node path, which guarantees that:
 - **Outcome tables** — roll `N`d6 and map the total onto ranges (`0-4`, `1,2`, `11`, `14+`).
 - **Rank check** (`roll ≤ Rank`), **Training** (`2d6 > current ability` ⇒ +1).
 - **Economy** — markets buy/sell items, weapons, armour, tools, ships, cargo and crew
-  upgrades; best-bonus-only stacking; 12-item carry limit (money is unlimited).
+  upgrades (one grade at a time); inline `<buy>`/`<sell>` in prose, including cargo grants
+  and cargo-for-cargo barter (give any one unit, receive the offered commodity);
+  best-bonus-only stacking; 12-item carry limit (money is unlimited).
 - **Bookkeeping** — codewords, blessings, curses, gods, titles, flags, variables, visit
   boxes, caches and resurrection deals.
 
@@ -215,12 +230,17 @@ fighting), and renders **every section of all six books** to confirm none throw.
 `web/` folder and open `/_test.html`, or run it headlessly:
 
 ```powershell
-& "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" `
-  --headless=new --disable-gpu --dump-dom --virtual-time-budget=60000 `
+& "C:\Program Files\Google\Chrome\Application\chrome.exe" `
+  --headless=new --disable-gpu --no-sandbox --dump-dom --virtual-time-budget=60000 `
+  --user-data-dir="$env:TEMP\fl-test-profile" `
   "http://localhost:8848/_test.html"
 ```
 
 The first line of the dumped `#results` reads `RESULT ALL PASS …` when healthy.
+
+> Use a **fresh `--user-data-dir`** (as above) so the service worker can't serve a stale
+> cached copy of the app — otherwise an old bundle can mask your changes and report a
+> false pass. Chrome is used here because headless Edge occasionally emitted empty dumps.
 
 ---
 
