@@ -5,15 +5,17 @@ open (`- [ ]`) item; the numbered sections below hold the detail for each.
 
 - [x] 1. Gate combat progression / model fight outcomes
 - [x] 2. Finish the logic/view split (combat/market/rest)
-- [ ] 3. Implement `<items group … limit="N">` "choose up to N" pickup — MEDIUM
-- [ ] 4. Centralise tag dispatch into a registry — LOW
-- [ ] 5. Dice RNG quality / reproducibility — LOW
-- [ ] 6. Harden the per-visit memoization assumption — LOW
-- [ ] 7. Add headless unit tests for the extracted rules — LOW
-- [ ] 8. Optional: build-time XML validation — LOW
-
-Separate review findings (not yet promoted into the ordered list above) are at
-the bottom of this file.
+- [ ] 3. Fix multi-attribute `<if>` conditions — HIGH
+- [ ] 4. Prevent silent save-slot overwrite — HIGH
+- [ ] 5. Implement `<items group … limit="N">` "choose up to N" pickup — MEDIUM
+- [ ] 6. Harden save import and migration — MEDIUM
+- [ ] 7. Surface persistence failures to the player — MEDIUM
+- [ ] 8. Make service-worker upgrades atomic — MEDIUM
+- [ ] 9. Centralise tag dispatch into a registry — LOW
+- [ ] 10. Dice RNG quality / reproducibility — LOW
+- [ ] 11. Harden the per-visit memoization assumption — LOW
+- [ ] 12. Add headless unit tests for the extracted rules — LOW
+- [ ] 13. Optional: build-time XML validation — LOW
 
 ---
 
@@ -56,22 +58,79 @@ widget and wires the button, then calls the rule and displays the result:
 sums `rollDice` + `childAdjustment`, both already in `engine.js`; outcome ranges
 are matched later by `engine.matchRange`).
 
-Remaining: add the unit tests these now enable — see item #7.
+Remaining: add the unit tests these now enable — see item #12.
 
 ---
 
-## 3. Implement `<items group … limit="N">` "choose up to N" pickup  — MEDIUM
+## 3. Fix multi-attribute `<if>` conditions  — HIGH
 
-Standalone award rows (`<weapon group=…>`, `<tool group=…>`, `<item group=…>`)
-and their `<items group="…" limit="N"/>` controller are **not rendered as
-pickable** — they fall through to the default prose branch. Affects ~7 sections
-(e.g. `book1/16.xml`, "choose up to three treasures"). The Java original handled
-this via `ItemNode` group/limit. Add a renderer + a `state` group-pick that
-enforces the limit and the 12-item carry cap.
+`engine.evaluateCondition` currently uses an `else if` chain, so a node such as
+`<if codeword="Dove" title="Arena Champion">` checks only the first recognized
+attribute instead of requiring both. Examples include `books/book4/122.xml`,
+`books/book1/184.xml`, `books/book3/222.xml`, `books/book6/160.xml`, and
+`books/book1/460.xml`. Change condition evaluation to combine all recognized
+condition attributes as an AND expression, then apply `not="t"` to the final
+result. Add targeted tests for at least one codeword+item/title case and one
+item+profession case.
 
 ---
 
-## 4. Centralise tag dispatch into a registry  — LOW (maintainability)
+## 4. Prevent silent save-slot overwrite  — HIGH
+
+`state.nextFreeSlot()` returns `0` when all 20 slots are occupied, so starting a
+new game, opening a demo link, or importing a save can overwrite slot 0. Return
+`null`/throw when full and have the UI ask the player to delete/export a save
+before continuing. Demo mode should also avoid creating a persistent save unless
+the player chooses to keep it.
+
+---
+
+## 5. Implement `<items group … limit="N">` "choose up to N" pickup  — MEDIUM
+
+Grouped award rows (`<weapon group=…>`, `<tool group=…>`, `<item group=…>`) are
+each rendered as an independent "Take" button by `renderItemAward`, which ignores
+the `group` and `limit` attributes; the `<items group="…" limit="N"/>` controller
+has no renderer (falls through the switch to `appendChildren`, producing nothing).
+So the "choose up to N" cap is **not enforced** — the player can take every listed
+treasure (only the global 12-item carry cap limits them). Affects 6 sections
+(`book1/16.xml`, `book4/113.xml`, `book4/137.xml`, `book4/218.xml`,
+`book5/671.xml`, `book5/709.xml`; e.g. 16's "choose up to three treasures"). The
+Java original handled this via `ItemNode` group/limit. Add an `<items>` renderer +
+a `state` group-pick that enforces the limit across the shared group id and the
+12-item carry cap.
+
+---
+
+## 6. Harden save import and migration  — MEDIUM
+
+`importSave()` only checks for an object with `abilities` and `stamina`;
+malformed imported JSON can still create saves with wrong array/object shapes
+that later break rendering or sheet logic. Validate/clamp the imported schema
+deeply (`items`, `ships`, `titles`, `curses`, `resurrections`, numeric fields,
+current book/section) and reject unsupported shapes with a clear import error.
+
+---
+
+## 7. Surface persistence failures to the player  — MEDIUM
+
+`GameState.save()` catches `localStorage` failures and logs them, but gameplay
+continues as if progress was saved. Return a success/failure signal or expose
+`lastSaveError` so the UI can warn when storage is unavailable, full, or blocked
+by browser privacy settings.
+
+---
+
+## 8. Make service-worker upgrades atomic  — MEDIUM
+
+`sw.js` catches individual precache misses, then `skipWaiting()`/`clients.claim()`
+activates the new worker and deletes all old caches. A partial install could
+discard the last complete offline cache. Split required shell/data assets from
+optional maps, fail installation if required assets miss, and delete older caches
+only after the new required cache is complete.
+
+---
+
+## 9. Centralise tag dispatch into a registry  — LOW (maintainability)
 
 Tag handling is spread across two hand-rolled switches (`render.js`
 `renderElement`, `engine.js` `applyEffect`). For ~40 tags this is fine, but a
@@ -81,7 +140,7 @@ UI coupling).
 
 ---
 
-## 5. Dice RNG quality / reproducibility  — LOW
+## 10. Dice RNG quality / reproducibility  — LOW
 
 `engine.js` rolls with `Math.random()` — uniform and unbiased for 1–6 (no modulo
 bias), statistically fine for play, but **not seedable**. A small seedable PRNG
@@ -91,7 +150,7 @@ for correctness.
 
 ---
 
-## 6. Harden the per-visit memoization assumption  — LOW
+## 11. Harden the per-visit memoization assumption  — LOW
 
 `render.js` memoises applied effects / rolls by a node path (`basePath + '.' +
 idx`). This is safe today because the XML tree shape is static per visit. Add a
@@ -100,7 +159,7 @@ conditionally reorders siblings would break effect-dedup.
 
 ---
 
-## 7. Add headless unit tests for the extracted rules  — LOW
+## 12. Add headless unit tests for the extracted rules  — LOW
 
 `web/_test.html` renders every section (catches throws) but doesn't assert
 combat/economy outcomes. Now that `combat.js` / `market.js` / `engine.applyRest`
@@ -110,52 +169,8 @@ and rest healing (fixed + dice).
 
 ---
 
-## 8. Optional: build-time XML validation  — LOW
+## 13. Optional: build-time XML validation  — LOW
 
 `build/build-data.ps1` bundles section XML unchecked. A lightweight schema/lint
 pass (or wiring the render-every-section smoke test into the build) would catch
 malformed sections before deploy. The smoke test already covers most of this.
-
----
-
-## Separate repo review recommendations — 2026-07-03
-
-These are separate recommendations from a repo review pass. They have not been
-promoted into the ordered backlog above.
-
-- **Fix multi-attribute `<if>` conditions — HIGH.** `engine.evaluateCondition`
-  currently uses an `else if` chain, so a node such as `<if codeword="Dove"
-  title="Arena Champion">` checks only the first recognized attribute instead of
-  requiring both. Examples include `books/book4/122.xml`,
-  `books/book1/184.xml`, `books/book3/222.xml`, `books/book6/160.xml`, and
-  `books/book1/460.xml`. Change condition evaluation to combine all recognized
-  condition attributes as an AND expression, then apply `not="t"` to the final
-  result. Add targeted tests for at least one codeword+item/title case and one
-  item+profession case.
-
-- **Prevent silent save-slot overwrite — HIGH.** `state.nextFreeSlot()` returns
-  `0` when all 20 slots are occupied, so starting a new game, opening a demo
-  link, or importing a save can overwrite slot 0. Return `null`/throw when full
-  and have the UI ask the player to delete/export a save before continuing. Demo
-  mode should also avoid creating a persistent save unless the player chooses to
-  keep it.
-
-- **Harden save import and migration — MEDIUM.** `importSave()` only checks for
-  an object with `abilities` and `stamina`; malformed imported JSON can still
-  create saves with wrong array/object shapes that later break rendering or
-  sheet logic. Validate/clamp the imported schema deeply (`items`, `ships`,
-  `titles`, `curses`, `resurrections`, numeric fields, current book/section) and
-  reject unsupported shapes with a clear import error.
-
-- **Surface persistence failures to the player — MEDIUM.** `GameState.save()`
-  catches `localStorage` failures and logs them, but gameplay continues as if
-  progress was saved. Return a success/failure signal or expose `lastSaveError`
-  so the UI can warn when storage is unavailable, full, or blocked by browser
-  privacy settings.
-
-- **Make service-worker upgrades atomic — MEDIUM.** `sw.js` catches individual
-  precache misses, then `skipWaiting()`/`clients.claim()` activates the new
-  worker and deletes all old caches. A partial install could discard the last
-  complete offline cache. Split required shell/data assets from optional maps,
-  fail installation if required assets miss, and delete older caches only after
-  the new required cache is complete.
