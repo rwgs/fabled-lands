@@ -16,6 +16,7 @@ open (`- [ ]`) item; the numbered sections below hold the detail for each.
 - [ ] 11. Harden the per-visit memoization assumption — LOW
 - [ ] 12. Add headless unit tests for the extracted rules — LOW
 - [ ] 13. Optional: build-time XML validation — LOW
+- [x] 14. Fix save-card button overflow on mobile
 
 ---
 
@@ -174,3 +175,17 @@ and rest healing (fixed + dice).
 `build/build-data.ps1` bundles section XML unchecked. A lightweight schema/lint
 pass (or wiring the render-every-section smoke test into the build) would catch
 malformed sections before deploy. The smoke test already covers most of this.
+
+---
+
+## 14. Fix save-card button overflow on mobile  — **done**
+
+On the saves screen each `.save-card` laid out the info and a `.save-btns` row of
+three full-size buttons (Play / Export / Delete) side by side; `.save-btns` is
+`flex-shrink: 0`, so on a narrow phone the buttons overflowed the card (Delete
+clipped off-screen). Fixed in `css/style.css` inside the `@media (max-width:600px)`
+block: the card stacks (`flex-direction: column`), and the button row goes
+full-width with each `.btn` `flex: 1; min-width: 0` and reduced side padding, so
+the three buttons share the row and all stay visible. CSS-only; verified visually
+at a 360px viewport and with the full render-every-section smoke test
+(`RESULT ALL PASS`).
