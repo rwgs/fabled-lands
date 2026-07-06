@@ -12,9 +12,6 @@ the view/app/infra layer, with every finding verified against both the code and
 the book XML corpus.
 
 **HIGH**
-- [ ] 3. Fix multi-attribute `<if>` conditions
-- [ ] 4. Prevent silent save-slot overwrite
-- [ ] 15. Fix `<gain>`/`<lose>`/`<tick>` ability effects (rank, stamina, "?", "*", fatal)
 - [ ] 16. Make wildcard/choice losses actually take things
 - [ ] 17. Recognise all spec'd `<if>` attributes; stop defaulting unknown conditions to true
 - [ ] 18. Preserve item `tags` and support tag-filtered item conditions
@@ -53,7 +50,10 @@ the book XML corpus.
 **Done**
 - [x] 1. Gate combat progression / model fight outcomes
 - [x] 2. Finish the logic/view split (combat/market/rest)
+- [x] 3. Fix multi-attribute `<if>` conditions
+- [x] 4. Prevent silent save-slot overwrite
 - [x] 14. Fix save-card button overflow on mobile
+- [x] 15. Fix `<gain>`/`<lose>`/`<tick>` ability effects (rank, stamina, "?", "*", fatal)
 
 ---
 
@@ -100,27 +100,57 @@ Remaining: add the unit tests these now enable — see item #12.
 
 ---
 
-## 3. Fix multi-attribute `<if>` conditions  — HIGH
+## 3. Fix multi-attribute `<if>` conditions  — **done**
 
-`engine.evaluateCondition` currently uses an `else if` chain, so a node such as
-`<if codeword="Dove" title="Arena Champion">` checks only the first recognized
-attribute instead of requiring both. Examples include `books/book4/122.xml`,
-`books/book1/184.xml`, `books/book3/222.xml`, `books/book6/160.xml`, and
-`books/book1/460.xml`. Change condition evaluation to combine all recognized
-condition attributes as an AND expression, then apply `not="t"` to the final
-result. Add targeted tests for at least one codeword+item/title case and one
-item+profession case. (Task 17 extends the same function with the attribute
-handlers it is missing entirely — do them together if convenient.)
+`engine.evaluateCondition` used an `else if` chain, so a node such as
+`<if codeword="Dove" title="Arena Champion">` checked only the first recognized
+attribute and ignored the rest.
+
+**Correction to the original task text:** the task said to combine the recognized
+attributes as an *AND*. That is wrong — the canonical JaFL semantics is *OR*.
+The original Java `IfNode.meetsConditions()` (`java-engine/flands/IfNode.java`)
+returns `true` as soon as **any** present attribute is satisfied and applies
+`not` to that final result; and every cited example's prose confirms OR:
+book4/122 "codeword Dove **or** the title Arena Champion", book1/184 "codeword
+Axe **or** … a black dragon shield", book3/222 "codeword Aid **or** … a ship
+docked at Smogmaw", book6/160 "blessing … **or** a catastrophe certificate",
+book1/460 light-source **or** Mage. Combining as AND would have broken all five.
+
+Fix (`web/js/engine.js`): `evaluateCondition` now OR-combines every recognized
+attribute (each is a disjunct; comma/pipe *within* a codeword or title list keep
+their own AND/OR meaning), then negates with `not="t"`. A node with no recognized
+attribute still defaults to true (task 17 tightens that to a warning + adds the
+missing handlers — `weapon`/`armour`/`tool`/`disease`/`poison`/`cache`/`using`,
+docked-at-location, natural-score, empty-god). Verified: 8 new engine assertions
+in `web/_test.html` (codeword|title OR both ways + neither; item|profession OR;
+`not` over the whole OR) + full render-every-section smoke test
+(`RESULT ALL PASS pass=100 fail=0`).
 
 ---
 
-## 4. Prevent silent save-slot overwrite  — HIGH
+## 4. Prevent silent save-slot overwrite  — **done**
 
-`state.nextFreeSlot()` returns `0` when all 20 slots are occupied, so starting a
-new game, opening a demo link, or importing a save can overwrite slot 0. Return
-`null`/throw when full and have the UI ask the player to delete/export a save
-before continuing. Demo mode should also avoid creating a persistent save unless
-the player chooses to keep it.
+`state.nextFreeSlot()` returned `0` when all 20 slots were occupied, so starting a
+new game, opening a demo link, or importing a save could overwrite slot 0.
+
+Fix:
+- `nextFreeSlot()` (`state.js`) now returns **`null`** when all 20 slots are full.
+- `importSave()` throws a clear "All 20 save slots are full…" error instead of
+  landing on slot 0.
+- New-game start (`app.js`) checks `nextFreeSlot()` first; if full it shows a
+  `slotsFullModal()` ("Delete or export one to free a slot") and refuses to start
+  rather than clobbering slot 0.
+- **Demo / preview (`?demo=`) mode** no longer creates a persistent save: a new
+  `GameState.ephemeral` flag makes `save()` a no-op, so a preview never occupies
+  (or overwrites) a slot. The in-game menu offers **"Keep this adventure"** for an
+  ephemeral game, which calls `GameState.keep()` — it grabs the first free slot,
+  clears the flag and persists, or throws if full.
+
+Verified: 5 new headless assertions (`nextFreeSlot()===null` when full; import
+throws when full; ephemeral game writes nothing to storage; `keep()` assigns a
+real slot, clears the flag and persists) plus a real-app boot check — title
+screen and `?demo=1.1` game screen both render with no fatal error and no save
+written. Full smoke test `RESULT ALL PASS pass=105 fail=0`.
 
 ---
 
@@ -232,30 +262,46 @@ at a 360px viewport and with the full render-every-section smoke test
 
 ---
 
-## 15. Fix `<gain>`/`<lose>`/`<tick>` ability effects (rank, stamina, "?", "*", fatal)  — HIGH
+## 15. Fix `<gain>`/`<lose>`/`<tick>` ability effects (rank, stamina, "?", "*", fatal)  — **done**
 
-`firstAbility` (`web/js/engine.js:47`) accepts only the six core abilities, so
-`ability="rank"`, `ability="stamina"`, `ability="?"` (player's choice) and
-`ability="*"` (all six) are silently dropped by `applyLose` (engine.js:172) and
-`applyTick` (engine.js:241). Worse, in a `<gain>`/`<tick>` the dropped effect
-leaves `did` false, so the bare-tick fallback (engine.js:257–261) **ticks the
-section's visit box instead** — the series' 39 `<gain ability="rank">` rank-ups
-do nothing *and* corrupt tick state (e.g. `books/book2/157.xml`, the wheel of
-fortune, which also uses stamina gains/losses — 27 `ability="stamina"` gains and
-~25 stamina/rank losses corpus-wide). Also unread: `fatal="t"` (ability reduced
-to 0 kills — book2/157, book5/356) and `<tick ability=… effect="+fixed|+cursed|
--…">` (fix-at-1 / auto-fail effects — book2/643, book6/78/332/353).
+`firstAbility` accepted only the six core abilities, so `ability="rank"`,
+`ability="stamina"`, `ability="?"` and `ability="*"` were dropped by `applyLose`/
+`applyTick`, and in a `<gain>`/`<tick>` the dropped effect left `did` false so the
+bare-tick fallback **ticked the visit box instead** (39 rank-ups did nothing and
+corrupted tick state; book2/157 wheel of fortune, etc.).
 
-Fix: route `rank`/`stamina` to their real fields, loop all six for `"*"`, honour
-`fatal`, implement the `effect=` forms, and make the fallback fire only for a
-genuinely bare `<tick>`. `"?"` and `"a|b"` need a player chooser — reuse the
-`opts.chooser` pattern `applyLose` already has for items. The same chooser fixes
-two relatives: bare `<training>` / `ability="?"` currently "trains" a phantom
-`''`/`'?'` key and memoises the one-time opportunity away (render.js:842,
-engine.js:429, state.js:226; book5/59/63/108/347/652, book2/615), and
-multi-ability `<difficulty ability="combat|magic">` (14×; book1/344/399,
-book6/18) always rolls the first ability instead of offering the choice.
-Add engine unit tests for each form.
+Fix (`web/js/engine.js` + `web/js/state.js` + `web/js/render.js`):
+- New `applyAbilityChange()` routes any ability spec: core abilities, `rank`,
+  `stamina` (permanent max+current move via `state.adjustAbilityStamina`), `*`
+  (all six), and `?`/`a|b` (via `opts.chooser`). `applyLose`/`applyTick` now enter
+  the branch on `ability=` alone and set `did`, so a recognized ability effect
+  never falls through to the box tick.
+- `fatal="t"` honoured in `adjustAbility`/`adjustRank`/`adjustAbilityStamina`:
+  reducing an ability/rank/current-Stamina to 0 drops Stamina to 0 (death);
+  non-fatal Stamina floors current at 1 (book2/157, book5/356 hangman).
+- `effect="+fixed|+cursed|-…"` stored as per-ability flags (`data.abilityFlags`);
+  a new `state.abilityForCheck()` (used by `rollDifficulty` and the `ability=`
+  `<if>` path) treats fixed as 1 and cursed as auto-fail, with JaFL's **mask
+  exception** for CHARISMA. The displayed/derived score is left untouched
+  (matches JaFL's PURPOSE_TESTING split) — book2/643, book6/78/332.
+- **Choosers** (`render.js`): `renderAbilityChoice` defers `<lose|gain|tick
+  ability="?"/"a|b">` to pick buttons instead of auto-applying; `renderTraining`
+  offers a chooser for a bare/`?`/`a|b` `<training>` (fixes the phantom `''`/`'?'`
+  key — book5/59, etc.); `renderDifficulty` offers a chooser for multi-ability
+  rolls (`combat|magic`, 14×; book1/344).
+
+Verified: 17 new assertions (rank gain w/o box-tick; bare `<tick/>` still ticks;
+permanent stamina gain/loss; fatal stamina & fatal core-ability death; `*`; `?`
+via chooser; fixed/cursed + mask; cursed auto-fails difficulty; §344 chooser→roll;
+§59 six-ability chooser) + full render-every-section scan. `RESULT ALL PASS
+pass=122 fail=0`.
+
+Deferred (tracked elsewhere, not this task): `<lose>`'s `<adjust>` child
+modifiers on ability/stamina damage → **task 25**; the flag-gated wheel spins in
+book2/157 (`<random flag=…>`) still default the "?" choice to the first eligible
+ability until **task 30** wires the payment gate; and book6/332's
+`12-charisma modifier="natural"` raise depends on **task 25**'s `<set modifier>`
+fix (the `-fixed`/`-cursed` clearing itself works).
 
 ---
 

@@ -7,6 +7,11 @@ const SAVE_PREFIX = 'fl_save_';
 const META_KEY = 'fl_meta';
 const SCHEMA = 3;
 
+// A cursed ability auto-fails any check that uses it (JaFL returns -1000 for
+// PURPOSE_TESTING); a fixed ability is pinned at 1. Applied only in check
+// contexts (abilityForCheck), never to the displayed/derived score.
+const CURSED_ABILITY = -1000;
+
 // Some books spell the sea-safety blessing "storms" (book 1) and others "storm"
 // (books 2–6); they are the same blessing. Canonicalise so a grant in one book
 // satisfies an <if blessing="…"> check in another and the "only one at a time"
@@ -42,6 +47,7 @@ function freshData() {
     ships: [],            // {type, name, crew, cargo:[], docked}
     resurrections: [],    // {book, section, text, god}
     effects: [],          // {ability, bonus, type, uses, text}
+    abilityFlags: {},     // ability -> {fixed?:true, cursed?:true} (effect="+fixed|+cursed")
     caches: {},           // name -> {items:[], money:0}
     book: 1,
     section: null,
@@ -60,6 +66,11 @@ export class GameState {
   constructor(data, slot) {
     this.data = data;
     this.slot = slot ?? 0;
+    // Ephemeral games (the ?demo= preview link) never touch persistent storage
+    // until the player explicitly keeps them — see save()/keep(). This stops a
+    // throwaway preview from occupying a slot (and, when slots are full, from
+    // clobbering slot 0 via the old nextFreeSlot()===0 fallback).
+    this.ephemeral = false;
     this._listeners = new Set();
     this._undo = []; // in-memory stack of pre-section-effects state snapshots
   }
@@ -134,13 +145,36 @@ export class GameState {
     return sum;
   }
 
-  /** Affected ability score, including item/effect bonuses, clamped 1..12. */
+  /** Affected ability score, including item/effect bonuses, clamped 1..12.
+   *  The fixed/cursed flags are deliberately NOT applied here — like JaFL, the
+   *  displayed/derived score is the real one; the flags bite only in checks. */
   ability(ability) {
     const base = this.data.abilities[ability] || 0;
     return clampAbility(base + this.itemBonus(ability) + this.effectBonus(ability));
   }
 
+  /** Ability score as seen by a check (difficulty/rank/if): a cursed ability
+   *  auto-fails, a fixed one counts as 1. A mask hides a blanked/disfigured face,
+   *  restoring CHARISMA while worn (JaFL's mask exception). */
+  abilityForCheck(ability) {
+    const fx = this.data.abilityFlags && this.data.abilityFlags[ability];
+    if (fx && (fx.cursed || fx.fixed) && !(ability === 'charisma' && this.hasMask())) {
+      return fx.cursed ? CURSED_ABILITY : 1;
+    }
+    return this.ability(ability);
+  }
+
   abilityNatural(ability) { return this.data.abilities[ability] || 0; }
+
+  hasMask() { return this.data.items.some((it) => normalize(it.name).includes('mask')); }
+  hasAbilityFlag(ability, flag) { return !!(this.data.abilityFlags && this.data.abilityFlags[ability] && this.data.abilityFlags[ability][flag]); }
+  setAbilityFlag(ability, flag, on) {
+    const all = (this.data.abilityFlags ||= {});
+    const fx = (all[ability] ||= {});
+    if (on) fx[flag] = true; else delete fx[flag];
+    if (!Object.keys(fx).length) delete all[ability];
+    this.changed();
+  }
 
   defence() {
     // COMBAT (incl. weapon bonus) + Rank + best armour bonus
@@ -223,11 +257,29 @@ export class GameState {
   }
 
   // ---- abilities & stamina ---------------------------------------------
-  adjustAbility(ability, delta) {
+  // fatal="t": if the loss would take the ability below 1, the adventurer dies
+  // (JaFL clamps the ability at 1 and drops Stamina to 0).
+  adjustAbility(ability, delta, fatal = false) {
     const cur = this.data.abilities[ability] || 0;
+    if (fatal && cur + delta < 1) this.data.stamina = 0;
     this.data.abilities[ability] = clampAbility(cur + delta);
     this.changed();
     return this.data.abilities[ability];
+  }
+
+  // Permanent Stamina change (an <gain/lose ability="stamina">): moves the
+  // maximum AND the current score together, mirroring JaFL's adjustAbility for
+  // ABILITY_STAMINA. fatal="t" ⇒ death if current drops to 0 or below; otherwise
+  // current floors at 1.
+  adjustAbilityStamina(delta, fatal = false) {
+    let d = delta;
+    let newMax = this.data.staminaMax + d;
+    if (newMax < 1) { d = 1 - this.data.staminaMax; newMax = 1; }
+    this.data.staminaMax = newMax;
+    this.data.stamina += d;
+    if (this.data.stamina <= 0) this.data.stamina = fatal ? 0 : 1;
+    else if (this.data.stamina > this.data.staminaMax) this.data.stamina = this.data.staminaMax;
+    this.changed();
   }
 
   damageStamina(amount) {
@@ -246,7 +298,8 @@ export class GameState {
   }
   isDead() { return this.data.stamina <= 0; }
 
-  adjustRank(delta) {
+  adjustRank(delta, fatal = false) {
+    if (fatal && this.data.rank + delta <= 0) this.data.stamina = 0; // reduced to 0 Rank ⇒ death
     this.data.rank = Math.max(1, this.data.rank + delta);
     this.changed();
   }
@@ -333,6 +386,7 @@ export class GameState {
 
   // ---- persistence -----------------------------------------------------
   save() {
+    if (this.ephemeral) return; // preview game: not persisted until kept
     try {
       localStorage.setItem(SAVE_PREFIX + this.slot, JSON.stringify(this.data));
       const meta = loadSlotMeta();
@@ -360,6 +414,17 @@ export class GameState {
       console.error('load failed', e);
       return null;
     }
+  }
+
+  /** Promote an ephemeral (preview) game to a real, persisted save slot.
+   *  Returns the slot number, or throws if all slots are full. */
+  keep() {
+    const slot = nextFreeSlot();
+    if (slot == null) throw new Error('All save slots are full. Delete or export a save first.');
+    this.slot = slot;
+    this.ephemeral = false;
+    this.save();
+    return slot;
   }
 }
 
@@ -401,13 +466,16 @@ export function importSave(data) {
     throw new Error('That file is not a valid Fabled Lands save.');
   }
   const slot = nextFreeSlot();
+  if (slot == null) throw new Error('All 20 save slots are full. Delete or export a save before importing.');
   const gs = new GameState(migrate(data), slot);
   gs.save();
   return { slot, meta: loadSlotMeta()[slot] };
 }
 
+/** First unoccupied save slot (0..19), or null if all 20 are full. Callers must
+ *  handle null — previously this returned 0, silently overwriting the first save. */
 export function nextFreeSlot() {
   const meta = loadSlotMeta();
   for (let i = 0; i < 20; i++) if (!meta[i]) return i;
-  return 0;
+  return null;
 }

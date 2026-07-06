@@ -34,9 +34,28 @@ async function startDemo(spec) {
   const book = Number(b) || 1;
   const adv = await getAdvData(book);
   state = GameState.create({ name: 'Wanderer', gender: 'm', profession: 'Warrior', book, adv });
-  state.slot = nextFreeSlot();
+  state.ephemeral = true; // a preview: don't create a persistent save unless kept
   buildGameScreen();
   await navigate(book, s || 1);
+}
+
+/** Modal shown when the player has all 20 save slots occupied. */
+function slotsFullModal() {
+  return modal({
+    title: 'All save slots are full',
+    body: 'You already have 20 saved adventurers — the maximum. Delete or export one to free a slot first.',
+    buttons: [{ label: 'Manage saves', value: 'saves', primary: true }, { label: 'Cancel', value: null }],
+  }).then((v) => { if (v === 'saves') showSaves(); });
+}
+
+/** Persist the current ephemeral (preview) game into a real save slot. */
+function keepDemo() {
+  try {
+    state.keep();
+    toast('Adventure saved.');
+  } catch (e) {
+    modal({ title: 'Could not save', body: escapeHtml(e && e.message ? e.message : String(e)), buttons: [{ label: 'OK', value: null, primary: true }] });
+  }
 }
 
 function registerSW() {
@@ -239,9 +258,11 @@ async function showCreate() {
   });
   backBtn.addEventListener('click', showTitle);
   startBtn.addEventListener('click', async () => {
+    const slot = nextFreeSlot();
+    if (slot == null) { await slotsFullModal(); return; } // don't overwrite an existing save
     const name = nameInput.value.trim() || pregenFor(profession)?.name || 'Adventurer';
     state = GameState.create({ name, gender: genderSel.value, profession, book, adv });
-    state.slot = nextFreeSlot();
+    state.slot = slot;
     state.save();
     startGame(1); // book start section
   });
@@ -529,7 +550,8 @@ async function showGameMenu() {
   if (narrator.supported) add('⚙️', 'Narration settings', () => showNarrationSettings()); // [TTS]
   add('📤', 'Export this save', () => exportSave(null, null));
   add('📥', 'Import a save', () => importSaveFile());
-  add('💾', 'Save & quit to title', () => { state.save(); showTitle(); });
+  if (state.ephemeral) add('💾', 'Keep this adventure', () => keepDemo());
+  else add('💾', 'Save & quit to title', () => { state.save(); showTitle(); });
   const menuCredits = el('div', 'menu-credits');
   menuCredits.innerHTML = creditsHtml();
   body.appendChild(menuCredits);

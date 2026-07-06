@@ -9,11 +9,12 @@
 import {
   evaluateCondition, applyEffect, boolAttr, resolveValue, isDiceExpr,
   rollDifficulty, rollRankCheck, rollTraining, rollDice, matchRange, childAdjustment,
-  applyRest, buyResurrectionDeal,
+  applyRest, buyResurrectionDeal, abilityChoiceOptions,
 } from './engine.js';
 import { makeFight, fightRound } from './combat.js';
 import { shopKind, goodsFrom, ownsGoods, buyTrade, sellTrade, applyInlineBuy } from './market.js';
 import { normalize, makeItem } from './state.js';
+import { ABILITY_LABEL } from './rules.js';
 import { bookTitle, availableBooks } from './data.js';
 import { animateDice, modal } from './ui.js';
 
@@ -431,6 +432,13 @@ export class Story {
       return this.renderPayment(container, node, path);
     }
 
+    // "Lose/gain 1 point from any ability" (ability="?" or "a|b"): the player
+    // picks which ability rather than the engine defaulting — defer to a chooser
+    // instead of auto-applying on entry.
+    if (!hidden && this.needsAbilityChoice(node)) {
+      return this.renderAbilityChoice(container, node, path);
+    }
+
     const key = 'fx@' + path;
     // An absolute <set value="…"> is a pure function of current state, so it is
     // re-evaluated on every render — this keeps variables derived from a roll
@@ -449,6 +457,56 @@ export class Story {
       if (span.textContent.trim()) container.appendChild(span);
     }
     return null;
+  }
+
+  // Does this <gain>/<lose>/<tick> ask the player to choose which ability it
+  // affects (ability="?" or "a|b")? effect= forms target one named ability, so
+  // they never need a chooser.
+  needsAbilityChoice(node) {
+    const tag = node.tagName.toLowerCase();
+    if (tag !== 'lose' && tag !== 'gain' && tag !== 'tick') return false;
+    if (node.getAttribute('effect') != null) return false;
+    const ab = node.getAttribute('ability');
+    if (ab == null) return false;
+    const s = ab.trim().toLowerCase();
+    return s === '?' || s.includes('|');
+  }
+
+  // Render an ability-choice effect as a row of pick buttons; applying it only on
+  // click (once per visit), with the chosen ability fed to the engine's chooser.
+  renderAbilityChoice(container, node, path) {
+    const memo = 'fx@' + path;
+    const isLoss = node.tagName.toLowerCase() === 'lose';
+    const desc = document.createElement('span');
+    desc.className = 'fx';
+    this.appendChildren(desc, node, path);
+    if (desc.textContent.trim()) container.appendChild(desc);
+    if (this.ctx.applied.has(memo)) return null; // already chosen this visit
+    const opts = abilityChoiceOptions(node.getAttribute('ability'), this.state, isLoss);
+    if (!opts.length) { this.ctx.applied.add(memo); return null; } // nothing eligible
+    this.appendAbilityPicker(container, opts, (ab) => {
+      const note = applyEffect(node, this.state, { chooser: () => [ab] });
+      this.ctx.applied.add(memo);
+      if (note) this.notify(note);
+      this.rerender();
+    }, isLoss ? '−' : '+');
+    return null;
+  }
+
+  // A reusable inline "choose an ability" control (used by ability-choice effects,
+  // multi-ability difficulty rolls and open-choice training).
+  appendAbilityPicker(container, options, onPick, prefix = '') {
+    const box = document.createElement('span');
+    box.className = 'ability-choice';
+    options.forEach((ab) => {
+      const btn = document.createElement('button');
+      btn.className = 'btn-mini ability-pick';
+      btn.textContent = (prefix ? prefix + ' ' : '') + (ABILITY_LABEL[ab] || ab.toUpperCase());
+      btn.addEventListener('click', () => onPick(ab));
+      box.appendChild(btn);
+    });
+    container.appendChild(box);
+    return box;
   }
 
   // The name of a not-yet-set variable that this effect's magnitude depends on and
@@ -742,7 +800,8 @@ export class Story {
 
   // ---- rolls: difficulty ---------------------------------------------------
   renderDifficulty(container, node, path) {
-    const ability = node.getAttribute('ability');
+    const spec = (node.getAttribute('ability') || '').trim();
+    const multi = spec.includes('|');
     const level = resolveValue(this.state, node.getAttribute('level'));
     const modifier = node.getAttribute('modifier') ? resolveValue(this.state, node.getAttribute('modifier')) : 0;
 
@@ -757,18 +816,26 @@ export class Story {
     container.appendChild(widget);
 
     const stored = this.ctx.rolls.get(key);
-    const abLabel = (ability || '').split('|')[0];
     if (stored) {
-      this.showDiceResult(widget, stored.dice, `${abLabel.toUpperCase()} ${stored.abilityScore >= 0 ? '+' : ''}${stored.abilityScore} = ${stored.total} vs ${level}`, stored.success ? 'Success' : 'Failure', stored.success);
-    } else {
-      const btn = this.rollButton(`Roll 2 dice + ${abLabel.toUpperCase()}`, widget, () => {
-        const res = rollDifficulty(this.state, ability, level, modifier + childAdjustment(node, this.state));
-        if (node.getAttribute('var')) this.state.setVar(node.getAttribute('var'), res.margin);
-        this.ctx.rolls.set(key, res);
-        this.rerender();
-      });
-      widget.appendChild(btn);
+      const abLabel = (stored.ability || spec.split('|')[0] || '').toUpperCase();
+      this.showDiceResult(widget, stored.dice, `${abLabel} ${stored.abilityScore >= 0 ? '+' : ''}${stored.abilityScore} = ${stored.total} vs ${level}`, stored.success ? 'Success' : 'Failure', stored.success);
+      return widget;
     }
+    // "combat|magic": let the player pick which ability to roll before rolling.
+    const pickKey = 'pick@' + path;
+    const ability = multi ? this.ctx.rolls.get(pickKey) : spec;
+    if (multi && !ability) {
+      this.appendAbilityPicker(widget, abilityChoiceOptions(spec, this.state, false), (ab) => { this.ctx.rolls.set(pickKey, ab); this.rerender(); });
+      return widget;
+    }
+    const abLabel = (ability || '').split('|')[0].toUpperCase();
+    const btn = this.rollButton(`Roll 2 dice + ${abLabel}`, widget, () => {
+      const res = rollDifficulty(this.state, ability, level, modifier + childAdjustment(node, this.state));
+      if (node.getAttribute('var')) this.state.setVar(node.getAttribute('var'), res.margin);
+      this.ctx.rolls.set(key, res);
+      this.rerender();
+    });
+    widget.appendChild(btn);
     return widget;
   }
 
@@ -840,7 +907,10 @@ export class Story {
   }
 
   renderTraining(container, node, path) {
-    const ability = (node.getAttribute('ability') || '').split('|')[0].toLowerCase();
+    const spec = (node.getAttribute('ability') || '').trim();
+    // Bare <training> (book5/59) or "?"/"a|b" means "train the ability of your
+    // choice" — offer a picker rather than training a phantom '' ability.
+    const multi = spec === '' || spec === '?' || spec.includes('|');
     const dice = parseInt(node.getAttribute('dice') || '2', 10);
     const add = parseInt(node.getAttribute('add') || '0', 10);
     const key = 'roll@' + path;
@@ -849,13 +919,20 @@ export class Story {
     container.appendChild(widget);
     const stored = this.ctx.rolls.get(key);
     if (stored) {
-      this.showDiceResult(widget, stored.dice, `Rolled ${stored.total} vs ${ability.toUpperCase()} ${stored.natural}`, stored.success ? `+1 ${ability.toUpperCase()}` : 'No gain', stored.success);
-    } else {
-      widget.appendChild(this.rollButton(`Train ${ability.toUpperCase()} (roll ${diceWord(dice)})`, widget, () => {
-        this.ctx.rolls.set(key, rollTraining(this.state, ability, dice, add));
-        this.rerender();
-      }));
+      const ab = stored.ability;
+      this.showDiceResult(widget, stored.dice, `Rolled ${stored.total} vs ${ab.toUpperCase()} ${stored.natural}`, stored.success ? `+1 ${ab.toUpperCase()}` : 'No gain', stored.success);
+      return widget;
     }
+    const pickKey = 'pick@' + path;
+    const ability = multi ? this.ctx.rolls.get(pickKey) : spec.toLowerCase();
+    if (multi && !ability) {
+      this.appendAbilityPicker(widget, abilityChoiceOptions(spec, this.state, false), (ab) => { this.ctx.rolls.set(pickKey, ab); this.rerender(); });
+      return widget;
+    }
+    widget.appendChild(this.rollButton(`Train ${ability.toUpperCase()} (roll ${diceWord(dice)})`, widget, () => {
+      this.ctx.rolls.set(key, rollTraining(this.state, ability, dice, add));
+      this.rerender();
+    }));
     return widget;
   }
 

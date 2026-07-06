@@ -260,6 +260,8 @@ img { max-width: 100%; }
 .trade-actions { display: flex; gap: 0.4rem; flex-shrink: 0; }
 .btn-mini { border: 1px solid var(--gold); background: #fbf1d9; color: var(--ink); padding: 0.3rem 0.6rem; border-radius: 6px; font-size: 0.85rem; font-weight: 700; }
 .btn-mini:disabled { opacity: 0.45; cursor: not-allowed; }
+.ability-choice { display: inline-flex; flex-wrap: wrap; gap: 0.35rem; margin: 0.2rem 0; vertical-align: middle; }
+.ability-pick { cursor: pointer; }
 .trade-na { font-size: 0.8rem; color: #9c885f; font-style: italic; }
 
 .book-table { border-collapse: collapse; margin: 0.6rem auto; width: auto; max-width: 100%; }

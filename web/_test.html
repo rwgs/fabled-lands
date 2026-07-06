@@ -2,7 +2,7 @@
 <body><pre id="results">running…</pre>
 <script type="module">
 import * as data from './js/data.js';
-import { GameState, readSlotData, importSave, loadSlotMeta, deleteSlot, makeItem } from './js/state.js';
+import { GameState, readSlotData, importSave, loadSlotMeta, deleteSlot, makeItem, nextFreeSlot } from './js/state.js';
 import * as eng from './js/engine.js';
 import { fightRound } from './js/combat.js';
 import { Story } from './js/render.js';
@@ -45,6 +45,24 @@ async function run() {
     ok('if var greaterthan', eng.evaluateCondition(parse('<if var="x" greaterthan="4"/>'), gs));
     ok('if var lessthan false', eng.evaluateCondition(parse('<if var="x" lessthan="3"/>'), gs) === false);
 
+    // multi-attribute <if>: recognized attributes combine as OR (JaFL
+    // IfNode.meetsConditions), then not="t" negates the whole result. (task 3)
+    const gcond = GameState.create({ name:'C', gender:'m', profession:'Mage', book:1, adv });
+    gcond.data.items = []; gcond.addItem(makeItem('item', 'lantern'));
+    gcond.addTitle('Arena Champion');   // has the title, NOT the codeword Dove
+    ok('if codeword|title OR: title-only true', eng.evaluateCondition(parse('<if codeword="Dove" title="Arena Champion"/>'), gcond));
+    gcond.addCodeword('Dove'); gcond.removeTitle('Arena Champion'); // has codeword, not title
+    ok('if codeword|title OR: codeword-only true', eng.evaluateCondition(parse('<if codeword="Dove" title="Arena Champion"/>'), gcond));
+    gcond.removeCodeword('Dove');       // has neither
+    ok('if codeword|title OR: neither false', eng.evaluateCondition(parse('<if codeword="Dove" title="Arena Champion"/>'), gcond) === false);
+    // item + profession OR (book1/460 shape): Mage without the item still matches
+    ok('if item|profession OR: profession matches w/o item', eng.evaluateCondition(parse('<if item="torch" profession="Mage"/>'), gcond));
+    ok('if item|profession OR: item matches w/o profession', eng.evaluateCondition(parse('<if item="lantern" profession="Warrior"/>'), gcond));
+    ok('if item|profession OR: neither matches false', eng.evaluateCondition(parse('<if item="torch" profession="Warrior"/>'), gcond) === false);
+    // not applies to the whole OR, not just the first attribute
+    ok('not over OR: neither ⇒ true', eng.evaluateCondition(parse('<if not="t" item="torch" profession="Warrior"/>'), gcond));
+    ok('not over OR: one present ⇒ false', eng.evaluateCondition(parse('<if not="t" item="lantern" profession="Warrior"/>'), gcond) === false);
+
     // effects
     const before = gs.data.shards;
     eng.applyEffect(parse('<lose shards="10"/>'), gs, {});
@@ -59,6 +77,63 @@ async function run() {
     const st = gs.data.stamina;
     eng.applyEffect(parse('<lose stamina="3"/>'), gs, {});
     ok('lose 3 stamina', gs.data.stamina === st-3);
+
+    // --- ability effects: rank/stamina/*/?/fatal/effect= (task 15) ---
+    const ga = GameState.create({ name:'A', gender:'m', profession:'Warrior', book:1, adv });
+    ga.data.section = '999';
+    const rank0 = ga.data.rank, box0 = ga.tickCount(1,'999');
+    eng.applyEffect(parse('<gain ability="rank" amount="1"/>'), ga, {});
+    ok('gain ability=rank raises Rank', ga.data.rank === rank0 + 1, `rank=${ga.data.rank}`);
+    ok('gain ability=rank does NOT tick the visit box', ga.tickCount(1,'999') === box0, `box=${ga.tickCount(1,'999')}`);
+    // a genuinely bare <tick/> still ticks the box
+    ga.data.section = '998';
+    eng.applyEffect(parse('<tick/>'), ga, {});
+    ok('bare <tick/> still ticks the box', ga.tickCount(1,'998') === 1);
+
+    // ability=stamina is a PERMANENT change (max + current move together)
+    const gm2 = GameState.create({ name:'S2', gender:'m', profession:'Warrior', book:1, adv });
+    const max0 = gm2.data.staminaMax, cur0 = gm2.data.stamina;
+    eng.applyEffect(parse('<gain ability="stamina" amount="3"/>'), gm2, {});
+    ok('gain ability=stamina raises max+current', gm2.data.staminaMax === max0+3 && gm2.data.stamina === cur0+3, `max=${gm2.data.staminaMax} cur=${gm2.data.stamina}`);
+    gm2.data.stamina = 2;
+    eng.applyEffect(parse('<lose ability="stamina" amount="5"/>'), gm2, {});
+    ok('lose ability=stamina non-fatal floors current at 1', gm2.data.stamina === 1 && gm2.isDead() === false, `st=${gm2.data.stamina}`);
+    // fatal stamina loss to <=0 kills
+    const gf = GameState.create({ name:'F', gender:'m', profession:'Warrior', book:1, adv });
+    gf.data.stamina = 3;
+    eng.applyEffect(parse('<lose ability="stamina" amount="10" fatal="t"/>'), gf, {});
+    ok('fatal stamina loss to <=0 kills', gf.isDead() === true && gf.data.stamina === 0, `st=${gf.data.stamina}`);
+
+    // ability="*" affects all six; fatal core-ability loss to 0 kills
+    const gall = GameState.create({ name:'X', gender:'m', profession:'Warrior', book:1, adv });
+    const c0 = gall.abilityNatural('combat'), t0 = gall.abilityNatural('thievery');
+    eng.applyEffect(parse('<gain ability="*" amount="1"/>'), gall, {});
+    ok('gain ability=* raises all abilities', gall.abilityNatural('combat')===c0+1 && gall.abilityNatural('thievery')===t0+1);
+    const gfc = GameState.create({ name:'FC', gender:'m', profession:'Warrior', book:1, adv });
+    gfc.data.abilities.thievery = 1;
+    eng.applyEffect(parse('<lose ability="thievery" amount="1" fatal="t"/>'), gfc, {});
+    ok('fatal ability loss to 0 kills (ability clamps to 1)', gfc.isDead() === true && gfc.abilityNatural('thievery') === 1);
+
+    // ability="?" uses the provided chooser
+    const gq = GameState.create({ name:'Q', gender:'m', profession:'Warrior', book:1, adv });
+    gq.data.abilities.magic = 5;
+    eng.applyEffect(parse('<lose ability="?" amount="1"/>'), gq, { chooser: () => ['magic'] });
+    ok('lose ability="?" applies to the chosen ability', gq.abilityNatural('magic') === 4, `magic=${gq.abilityNatural('magic')}`);
+
+    // effect="+fixed"/"+cursed" flag forms (display score unchanged; checks bite)
+    const gfx = GameState.create({ name:'FX', gender:'m', profession:'Warrior', book:1, adv });
+    gfx.data.abilities.charisma = 8;
+    eng.applyEffect(parse('<tick ability="charisma" effect="+fixed"/>'), gfx, {});
+    ok('effect="+fixed" pins check-value at 1, keeps display score', gfx.abilityForCheck('charisma') === 1 && gfx.ability('charisma') === 8);
+    const mask = gfx.addItem(makeItem('item', 'courtier’s mask'));
+    ok('a mask restores fixed CHARISMA in checks', gfx.abilityForCheck('charisma') === 8);
+    gfx.removeItemById(mask.id);
+    eng.applyEffect(parse('<tick ability="charisma" effect="-fixed"/>'), gfx, {});
+    ok('effect="-fixed" clears the flag', gfx.abilityForCheck('charisma') === 8);
+    const gcz = GameState.create({ name:'CZ', gender:'m', profession:'Warrior', book:1, adv });
+    eng.applyEffect(parse('<tick ability="charisma" effect="+cursed"/>'), gcz, {});
+    let cursedWin = 0; for (let i=0;i<60;i++){ if (eng.rollDifficulty(gcz,'charisma',6,0).success) cursedWin++; }
+    ok('effect="+cursed" auto-fails CHARISMA checks', gcz.abilityForCheck('charisma') < 0 && cursedWin === 0, `win=${cursedWin}`);
 
     // ranges
     ok('range 0-4 ~3', eng.matchRange('0-4', 3));
@@ -137,6 +212,20 @@ async function run() {
     const prog120 = container.querySelector('.goto, .goto-primary');
     ok('§120 random resolves to a goto', !!prog120 && !!container.querySelector('.die'),
        'HTML=' + container.querySelector('.flow').innerHTML.replace(/\s+/g,' ').slice(0, 400));
+
+    // §344: a multi-ability difficulty offers an ability chooser, then a roll (task 15)
+    await renderSec(1,'344');
+    const pick344 = container.querySelectorAll('.ability-pick');
+    ok('§344 offers a combat|magic chooser', pick344.length === 2, 'picks=' + pick344.length);
+    ok('§344 has no roll button before picking', !container.querySelector('.btn-roll'));
+    pick344[0].click();
+    await new Promise(r => setTimeout(r, 50));
+    ok('§344 shows a roll button after picking an ability', !!container.querySelector('.btn-roll'));
+
+    // §59: bare <training> ("choose the ability of your choice") offers all six (task 15)
+    await renderSec(5,'59');
+    ok('§59 bare training offers a six-ability chooser', container.querySelectorAll('.ability-pick').length === 6,
+       'picks=' + container.querySelectorAll('.ability-pick').length);
 
     // --- interaction: clicking a choice navigates ---
     let navd = null;
@@ -324,6 +413,26 @@ async function run() {
     let threw = false; try { importSave({ foo: 1 }); } catch { threw = true; }
     ok('import rejects invalid file', threw === true);
     deleteSlot(15); deleteSlot(impSlot); // cleanup
+
+    // --- save-slot exhaustion never silently overwrites slot 0 (task 4) ---
+    {
+      const savedMeta = localStorage.getItem('fl_meta');
+      const full = {}; for (let i = 0; i < 20; i++) full[i] = { name: 'occupied' + i };
+      localStorage.setItem('fl_meta', JSON.stringify(full));
+      ok('nextFreeSlot returns null when all 20 slots full', nextFreeSlot() === null);
+      let fullThrew = false; try { importSave({ abilities: { combat: 4 }, stamina: 5 }); } catch { fullThrew = true; }
+      ok('import throws (does not overwrite) when full', fullThrew === true);
+      if (savedMeta == null) localStorage.removeItem('fl_meta'); else localStorage.setItem('fl_meta', savedMeta);
+    }
+
+    // --- ephemeral (preview / ?demo=) game must not persist until kept (task 4) ---
+    const gep = GameState.create({ name: 'Demo', gender: 'm', profession: 'Warrior', book: 1, adv });
+    gep.slot = 18; gep.ephemeral = true; gep.data.shards = 4242; gep.changed(); // would normally write
+    ok('ephemeral game writes nothing to storage', localStorage.getItem('fl_save_18') === null && !loadSlotMeta()[18]);
+    const keptSlot = gep.keep();
+    ok('keep() assigns a real slot and clears ephemeral', keptSlot != null && gep.ephemeral === false);
+    ok('keep() persists the game', !!readSlotData(keptSlot) && readSlotData(keptSlot).shards === 4242);
+    deleteSlot(keptSlot); // cleanup
 
   } catch (e) {
     out.push('FATAL ' + (e.stack || e.message));

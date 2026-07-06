@@ -50,10 +50,78 @@ function firstAbility(attr) {
   return ABILITIES.includes(a) ? a : null;
 }
 
+/** The concrete ability keys a chooser should offer for an ability spec:
+ *  '?' (or bare) → all six; 'a|b' → the listed core abilities. For a loss, drop
+ *  any already at their minimum (1) — JaFL won't let the player pick those. */
+export function abilityChoiceOptions(spec, state, forLoss = false) {
+  const s = String(spec || '').trim().toLowerCase();
+  let cands = (s === '?' || s === '')
+    ? ABILITIES.slice()
+    : s.split('|').map((a) => a.trim()).filter((a) => ABILITIES.includes(a));
+  if (forLoss) { const elig = cands.filter((a) => state.abilityNatural(a) > 1); if (elig.length) cands = elig; }
+  return cands;
+}
+
+/** Resolve an ability spec to the target key(s) to affect. '*' = all six;
+ *  'rank'/'stamina' route to those stats; '?' / 'a|b' ask opts.chooser (a
+ *  [key]-returning callback) or default to the first eligible option. */
+function abilityTargets(spec, state, forLoss, opts) {
+  const s = String(spec || '').trim().toLowerCase();
+  if (s === '*') return ABILITIES.slice();
+  if (s === 'rank') return ['rank'];
+  if (s === 'stamina') return ['stamina'];
+  if (ABILITIES.includes(s)) return [s];
+  if (s === '?' || s.includes('|')) {
+    const cands = abilityChoiceOptions(spec, state, forLoss);
+    if (!cands.length) return [];
+    const picked = opts.chooser ? opts.chooser(cands, 1, 'ability') : null;
+    const chosen = (picked && picked.length) ? picked[0] : cands[0];
+    return ABILITIES.includes(chosen) ? [chosen] : [cands[0]];
+  }
+  return []; // unknown ability token
+}
+
+/** Apply an ability effect on a <gain>/<lose>/<tick>. sign is +1 (gain/tick) or
+ *  -1 (lose). Handles rank, stamina, all-six, choose-one, fatal="t", and the
+ *  effect="+fixed|+cursed|-…" flag forms. */
+function applyAbilityChange(el, state, sign, opts) {
+  const spec = el.getAttribute('ability');
+  const effect = el.getAttribute('effect');
+  // effect="+fixed|+cursed|-…": set/clear an ability flag; no numeric change.
+  if (effect != null) {
+    const e = String(effect).trim();
+    const add = !e.startsWith('-');
+    const kind = /curse/i.test(e) ? 'cursed' : (/fix/i.test(e) ? 'fixed' : null);
+    if (!kind) return '';
+    abilityTargets(spec, state, false, opts).forEach((t) => { if (ABILITIES.includes(t)) state.setAbilityFlag(t, kind, add); });
+    return `${add ? '' : 'un-'}${kind}`;
+  }
+  const fatal = boolAttr(el.getAttribute('fatal'));
+  const delta = sign * resolveValue(state, el.getAttribute('amount'));
+  const notes = [];
+  for (const t of abilityTargets(spec, state, sign < 0, opts)) {
+    if (t === 'rank') state.adjustRank(delta, fatal);
+    else if (t === 'stamina') state.adjustAbilityStamina(delta, fatal);
+    else state.adjustAbility(t, delta, fatal);
+    notes.push(`${delta >= 0 ? '+' : ''}${delta} ${t}`);
+  }
+  return notes.join(', ');
+}
+
 // ---- <if> / <elseif> condition evaluation ---------------------------------
+// Mirrors the Java engine's IfNode.meetsConditions(): every recognized attribute
+// on the node is a *disjunct* — the condition is met as soon as ANY one of them
+// holds (an OR), and `not="t"` negates that final result. (The books' prose bears
+// this out: "if you have the codeword Dove OR the title Arena Champion", "codeword
+// Aid OR a ship docked at Smogmaw", etc.) Comma/pipe *within* a codeword or title
+// list keep their own AND/OR meaning via matchCodewords / the title split.
+// A node with no recognized attribute at all (only `not`, or attrs this engine
+// doesn't yet handle) defaults to true — task 17 tightens that to a warning.
 export function evaluateCondition(el, state) {
   const get = (a) => el.getAttribute(a);
-  let result = true; // default: an <if> with only a 'not' or unknown attrs
+  let matched = false; // did we recognize any condition attribute?
+  let result = false;  // OR accumulator over the recognized attributes
+  const add = (present, cond) => { if (present != null) { matched = true; result = result || cond(); } };
 
   const compare = (val) => {
     const eq = get('equals'), gt = get('greaterthan'), lt = get('lessthan');
@@ -65,64 +133,32 @@ export function evaluateCondition(el, state) {
     return ok;
   };
 
-  if (get('codeword') != null) {
-    result = matchCodewords(state, get('codeword'));
-  } else if (get('ticks') != null) {
-    result = state.tickCount() === resolveValue(state, get('ticks'));
-  } else if (get('shards') != null) {
-    const need = resolveValue(state, get('shards'));
-    result = state.data.shards >= need;
-  } else if (get('item') != null) {
-    const count = state.findItems(get('item')).length;
-    const cmp = compare(count);
-    result = cmp == null ? count > 0 : cmp;
-  } else if (get('god') != null) {
-    result = state.hasGod(get('god'));
-  } else if (get('safeAddGod') != null) {
-    // Can become an initiate only if not godless and not already worshipping a god.
-    result = !state.data.godless && !state.hasGod(get('safeAddGod')) && state.data.gods.length === 0;
-  } else if (get('blessing') != null) {
-    result = state.hasBlessing(get('blessing'));
-  } else if (get('curse') != null) {
-    result = state.hasCurse(get('curse'));
-  } else if (get('title') != null) {
-    result = get('title').split(/[|,]/).some((t) => state.hasTitle(t.trim()));
-  } else if (get('profession') != null) {
-    result = normalize(state.data.profession) === normalize(get('profession'));
-  } else if (get('gender') != null) {
-    const wantMale = get('gender').toLowerCase().startsWith('m');
-    result = (state.data.gender === 'm') === wantMale;
-  } else if (get('resurrection') != null) {
-    result = state.hasResurrection();
-  } else if (get('dead') != null) {
-    result = state.isDead() === boolAttr(get('dead'));
-  } else if (get('book') != null) {
-    result = availableBooks().includes(Number(get('book')));
-  } else if (get('var') != null) {
-    const v = state.getVar(get('var'));
-    const cmp = compare(v);
-    result = cmp == null ? v !== 0 : cmp;
-  } else if (get('name') != null) {
-    const v = state.codewordValue(get('name'));
-    const cmp = compare(v);
-    result = cmp == null ? v !== 0 : cmp;
-  } else if (get('ability') != null) {
-    const ab = firstAbility(get('ability'));
-    const v = ab ? state.ability(ab) : 0;
-    const cmp = compare(v);
-    result = cmp == null ? v > 0 : cmp;
-  } else if (get('ship') != null) {
-    result = state.ships.some((s) => s.type === get('ship'));
-  } else if (get('crew') != null) {
-    result = state.ships.some((s) => s.crew === get('crew'));
-  } else if (get('cargo') != null) {
-    result = state.ships.some((s) => (s.cargo || []).length > 0);
-  } else if (get('docked') != null) {
-    result = state.ships.length > 0;
-  }
+  add(get('codeword'), () => matchCodewords(state, get('codeword')));
+  add(get('ticks'), () => state.tickCount() === resolveValue(state, get('ticks')));
+  add(get('shards'), () => state.data.shards >= resolveValue(state, get('shards')));
+  add(get('item'), () => { const count = state.findItems(get('item')).length; const cmp = compare(count); return cmp == null ? count > 0 : cmp; });
+  add(get('god'), () => state.hasGod(get('god')));
+  // Can become an initiate only if not godless and not already worshipping a god.
+  add(get('safeAddGod'), () => !state.data.godless && !state.hasGod(get('safeAddGod')) && state.data.gods.length === 0);
+  add(get('blessing'), () => state.hasBlessing(get('blessing')));
+  add(get('curse'), () => state.hasCurse(get('curse')));
+  add(get('title'), () => get('title').split(/[|,]/).some((t) => state.hasTitle(t.trim())));
+  add(get('profession'), () => normalize(state.data.profession) === normalize(get('profession')));
+  add(get('gender'), () => (state.data.gender === 'm') === get('gender').toLowerCase().startsWith('m'));
+  add(get('resurrection'), () => state.hasResurrection());
+  add(get('dead'), () => state.isDead() === boolAttr(get('dead')));
+  add(get('book'), () => availableBooks().includes(Number(get('book'))));
+  add(get('var'), () => { const v = state.getVar(get('var')); const cmp = compare(v); return cmp == null ? v !== 0 : cmp; });
+  add(get('name'), () => { const v = state.codewordValue(get('name')); const cmp = compare(v); return cmp == null ? v !== 0 : cmp; });
+  add(get('ability'), () => { const ab = firstAbility(get('ability')); const v = ab ? state.abilityForCheck(ab) : 0; const cmp = compare(v); return cmp == null ? v > 0 : cmp; });
+  add(get('ship'), () => state.ships.some((s) => s.type === get('ship')));
+  add(get('crew'), () => state.ships.some((s) => s.crew === get('crew')));
+  add(get('cargo'), () => state.ships.some((s) => (s.cargo || []).length > 0));
+  add(get('docked'), () => state.ships.length > 0);
 
-  if (boolAttr(get('not'))) result = !result;
-  return result;
+  let final = matched ? result : true; // default true when nothing recognized
+  if (boolAttr(get('not'))) final = !final;
+  return final;
 }
 
 function matchCodewords(state, spec) {
@@ -169,9 +205,9 @@ function applyLose(el, state, opts) {
     else n = Math.max(0, resolveValue(state, s));
     state.damageStamina(n); notes.push(`−${n} Stamina`);
   }
-  if (get('ability') != null && get('amount') != null) {
-    const ab = firstAbility(get('ability')); const n = resolveValue(state, get('amount'));
-    if (ab) { state.adjustAbility(ab, -n); notes.push(`−${n} ${ab}`); }
+  if (get('ability') != null) {
+    const note = applyAbilityChange(el, state, -1, opts);
+    if (note) notes.push(note);
   }
   if (get('blessing') != null) { if (state.removeBlessing(get('blessing'))) notes.push('lost blessing'); }
   if (get('curse') != null) { state.removeCurse(get('curse')); notes.push('curse lifted'); }
@@ -238,9 +274,12 @@ function applyTick(el, state, opts) {
     const val = get('titleValue') ? resolveValue(state, get('titleValue')) : (get('amount') ? resolveValue(state, get('amount')) : 0);
     state.addTitle(get('title'), val); did = true;
   }
-  if (get('ability') != null && get('amount') != null) {
-    const ab = firstAbility(get('ability')); const n = resolveValue(state, get('amount'));
-    if (ab) { state.adjustAbility(ab, n); notes.push(`+${n} ${ab}`); did = true; }
+  if (get('ability') != null) {
+    // An ability attr was present — route it (rank/stamina/*/?/effect=…) and mark
+    // `did` so a recognized-but-zero effect never falls through to the box tick.
+    const note = applyAbilityChange(el, state, +1, opts);
+    if (note) notes.push(note);
+    did = true;
   }
   if (get('name') != null) { const n = get('amount') ? resolveValue(state, get('amount')) : (get('count') ? resolveValue(state, get('count')) : 1); state.adjustCodewordValue(get('name'), n); did = true; }
   if (get('flag') != null) { state.setFlag(get('flag'), false); did = true; }
@@ -409,7 +448,7 @@ function adjustApplies(el, state) {
 export function rollDifficulty(state, ability, level, modifier = 0) {
   const ab = firstAbility(ability);
   const r = rollDice(2);
-  const abilityScore = ab ? state.ability(ab) : 0;
+  const abilityScore = ab ? state.abilityForCheck(ab) : 0;
   const total = r.total + abilityScore + modifier;
   return { dice: r.dice, rollTotal: r.total, abilityScore, ability: ab, total, level, margin: total - level, success: total > level };
 }
