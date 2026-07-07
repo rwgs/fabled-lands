@@ -16,8 +16,8 @@ the book XML corpus.
 
 **MEDIUM**
 - [x] 5. Implement `<items group … limit="N">` "choose up to N" pickup
-- [ ] 6. Harden save import and migration
-- [ ] 7. Surface persistence failures to the player
+- [x] 6. Harden save import and migration
+- [x] 7. Surface persistence failures to the player
 - [ ] 8. Make service-worker upgrades atomic
 - [ ] 24. Canonicalise ship types (`brig`, `gall`) and fix crew-upgrade steps
 - [ ] 25. Fix value/expression parsing: vars containing "d", unary minus, division
@@ -185,22 +185,61 @@ rest lock) + full render-every-section scan. `RESULT ALL PASS pass=220 fail=0`.
 
 ---
 
-## 6. Harden save import and migration  — MEDIUM
+## 6. Harden save import and migration  — **done**
 
-`importSave()` only checks for an object with `abilities` and `stamina`;
-malformed imported JSON can still create saves with wrong array/object shapes
-that later break rendering or sheet logic. Validate/clamp the imported schema
-deeply (`items`, `ships`, `titles`, `curses`, `resurrections`, numeric fields,
-current book/section) and reject unsupported shapes with a clear import error.
+`importSave()` only checked for an object with `abilities` and `stamina`, and
+`migrate()` did a shallow `{...base, ...data}` merge, so a malformed file could
+still land wrong array/object shapes (a string `items`, junk affliction/ship
+entries, non-numeric stats) that later broke rendering or the sheet.
+
+Fix (`web/js/state.js`):
+- **`sanitizeData(raw)`** (exported) deeply coerces every field of the known
+  schema and **drops** bad entries rather than trusting them: strings→numbers
+  with min/max/int clamps (Stamina clamped to its max, Rank/Shards floored,
+  abilities `clampAbility`'d 1–12); `items`/`caches.items` filtered to well-formed
+  possessions (nameless ones dropped); `titles`/`ships`/`curses`/`diseases`/
+  `poisons`/`resurrections`/`effects` each element-validated; `codewords` kept
+  only when truthy; `boxes` kept only when > 0; `vars`/`codewordValues` kept only
+  when finite; `book`/`section`/`startBook`/`history`/`turns` coerced. Unknown
+  top-level keys are discarded (the schema is fully known via `freshData()`).
+- **`migrate()`** now simply delegates to `sanitizeData()`, so both **load** (from
+  localStorage) and **import** are hardened by the same path.
+- **`importSave()`** rejects non-save shapes up front with a clear error: not an
+  object, an array, or `abilities` not being a (non-array) object, or missing
+  Stamina.
+
+Verified: 23 new headless assertions (field-by-field coercion/clamp/drop of a
+deliberately hostile object; a junk save loaded into a live `GameState` renders
+and computes derived stats without throwing; `importSave` rejects an array and a
+non-object `abilities`) + the existing round-trip/exhaustion tests still pass +
+full render-every-section scan. `RESULT ALL PASS pass=243 fail=0`.
 
 ---
 
-## 7. Surface persistence failures to the player  — MEDIUM
+## 7. Surface persistence failures to the player  — **done**
 
-`GameState.save()` catches `localStorage` failures and logs them, but gameplay
-continues as if progress was saved. Return a success/failure signal or expose
-`lastSaveError` so the UI can warn when storage is unavailable, full, or blocked
-by browser privacy settings.
+`GameState.save()` swallowed `localStorage` failures (logged only), so gameplay
+continued as if progress was saved.
+
+Fix:
+- **`state.js`** — `save()` now **returns `true`/`false`** and sets a new
+  `state.lastSaveError` to a player-facing message on failure (cleared on the next
+  success). A `describeSaveError()` helper distinguishes a full store
+  (`QuotaExceededError` / code 22 / Firefox 1014 → "Storage is full… export…
+  delete an old save") from blocked storage ("…private-browsing mode… export to a
+  file"). An ephemeral preview game reports success without writing.
+- **`app.js`** — a `surfaceSaveError()` helper shows a modal ("Progress not
+  saved") with a one-click **Export now** option; it is shown once per failure
+  streak and re-arms once saving recovers. It is wired into the `onChange`
+  listener (so any gameplay change that fails to persist warns), and the two
+  "Save & quit to title" buttons + new-game start now check `save()`'s result and
+  warn (with `force`) instead of silently proceeding as if saved.
+
+Verified: 6 new headless assertions (normal save returns true / clears error;
+simulated `QuotaExceededError` → false + "full" message; blocked-storage →
+private-browsing message; recovery re-clears; ephemeral save reports success
+without writing) + full render-every-section scan. `RESULT ALL PASS pass=249
+fail=0`.
 
 ---
 

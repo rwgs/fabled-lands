@@ -311,7 +311,7 @@ async function showCreate() {
     const name = nameInput.value.trim() || pregenFor(profession)?.name || 'Adventurer';
     state = GameState.create({ name, gender: genderSel.value, profession, book, adv });
     state.slot = slot;
-    state.save();
+    if (!state.save()) surfaceSaveError(true); // storage blocked/full — warn, but let them play
     startGame(1); // book start section
   });
 }
@@ -468,7 +468,7 @@ function buildGameScreen() {
     syncSpeedBtn();
     actions.appendChild(speedBtn);
   }
-  actions.appendChild(iconBtn('💾', 'Save & quit to title', () => { state.save(); showTitle(); }));
+  actions.appendChild(iconBtn('💾', 'Save & quit to title', () => { if (state.save()) showTitle(); else surfaceSaveError(true); }));
   actions.appendChild(sheetBtn); // sheet drawer toggle (mobile only)
   header.appendChild(actions);
   app.appendChild(header);
@@ -493,8 +493,24 @@ function buildGameScreen() {
     onRender: () => narrator.handleRerender(), // [TTS] stop narration when the DOM changes
   });
 
-  state.onChange(() => refreshSheet());
+  state.onChange(() => { refreshSheet(); surfaceSaveError(); });
   refreshSheet();
+}
+
+// Warn the player when persistence has failed so they don't play on believing
+// progress is being saved (task 7). Shown once per failure streak (re-armed once
+// saving recovers); `force` re-shows it for an explicit "save & quit". Offers a
+// one-click export so the adventure can be kept even when storage is unavailable.
+let _saveErrorNotified = false;
+function surfaceSaveError(force = false) {
+  if (!state || !state.lastSaveError) { _saveErrorNotified = false; return; }
+  if (_saveErrorNotified && !force) return;
+  _saveErrorNotified = true;
+  modal({
+    title: 'Progress not saved',
+    body: `<p>${escapeHtml(state.lastSaveError)}</p>`,
+    buttons: [{ label: 'Export now', value: 'export', primary: true }, { label: 'Continue', value: null }],
+  }).then((v) => { if (v === 'export') exportSave(null, null); });
 }
 
 function iconBtn(glyph, title, fn) { const b = el('button', 'icon-btn', glyph); b.title = title; b.setAttribute('aria-label', title); b.addEventListener('click', fn); return b; }
@@ -604,7 +620,7 @@ async function showGameMenu() {
   add('📤', 'Export this save', () => exportSave(null, null));
   add('📥', 'Import a save', () => importSaveFile());
   if (state.ephemeral) add('💾', 'Keep this adventure', () => keepDemo());
-  else add('💾', 'Save & quit to title', () => { state.save(); showTitle(); });
+  else add('💾', 'Save & quit to title', () => { if (state.save()) showTitle(); else surfaceSaveError(true); });
   const menuCredits = el('div', 'menu-credits');
   menuCredits.innerHTML = creditsHtml();
   body.appendChild(menuCredits);

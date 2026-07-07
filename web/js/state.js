@@ -73,6 +73,10 @@ export class GameState {
     // throwaway preview from occupying a slot (and, when slots are full, from
     // clobbering slot 0 via the old nextFreeSlot()===0 fallback).
     this.ephemeral = false;
+    // Null while persistence is healthy; a player-facing message string when the
+    // last save() failed (storage full, or blocked in private-browsing mode). The
+    // UI watches this to warn that progress is no longer being saved (task 7).
+    this.lastSaveError = null;
     this._listeners = new Set();
     this._undo = []; // in-memory stack of pre-section-effects state snapshots
   }
@@ -466,8 +470,11 @@ export class GameState {
   }
 
   // ---- persistence -----------------------------------------------------
+  /** Persist to localStorage. Returns true on success, false on failure (and
+   *  sets lastSaveError to a player-facing message so the UI can warn). An
+   *  ephemeral preview game reports success without writing. */
   save() {
-    if (this.ephemeral) return; // preview game: not persisted until kept
+    if (this.ephemeral) { this.lastSaveError = null; return true; } // preview game: not persisted until kept
     try {
       localStorage.setItem(SAVE_PREFIX + this.slot, JSON.stringify(this.data));
       const meta = loadSlotMeta();
@@ -480,8 +487,12 @@ export class GameState {
         updated: this.data.updated,
       };
       localStorage.setItem(META_KEY, JSON.stringify(meta));
+      this.lastSaveError = null;
+      return true;
     } catch (e) {
+      this.lastSaveError = describeSaveError(e);
       console.error('save failed', e);
+      return false;
     }
   }
 
@@ -509,11 +520,145 @@ export class GameState {
   }
 }
 
-function migrate(data) {
+// ---- import / load hardening --------------------------------------------
+// A loaded or imported save (localStorage or a hand-edited JSON file) is
+// untrusted: wrong array/object shapes must never reach rendering or the sheet.
+// Each field is coerced to a well-typed value (bad entries dropped) rather than
+// merged verbatim. Unknown top-level keys are discarded — the schema is fully
+// known (freshData()), so anything else is stale or hostile.
+function asNum(v, def, { min = -Infinity, max = Infinity, int = false } = {}) {
+  let n = typeof v === 'number' ? v : (typeof v === 'string' && v.trim() !== '' ? parseFloat(v) : NaN);
+  if (!Number.isFinite(n)) n = def;
+  if (int) n = Math.round(n);
+  return Math.min(max, Math.max(min, n));
+}
+function asStr(v, def = '') { return typeof v === 'string' ? v : (v == null ? def : String(v)); }
+function asBool(v) { return v === true; }
+function asArr(v) { return Array.isArray(v) ? v : []; }
+function asObj(v) { return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {}; }
+
+function sanitizeItem(it) {
+  if (!it || typeof it !== 'object' || Array.isArray(it)) return null;
+  const name = asStr(it.name).trim();
+  if (!name) return null; // a nameless possession is meaningless — drop it
+  const kind = ['weapon', 'armour', 'tool', 'item'].includes(it.kind) ? it.kind : 'item';
+  return {
+    id: asStr(it.id) || nid(),
+    kind,
+    name,
+    bonus: asNum(it.bonus, 0, { int: true }),
+    ability: typeof it.ability === 'string' ? it.ability : null,
+    tags: asArr(it.tags).filter((t) => typeof t === 'string'),
+    wielded: asBool(it.wielded),
+    worn: asBool(it.worn),
+  };
+}
+
+function sanitizeAffliction(a, type) {
+  const o = asObj(a);
+  const name = asStr(o.name).trim();
+  if (!name) return null;
+  const effects = asArr(o.effects)
+    .map((e) => ({ ability: asStr(asObj(e).ability), bonus: asNum(asObj(e).bonus, 0, { int: true }) }))
+    .filter((e) => e.ability);
+  return { name, type, effects, cumulative: asBool(o.cumulative), lift: o.lift == null ? null : asStr(o.lift) };
+}
+
+function sanitizeShip(s) {
+  const o = asObj(s);
+  const type = asStr(o.type).trim();
+  if (!type) return null;
+  return {
+    type,
+    name: asStr(o.name, 'Ship') || 'Ship',
+    crew: asStr(o.crew, 'average') || 'average',
+    cargo: asArr(o.cargo).filter((c) => typeof c === 'string'),
+    docked: o.docked == null ? null : asStr(o.docked),
+  };
+}
+
+export function sanitizeData(raw) {
   const base = freshData();
-  const merged = { ...base, ...data };
-  merged.abilities = { ...base.abilities, ...(data.abilities || {}) };
-  return merged;
+  const d = asObj(raw);
+  const out = { ...base };
+  out.schema = SCHEMA;
+  out.name = (asStr(d.name, base.name).slice(0, 80).trim()) || base.name;
+  out.gender = d.gender === 'f' ? 'f' : 'm';
+  out.profession = asStr(d.profession, base.profession) || base.profession;
+
+  out.abilities = {};
+  for (const ab of ABILITIES) out.abilities[ab] = clampAbility(asNum(d.abilities && d.abilities[ab], 4, { int: true }));
+
+  out.staminaMax = asNum(d.staminaMax, base.staminaMax, { min: 1, int: true });
+  out.stamina = asNum(d.stamina, out.staminaMax, { min: 0, max: out.staminaMax, int: true });
+  out.rank = asNum(d.rank, base.rank, { min: 1, int: true });
+  out.shards = asNum(d.shards, 0, { min: 0, int: true });
+
+  out.items = asArr(d.items).map(sanitizeItem).filter(Boolean);
+  out.gods = asArr(d.gods).filter((g) => typeof g === 'string');
+  out.godless = asBool(d.godless);
+  out.titles = asArr(d.titles).map((t) => {
+    const o = asObj(t); const name = asStr(o.name).trim();
+    return name ? { name, value: asNum(o.value, 0, { int: true }) } : null;
+  }).filter(Boolean);
+  out.blessings = asArr(d.blessings).filter((b) => typeof b === 'string');
+  out.curses = asArr(d.curses).map((a) => sanitizeAffliction(a, 'curse')).filter(Boolean);
+  out.diseases = asArr(d.diseases).map((a) => sanitizeAffliction(a, 'disease')).filter(Boolean);
+  out.poisons = asArr(d.poisons).map((a) => sanitizeAffliction(a, 'poison')).filter(Boolean);
+
+  out.codewords = {};
+  for (const [k, v] of Object.entries(asObj(d.codewords))) if (v) out.codewords[k] = true;
+  out.codewordValues = {};
+  for (const [k, v] of Object.entries(asObj(d.codewordValues))) { const n = asNum(v, NaN, { int: true }); if (Number.isFinite(n)) out.codewordValues[k] = n; }
+  out.boxes = {};
+  for (const [k, v] of Object.entries(asObj(d.boxes))) { const n = asNum(v, 0, { min: 0, int: true }); if (n > 0) out.boxes[k] = n; }
+  out.flags = {};
+  for (const [k, v] of Object.entries(asObj(d.flags))) out.flags[k] = !!v;
+  out.vars = {};
+  for (const [k, v] of Object.entries(asObj(d.vars))) { const n = asNum(v, NaN); if (Number.isFinite(n)) out.vars[k] = n; }
+
+  out.ships = asArr(d.ships).map(sanitizeShip).filter(Boolean);
+  out.resurrections = asArr(d.resurrections).map((r) => {
+    const o = asObj(r);
+    return { book: asNum(o.book, out.book, { min: 1, int: true }), section: o.section == null ? null : asStr(o.section), text: asStr(o.text), god: o.god == null ? null : asStr(o.god) };
+  });
+  out.effects = asArr(d.effects).map((e) => {
+    const o = asObj(e);
+    if (!o.ability && !o.type) return null;
+    return { ability: typeof o.ability === 'string' ? o.ability : null, bonus: asNum(o.bonus, 0, { int: true }), type: typeof o.type === 'string' ? o.type : null, uses: o.uses == null ? null : asNum(o.uses, 0, { min: 0, int: true }), text: asStr(o.text) };
+  }).filter(Boolean);
+  out.abilityFlags = {};
+  for (const [k, v] of Object.entries(asObj(d.abilityFlags))) { const o = asObj(v); const f = {}; if (o.fixed) f.fixed = true; if (o.cursed) f.cursed = true; if (Object.keys(f).length) out.abilityFlags[k] = f; }
+
+  out.caches = {};
+  for (const [k, v] of Object.entries(asObj(d.caches))) {
+    const o = asObj(v);
+    out.caches[k] = { money: asNum(o.money, 0, { min: 0, int: true }), items: asArr(o.items).map(sanitizeItem).filter(Boolean), locked: asBool(o.locked) };
+  }
+
+  out.book = asNum(d.book, base.book, { min: 1, int: true });
+  out.section = d.section == null ? null : asStr(d.section);
+  out.startBook = asNum(d.startBook, out.book, { min: 1, int: true });
+  out.history = asArr(d.history).map((h) => { const o = asObj(h); return { book: asNum(o.book, 1, { min: 1, int: true }), section: asStr(o.section) }; }).filter((h) => h.section);
+  out.turns = asNum(d.turns, 0, { min: 0, int: true });
+  out.created = asNum(d.created, base.created, { min: 0 });
+  out.updated = asNum(d.updated, base.updated, { min: 0 });
+  return out;
+}
+
+function migrate(data) {
+  return sanitizeData(data);
+}
+
+// Turn a thrown localStorage error into a player-facing explanation. A full
+// store throws QuotaExceededError (code 22, or Firefox's 1014); other failures
+// are almost always private-browsing / disabled storage.
+function describeSaveError(e) {
+  const quota = e && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 22 || e.code === 1014);
+  if (quota) {
+    return 'Storage is full — your progress can’t be saved. Export this adventure to a file, then delete an old save to free space.';
+  }
+  return 'Your browser is blocking storage, so your progress can’t be saved (this often happens in private-browsing mode). Export this adventure to a file to keep it safe.';
 }
 
 export function makeItem(kind, name, bonus = 0, ability = null, tags = []) {
@@ -567,7 +712,12 @@ export function readSlotData(slot) {
 
 /** Import a save-data object into a new free slot. Returns {slot, meta}. Throws if invalid. */
 export function importSave(data) {
-  if (!data || typeof data !== 'object' || !data.abilities || data.stamina == null) {
+  // Reject anything that isn't shaped like a save before we bother sanitizing —
+  // a plausible FL save is a plain object carrying an `abilities` object and a
+  // Stamina value. sanitizeData() then hardens every field (see above).
+  if (!data || typeof data !== 'object' || Array.isArray(data)
+      || typeof data.abilities !== 'object' || data.abilities === null || Array.isArray(data.abilities)
+      || data.stamina == null) {
     throw new Error('That file is not a valid Fabled Lands save.');
   }
   const slot = nextFreeSlot();

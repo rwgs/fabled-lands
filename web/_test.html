@@ -2,7 +2,7 @@
 <body><pre id="results">running…</pre>
 <script type="module">
 import * as data from './js/data.js';
-import { GameState, readSlotData, importSave, loadSlotMeta, deleteSlot, makeItem, nextFreeSlot } from './js/state.js';
+import { GameState, readSlotData, importSave, loadSlotMeta, deleteSlot, makeItem, nextFreeSlot, sanitizeData } from './js/state.js';
 import * as eng from './js/engine.js';
 import { fightRound } from './js/combat.js';
 import { goodsFrom, buyTrade, applyInlineBuy, sellInlineItem, sellCargo } from './js/market.js';
@@ -786,6 +786,76 @@ async function run() {
     let threw = false; try { importSave({ foo: 1 }); } catch { threw = true; }
     ok('import rejects invalid file', threw === true);
     deleteSlot(15); deleteSlot(impSlot); // cleanup
+
+    // --- task 6: deep sanitize of imported/loaded saves ---
+    // sanitizeData coerces every field so a hostile/corrupt file can never crash
+    // rendering or the sheet; bad array/object entries are dropped, not trusted.
+    const dirty = sanitizeData({
+      name: 42, gender: 'x', profession: 7,
+      abilities: { combat: '9', magic: 99, sanctity: 'nope' }, // string→num, over-cap clamp, junk→default
+      stamina: '15', staminaMax: 12,                            // strings coerced; stamina clamped to max
+      rank: -3, shards: -50,                                    // clamped to floors
+      items: 'not-an-array',                                    // wrong shape → []
+      titles: [{ name: 'Hero', value: '2' }, { value: 5 }, 'junk'], // drop the nameless + non-object
+      ships: [{ type: 'sloop', cargo: ['silk', 5, null] }, 'nope', {}], // drop bad ships; filter cargo
+      curses: [{ name: 'Hex', effects: [{ ability: 'combat', bonus: '-2' }, {}] }, {}],
+      codewords: { Real: true, Fake: 0 }, boxes: { '1.5': '2', '1.6': -1 },
+      vars: { x: '3', bad: 'NaN' }, book: '4', section: 99, turns: -1,
+      caches: { pot: { money: '100', items: [{ name: 'gem' }, null], locked: 'yes' } },
+      junkField: { nested: true },                              // unknown key dropped
+    });
+    ok('sanitize: name coerced to string', dirty.name === '42');
+    ok('sanitize: gender falls back to m', dirty.gender === 'm');
+    ok('sanitize: ability string→number', dirty.abilities.combat === 9);
+    ok('sanitize: ability clamped to 12', dirty.abilities.magic === 12, String(dirty.abilities.magic));
+    ok('sanitize: junk ability→default 4', dirty.abilities.sanctity === 4, String(dirty.abilities.sanctity));
+    ok('sanitize: stamina string coerced', dirty.stamina === 12, String(dirty.stamina));
+    ok('sanitize: rank floored to 1', dirty.rank === 1, String(dirty.rank));
+    ok('sanitize: shards floored to 0', dirty.shards === 0, String(dirty.shards));
+    ok('sanitize: bad items array → []', Array.isArray(dirty.items) && dirty.items.length === 0);
+    ok('sanitize: titles drop nameless/non-object', dirty.titles.length === 1 && dirty.titles[0].name === 'Hero' && dirty.titles[0].value === 2);
+    ok('sanitize: bad ships dropped, cargo filtered', dirty.ships.length === 1 && dirty.ships[0].type === 'sloop' && dirty.ships[0].cargo.join(',') === 'silk');
+    ok('sanitize: curse effects filtered', dirty.curses.length === 1 && dirty.curses[0].effects.length === 1 && dirty.curses[0].effects[0].bonus === -2);
+    ok('sanitize: codewords keep only truthy', dirty.codewords.Real === true && dirty.codewords.Fake === undefined);
+    ok('sanitize: boxes drop non-positive, coerce', dirty.boxes['1.5'] === 2 && dirty.boxes['1.6'] === undefined);
+    ok('sanitize: vars drop non-numeric', dirty.vars.x === 3 && dirty.vars.bad === undefined);
+    ok('sanitize: book/section coerced', dirty.book === 4 && dirty.section === '99');
+    ok('sanitize: cache money/items/locked coerced', dirty.caches.pot.money === 100 && dirty.caches.pot.items.length === 1 && dirty.caches.pot.locked === false);
+    ok('sanitize: unknown top-level key dropped', dirty.junkField === undefined);
+    ok('sanitize: turns floored to 0', dirty.turns === 0);
+    // a malformed save must survive being loaded into a live GameState + rendered
+    const gdirty = new GameState(sanitizeData({ abilities: { combat: 5 }, stamina: 9, items: [null, { name:'sword', kind:'weapon', bonus:2 }, 3] }), 0);
+    ok('sanitize: GameState from junk has clean items', gdirty.itemCount() === 1 && gdirty.data.items[0].name === 'sword');
+    ok('sanitize: derived stats compute without throwing', Number.isFinite(gdirty.defence()) && Number.isFinite(gdirty.ability('combat')));
+
+    // importSave rejects non-save shapes (array, missing abilities object)
+    let arrThrew = false; try { importSave([1,2,3]); } catch { arrThrew = true; }
+    ok('import rejects a JSON array', arrThrew === true);
+    let noAbThrew = false; try { importSave({ abilities: 'nope', stamina: 5 }); } catch { noAbThrew = true; }
+    ok('import rejects when abilities is not an object', noAbThrew === true);
+
+    // --- task 7: save() surfaces persistence failures ---
+    const gsv = GameState.create({ name:'SV', gender:'m', profession:'Warrior', book:1, adv });
+    gsv.slot = 12;
+    ok('save returns true and clears error normally', gsv.save() === true && gsv.lastSaveError === null);
+    // simulate a full store (QuotaExceededError)
+    const quotaSpy = () => { const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e; };
+    localStorage.setItem = quotaSpy;
+    const okQuota = gsv.save();
+    delete localStorage.setItem; // revert to Storage.prototype.setItem
+    ok('save returns false when storage is full', okQuota === false);
+    ok('lastSaveError explains a full store', typeof gsv.lastSaveError === 'string' && /full/i.test(gsv.lastSaveError), gsv.lastSaveError);
+    // simulate blocked storage (private-browsing)
+    localStorage.setItem = () => { throw new Error('access denied'); };
+    gsv.save();
+    delete localStorage.setItem;
+    ok('lastSaveError explains blocked storage', /private|blocking/i.test(gsv.lastSaveError), gsv.lastSaveError);
+    ok('save recovers and re-clears lastSaveError', gsv.save() === true && gsv.lastSaveError === null);
+    // an ephemeral (preview) game reports success without writing or erroring
+    gsv.ephemeral = true; gsv.lastSaveError = 'stale';
+    ok('ephemeral save reports success, no error', gsv.save() === true && gsv.lastSaveError === null);
+    gsv.ephemeral = false;
+    deleteSlot(12); // cleanup
 
     // --- save-slot exhaustion never silently overwrites slot 0 (task 4) ---
     {
