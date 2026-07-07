@@ -368,6 +368,16 @@ async function run() {
     ok('§59 bare training offers a six-ability chooser', container.querySelectorAll('.ability-pick').length === 6,
        'picks=' + container.querySelectorAll('.ability-pick').length);
 
+    // §123: <success>/<failure> inside a <choices> table resolve the swim roll (task 22)
+    await renderSec(1,'123');
+    ok('§123 shows the swim difficulty roll', !!container.querySelector('.btn-roll'));
+    ok('§123 renders its plain choices too', container.querySelectorAll('.choice').length >= 4, 'choices=' + container.querySelectorAll('.choice').length);
+    ok('§123 hides the swim branch until rolled', !container.querySelector('.branch .goto-primary'));
+    container.querySelector('.btn-roll').click();
+    await new Promise(r => setTimeout(r, 1000));
+    ok('§123 reveals a swim outcome (→53 or →76) after rolling', /Continue → (53|76)/.test(container.textContent),
+       (container.querySelector('.choices') || container).textContent.replace(/\s+/g,' ').slice(0, 200));
+
     // --- interaction: clicking a choice navigates ---
     let navd = null;
     const story3 = new Story(container, gs, { navigate:(b,s)=>{navd={b,s};}, onDeath(){}, notify(){} });

@@ -14,7 +14,6 @@ the book XML corpus.
 **HIGH**
 - [ ] 20. Implement caches, banks, `<adjustmoney>` and `<transfer>`
 - [ ] 21. Fix `<flee>`/`<fightdamage>`: no render-time auto-apply, find them anywhere, honour `flee="t"`, `type="replace"`
-- [ ] 22. Render `<success>`/`<failure>`/`<outcome>` children of `<choices>`
 - [ ] 23. Make inline `<buy>`/`<sell>` functional (ships, tools, quantity, item sells)
 
 **MEDIUM**
@@ -55,6 +54,7 @@ the book XML corpus.
 - [x] 17. Recognise all spec'd `<if>` attributes; stop defaulting unknown conditions to true
 - [x] 18. Preserve item `tags` and support tag-filtered item conditions
 - [x] 19. Implement the curse / disease / poison system end-to-end
+- [x] 22. Render `<success>`/`<failure>`/`<outcome>` children of `<choices>`
 
 ---
 
@@ -478,16 +478,21 @@ per wound. Extend the fight tests in `web/_test.html`.
 
 ---
 
-## 22. Render `<success>`/`<failure>`/`<outcome>` children of `<choices>`  — HIGH
+## 22. Render `<success>`/`<failure>`/`<outcome>` children of `<choices>`  — **done**
 
-`renderChoices` keeps only `<choice>` children (render.js:664), silently
-dropping the roll-branch elements the books place inside choice tables — so
-book1/123's swim-the-river SCOUTING roll renders but leads nowhere (its
-`<success book="2" section="53">` / `<failure book="2" section="76">` never
-appear). 12 bundled sections: book1/123/554, book2/53/61/122/138/190,
-book3/533, book4/456/457 (`<outcome>`), book5/333, book6/735. Route these
-children through the normal success/failure rendering and add a regression
-test on book 1 §123.
+`renderChoices` kept only `<choice>` children, silently dropping the roll-branch
+elements the books place inside choice tables (book1/123's swim SCOUTING roll led
+nowhere). Fix (`render.js`): `renderChoices` now iterates *all* children in order
+and routes `<success>`/`<failure>`/`<outcome>`/`<outcomes>` through `renderBranch`
+(alongside the `<choice>` buttons), so the branch reveals its goto once the
+prose's `<difficulty>`/`<random>` resolves. `renderBranch` gained a lone-
+`<outcome>` case matching on `flag=` (no roll needed — the paid-offering idiom in
+book4/456), `range=`/`var=` (vs the roll) or `codeword=`. Covers book1/123/554,
+book2/53/61/122/138/190, book3/533, book4/456/457, book5/333, book6/735.
+
+Verified: 4 new assertions on §123 (roll button + 4 plain choices render; branch
+hidden until rolled; a swim outcome →53/→76 revealed after rolling) + full smoke
+test (`RESULT ALL PASS pass=169 fail=0`).
 
 ---
 

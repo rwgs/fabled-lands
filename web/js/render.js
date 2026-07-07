@@ -720,9 +720,17 @@ export class Story {
   renderChoices(container, choicesNode, path, only = null, explicitKids = null) {
     const wrap = document.createElement('div');
     wrap.className = 'choices';
-    const kids = explicitKids || (only ? [only] : Array.from(choicesNode.children).filter((c) => c.tagName.toLowerCase() === 'choice'));
-    kids.forEach((choice, i) => {
-      wrap.appendChild(this.renderChoice(choice, path + '.c' + i));
+    // A <choices> table can also hold the roll-branch elements the books place
+    // beside the buttons (<success>/<failure>/<outcome>) — the resolution of a
+    // <difficulty>/<random> rolled in the prose above (e.g. book1/123 swim). Route
+    // those through renderBranch so they reveal their goto once the roll resolves.
+    const kids = explicitKids || (only ? [only] : Array.from(choicesNode.children));
+    kids.forEach((node, i) => {
+      const tag = node.tagName.toLowerCase();
+      if (tag === 'choice') wrap.appendChild(this.renderChoice(node, path + '.c' + i));
+      else if (tag === 'success' || tag === 'failure' || tag === 'outcome' || tag === 'outcomes') {
+        this.renderBranch(wrap, node, path + '.b' + i, this.activeRoll);
+      }
     });
     container.appendChild(wrap);
     return wrap;
@@ -989,6 +997,22 @@ export class Story {
       if (!roll && !node.hasAttribute('var')) return; // wait until the roll is made
       const want = tag === 'success';
       if (this.branchSuccess(node, roll) === want) this.revealBranch(container, node, path);
+      return;
+    }
+
+    // A lone <outcome> (e.g. inside a <choices> table): reveal it when its
+    // flag/range/var/codeword condition matches. flag= needs no roll (it's set by
+    // a paid offering — book4/456); range/var need the roll to have resolved.
+    if (tag === 'outcome') {
+      const flag = node.getAttribute('flag');
+      let match;
+      if (flag != null) match = this.state.getFlag(flag);
+      else if (!roll && !node.hasAttribute('var')) return; // wait for the roll
+      else if (node.getAttribute('range') != null) match = matchRange(node.getAttribute('range'), node.getAttribute('var') ? this.state.getVar(node.getAttribute('var')) : roll.total);
+      else if (node.getAttribute('codeword')) match = node.getAttribute('codeword').split(/[|,]/).some((w) => this.state.hasCodeword(w.trim()));
+      else if (node.hasAttribute('var')) match = this.branchSuccess(node, roll);
+      else match = true;
+      if (match) this.revealBranch(container, node, path);
       return;
     }
 
