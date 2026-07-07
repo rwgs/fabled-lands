@@ -13,7 +13,7 @@ import {
 } from './engine.js';
 import { makeFight, fightRound, groupFightRound, isDefeated } from './combat.js';
 import { shopKind, goodsFrom, ownsGoods, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo } from './market.js';
-import { normalize, makeItem, parseTags } from './state.js';
+import { normalize, makeItem, parseTags, currencyAward, splitItemName } from './state.js';
 import { ABILITY_LABEL, CREW_LEVELS } from './rules.js';
 import { bookTitle, availableBooks } from './data.js';
 import { animateDice, modal } from './ui.js';
@@ -758,7 +758,12 @@ export class Story {
 
   renderItemAward(container, node, path) {
     const kind = node.tagName.toLowerCase();
-    const name = node.getAttribute('name') || (kind === 'weapon' ? 'weapon' : kind);
+    const rawName = node.getAttribute('name') || (kind === 'weapon' ? 'weapon' : kind);
+    // A "N Shards" award is stackable currency, not a possession (dragon hoard §1.16).
+    const currency = kind === 'item' ? currencyAward(rawName) : null;
+    // A multi-name label ("fur cloak|wolf pelt") displays under its first name; the
+    // rest ride along as tags so ownership/<if> match either name (task 29).
+    const { name, alts } = splitItemName(rawName);
     const bonus = node.getAttribute('bonus') ? parseInt(node.getAttribute('bonus'), 10) : 0;
     const ability = node.getAttribute('ability') || null;
     let tag = '';
@@ -766,7 +771,7 @@ export class Story {
     else if (kind === 'armour') tag = ` (Defence +${bonus})`;
     else if (kind === 'tool' && ability) tag = ` (${titleCase(ability)} +${bonus})`;
     else if (bonus) tag = ` (+${bonus})`;
-    const display = titleCase(name) + tag;
+    const display = currency != null ? `${currency} Shards` : titleCase(name) + tag;
     const key = 'take@' + path;
     const taken = this.ctx.applied.has(key);
     // Grouped "choose up to N" award: consult the shared group tally so the extra
@@ -784,15 +789,16 @@ export class Story {
       btn.disabled = true;
       btn.textContent = display;
       btn.title = `You may choose only ${limit}`;
-    } else if (this.state.freeSlots() <= 0) {
+    } else if (currency == null && this.state.freeSlots() <= 0) {
       btn.disabled = true;
       btn.textContent = display;
       btn.title = 'No room (12-item carry limit)';
     } else {
       btn.textContent = 'Take ' + display;
-      const tags = parseTags(node.getAttribute('tags'));
+      const tags = [...parseTags(node.getAttribute('tags')), ...alts];
       btn.addEventListener('click', () => {
-        this.state.addItem(makeItem(kind, name, bonus, ability, tags));
+        if (currency != null) this.state.adjustMoney(currency); // stackable "N Shards" treasure
+        else this.state.addItem(makeItem(kind, name, bonus, ability, tags));
         this.ctx.applied.add(key);
         if (limit != null) this.ctx.groupPicks.set(group, groupCount + 1);
         this.rerender();
@@ -1438,10 +1444,13 @@ export class Story {
       const tag = child.tagName.toLowerCase();
       if (tag === 'header') {
         hasHeader = true;
-        const type = child.getAttribute('type') || 'other';
+        // Prefer the explicit header1= column title (book4/111 "Potions"/"Artifacts");
+        // fall back to the type= keyword's label, then a generic heading (task 29).
+        const h1 = child.getAttribute('header1');
+        const title = (h1 && h1.trim()) || MARKET_TITLES[child.getAttribute('type')] || 'Goods for sale';
         const h = document.createElement('div');
         h.className = 'market-head';
-        h.textContent = MARKET_TITLES[type] || 'Market';
+        h.textContent = title;
         box.appendChild(h);
       } else if (tag === 'trade' || tag === 'armour' || tag === 'weapon' || tag === 'tool' || tag === 'item' || tag === 'cargo') {
         box.appendChild(this.renderShopRow(child, path + '.r' + i));
@@ -1476,7 +1485,7 @@ export class Story {
     else if (kind === 'armour') tag = ` (Defence +${bonus})`;
     else if (kind === 'tool' && ability) tag = ` (${titleCase(ability)} +${bonus})`;
     else if (bonus) tag = ` (+${bonus})`;
-    label.textContent = titleCase(name) + tag;
+    label.textContent = titleCase(splitItemName(name).name) + tag; // show the first of a "a|b" label
     row.appendChild(label);
 
     const actions = document.createElement('span');

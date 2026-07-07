@@ -4,7 +4,7 @@
 // returns { ok, note? } so the renderer can decide whether to redraw and what
 // (if anything) to toast. No DOM — unit-testable headlessly.
 
-import { makeItem, parseTags } from './state.js';
+import { makeItem, parseTags, splitItemName } from './state.js';
 import { SHIP_TYPES, CREW_LEVELS, canonShipType } from './rules.js';
 
 const shipCap = (type) => SHIP_TYPES[canonShipType(type)]?.capacity || 1;
@@ -78,7 +78,10 @@ export function buyTrade(state, goods, price) {
   } else {
     if (state.freeSlots() <= 0) return { ok: false, note: 'You can carry only 12 items.' };
     state.adjustMoney(-price);
-    state.addItem(makeItem(kind, name, bonus, ability, tags));
+    // A "fur cloak|wolf pelt" row is one item: store it under its first name, with
+    // the alternatives as tags so <if item="wolf pelt"> and re-selling match (task 29).
+    const { name: itemName, alts } = splitItemName(name);
+    state.addItem(makeItem(kind, itemName, bonus, ability, [...tags, ...alts]));
   }
   return { ok: true };
 }

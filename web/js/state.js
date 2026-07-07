@@ -686,6 +686,22 @@ export function normalize(s) {
   return (s || '').toLowerCase().replace(/[‘’]/g, "'").replace(/\s+/g, ' ').trim();
 }
 
+/** A treasure named "N Shards" (a dragon-hoard pick, book1/16 et al.) is stackable
+ *  currency, not a carried item — returns N, else null. (task 29) */
+export function currencyAward(name) {
+  const m = /^\s*(\d+)\s+shards\s*$/i.exec(String(name || ''));
+  return m ? parseInt(m[1], 10) : null;
+}
+
+/** Split a multi-name goods label ("fur cloak|wolf pelt") into a display name and
+ *  the alternative names. The alternatives are carried as extra item tags so the
+ *  Sell button and <if item="wolf pelt"> both match under either name — matchItems
+ *  already matches a name against tags. (task 29) */
+export function splitItemName(name) {
+  const parts = String(name || '').split('|').map((s) => s.trim()).filter(Boolean);
+  return { name: parts[0] || String(name || ''), alts: parts.slice(1) };
+}
+
 /** Match items (in any list) by a pipe-separated name/tag pattern. Shared by the
  *  adventure sheet and cache lookups so both use the same matching rules. */
 export function matchItems(items, pattern) {

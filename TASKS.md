@@ -24,9 +24,11 @@ the book XML corpus.
 - [x] 26. Implement the remaining `<fight>` attributes
 - [x] 27. Cap visit-box ticks and make `ticks=` guards robust
 - [x] 28. Honour `dead="t"` on `<goto>`/`<choice>`
-- [ ] 29. Market & item polish: currency items, `currency=`, pipe names, headers, item `<effect>`s
+- [x] 29. Market & item polish: currency items, pipe names, headers *(parts 2 & 5 split → 40, 41)*
 - [ ] 30. Gate `<random flag=…>` rolls behind their payment
 - [ ] 31. `<rest>` with no `stamina=` should restore to full
+- [ ] 40. `<market currency="…">` alternate-currency markets
+- [ ] 41. Item `<effect>` system (use/aura/wielded/ability) and `<sold>` sell-hooks
 
 **LOW**
 - [ ] 9. Centralise tag dispatch into a registry
@@ -819,25 +821,37 @@ fight/resurrection tests still green + full render-every-section scan (4369).
 
 ---
 
-## 29. Market & item polish: currency items, `currency=`, pipe names, headers, item `<effect>`s  — MEDIUM
+## 29. Market & item polish: currency items, pipe names, headers  — **done** (parts 1/3/4; 2 & 5 split out)
 
-Five smaller market/item divergences:
-1. `<item name="500 Shards">` (dragon hoard book1/16 and 7 similar
-   150–2000-Shard items) is created as an ordinary possession — burns one of
-   the 12 slots and adds no money. Spec: "N things" names are stackable
-   currency (state.js:373 `makeItem`).
-2. `<market currency="Mithral">` (book2/495) deducts Shards — `market.js` has
-   no `currency=` support.
-3. Multi-name rows (`fur cloak|wolf pelt` — book4/417, book5/101/416) store the
-   literal pipe name (market.js:73), so the same row's Sell button never
-   enables and `<if item="wolf pelt">` fails; pick one name (or match either).
-4. `header1=`/`header2=` column titles are dropped — the 13 markets using them
-   (book4/111 "Potions"/"Artifacts") all render the fallback "Goods for sale"
-   (render.js:1128).
-5. The 96 `<effect>` children of items are inert at award and purchase —
-   `applyItemEffect` (engine.js:313) is a stub (book4/111 potions, book5/549
-   Vade Mecum with its use-goto). Also `<sold>` rows (4×, incl. 2 market rows
-   at book3/86/318) are unhandled.
+This item bundled five loosely-related market/item divergences. The three
+contained, high-confidence display/award fixes are done here; the two that are
+really subsystems (alternate-currency markets, and the item `<effect>` /`<sold>`
+system) were split into tasks **40** and **41** so each gets focused treatment.
+
+Done (`web/js/state.js` helpers `currencyAward`/`splitItemName`, wired into
+`render.js` + `market.js`):
+1. **Currency items** — an award named `"N Shards"` (dragon hoard book1/16 and
+   the 150–2000-Shard picks) now grants N Shards instead of burning a carry slot
+   on a valueless possession; it still counts as one grouped "choose up to N" pick.
+3. **Pipe-name rows** — a `name="fur cloak|wolf pelt"` good (book4/417,
+   book5/101/416) is stored under its first name with the alternatives as tags, so
+   the Sell button enables and `<if item="wolf pelt">` matches under either name
+   (`matchItems` already matches a name against tags); the row displays the first
+   name.
+4. **`header1=` titles** — the market heading now prefers the explicit `header1=`
+   column title (book4/111 "Potions"/"Artifacts"), falling back to the `type=`
+   keyword label then a generic heading, instead of always "Goods for sale".
+
+Verified: 6 new headless assertions (currencyAward parsing; §1.16 "500 Shards"
+award adds money and no item; splitItemName; a pipe-name buy matched by either
+name incl. `<if item="wolf pelt">`; header1= heading) + full render-every-section
+scan (4369). `RESULT ALL PASS pass=319 fail=0`.
+
+Split out (were parts 2 and 5): **task 40** `<market currency="Mithral">`
+(book2/495) — needs a named-currency pool rather than deducting Shards; **task 41**
+the ~54 item `<effect>` children (`type="use"` potions/Vade Mecum use-goto,
+`aura`/`wielded` passives, `ability`) plus `<sold>` sell-hooks (book3/86/318),
+which is a sheet-UI + effect subsystem.
 
 ---
 
@@ -965,3 +979,44 @@ regression, but not the intended weaponless fight). Non-fight transfers (villa
 stashing, banking) are correct. Fix: defer effects that appear after a `<fight>`
 and are gated on `dead="f"` until the fight actually resolves (relates to the
 fight-gate machinery and task 28's `dead="t"` handling). Add a §462 test.
+
+---
+
+## 40. `<market currency="…">` alternate-currency markets  — MEDIUM
+
+Split from task 29 (part 2). `<market currency="Mithral">` (book2/495, the Trau
+trader) currently deducts **Shards** — `market.js`/`renderShopRow` have no
+`currency=` support. Note that in the shipped corpus there is no way to *acquire*
+Mithral (no `<item name="Mithral">`, `<gain>` or `<adjustmoney currency=…>`), so
+the practical bug is only that the market wrongly lets you spend Shards; a correct
+implementation should let the player spend/receive only the named currency (of
+which they have none → nothing is buyable). Options: (a) a named-currency pool
+`state.data.currencies[name]` threaded through `buyTrade`/`sellTrade`/`renderShopRow`
+(clean, general — also lets a future section grant Mithral), or (b) the minimal
+fix — disable buy buttons in a non-Shards-currency market and price them in that
+currency. Prefer (a); add tests (buy refused with 0 Mithral; a granted Mithral
+pool lets a buy through and is debited; Shards untouched).
+
+---
+
+## 41. Item `<effect>` system (use/aura/wielded/ability) and `<sold>` sell-hooks  — MEDIUM
+
+Split from task 29 (part 5). The ~54 `<effect>` children of items are inert at
+award and purchase (`applyItemEffect`, engine.js, is a stub), and `<sold>` rows
+are unhandled. Concretely:
+- **`type="use"`** (39×) — a usable item (book4/111 potions raise an ability;
+  book5/549 Vade Mecum; `<effect type="use" uses="1" verb="Drink"><rest/></effect>`
+  potion of restoration heals all Stamina). Needs: item effects stored on the
+  possession (extend `makeItem` + the award/buy call sites so `<effect>` is
+  preserved, not discarded), a **Use/Drink** affordance in the Adventure Sheet
+  (`ui.js renderSheet` — add an `onUse` callback wired from `app.js`), the effect
+  applied via `engine.applyEffectBody` (honouring an inner `<goto>` use-target),
+  and `uses=` consumption (remove/decrement when spent).
+- **`type="aura"`** (11×) / **`type="wielded"`** (2×) — passive ability effects
+  while the item is carried/worn; fold into `state.ability()` like afflictions.
+- **`type="ability"`** (2×) — a permanent ability change applied at award.
+- **`<sold>`** (book3/86/318) — a child of an `<item>`/`<market>` holding actions
+  that fire **when the good is sold** (e.g. `<tick codeword="3.86.sold"/>`); run
+  them from the sell path (`market.sellTrade` / the inline sell), matching
+  `item=`/`tags=` for a market-level `<sold>`.
+Cover each effect type + the sell-hook with headless unit tests.

@@ -2,7 +2,7 @@
 <body><pre id="results">running…</pre>
 <script type="module">
 import * as data from './js/data.js';
-import { GameState, readSlotData, importSave, loadSlotMeta, deleteSlot, makeItem, nextFreeSlot, sanitizeData } from './js/state.js';
+import { GameState, readSlotData, importSave, loadSlotMeta, deleteSlot, makeItem, nextFreeSlot, sanitizeData, currencyAward, splitItemName } from './js/state.js';
 import * as eng from './js/engine.js';
 import { fightRound, makeFight, groupFightRound, isDefeated } from './js/combat.js';
 import { goodsFrom, buyTrade, applyInlineBuy, sellInlineItem, sellCargo } from './js/market.js';
@@ -944,6 +944,31 @@ async function run() {
     const gate = stAlive.computeFightGate(fgSec);
     const deadGoto = fgSec.querySelector('goto[dead="t"]');
     ok('fight gate marks a dead="t" goto as the lose-branch', !!gate && gate.loseNodes.has(deadGoto) && gate.hasLosePath === true, `has=${!!gate && gate.loseNodes.has(deadGoto)}`);
+
+    // --- task 29: market & item polish (currency items, pipe names, headers) ---
+    // part 1: a "N Shards" award is stackable currency, not a carried item.
+    ok('currencyAward parses "500 Shards", rejects a real item', currencyAward('500 Shards') === 500 && currencyAward('enchanted sword') === null);
+    const gcur = GameState.create({ name:'CUR', gender:'m', profession:'Warrior', book:1, adv });
+    const shBefore = gcur.data.shards, itBefore = gcur.itemCount();
+    const ccur = document.createElement('div');
+    const stCur = new Story(ccur, gcur, { navigate(){}, onDeath(){}, notify(){} });
+    gcur.data.section = '16';
+    const s116 = await data.getSection(1, '16'); stCur.begin(s116, 1, '16');
+    const shardsBtn = Array.from(ccur.querySelectorAll('.take-item')).find((b) => /500 Shards/.test(b.textContent));
+    ok('§1.16 shows a "500 Shards" award button', !!shardsBtn, `found=${!!shardsBtn}`);
+    shardsBtn.click();
+    ok('§1.16 taking "500 Shards" adds money, not an item', gcur.data.shards === shBefore + 500 && gcur.itemCount() === itBefore, `sh=${gcur.data.shards} items=${gcur.itemCount()}`);
+    // part 3: a "fur cloak|wolf pelt" row is one item, matchable under either name.
+    ok('splitItemName splits "fur cloak|wolf pelt"', (() => { const s = splitItemName('fur cloak|wolf pelt'); return s.name === 'fur cloak' && s.alts.length === 1 && s.alts[0] === 'wolf pelt'; })());
+    const gpn = GameState.create({ name:'PN', gender:'m', profession:'Warrior', book:4, adv });
+    gpn.data.shards = 500;
+    buyTrade(gpn, goodsFrom(parse('<item name="fur cloak|wolf pelt" buy="40" sell="30"/>'), 'item', 'fur cloak|wolf pelt', 0), 40);
+    ok('pipe-name buy: stored under first name, matched by either', gpn.hasItem('fur cloak') && gpn.hasItem('wolf pelt') && eng.evaluateCondition(parse('<if item="wolf pelt"/>'), gpn) === true, JSON.stringify(gpn.data.items.map((i) => ({ n:i.name, t:i.tags }))));
+    // part 4: header1= supplies the market column heading.
+    const stHd = new Story(document.createElement('div'), GameState.create({ name:'HD', gender:'m', profession:'Warrior', book:4, adv }), { navigate(){}, onDeath(){}, notify(){} });
+    stHd.book = 4; stHd.sectionEl = parse('<section/>');
+    const mktBox = stHd.renderMarket(document.createElement('div'), parse('<market><header header1="Potions"/><item name="potion of strength" buy="100" sell="90"/></market>'), 'm');
+    ok('header1= supplies the market heading', /Potions/.test(mktBox.textContent), mktBox.textContent.slice(0, 40));
 
     // buy a tool: grants a bonus tool tied to an ability and charges the price
     const gbtool = GameState.create({ name:'BT', gender:'m', profession:'Warrior', book:5, adv });
