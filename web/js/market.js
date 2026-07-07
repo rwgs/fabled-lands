@@ -5,9 +5,16 @@
 // (if anything) to toast. No DOM — unit-testable headlessly.
 
 import { makeItem, parseTags } from './state.js';
-import { SHIP_TYPES } from './rules.js';
+import { SHIP_TYPES, CREW_LEVELS, canonShipType } from './rules.js';
 
-const shipCap = (type) => SHIP_TYPES[type]?.capacity || 1;
+const shipCap = (type) => SHIP_TYPES[canonShipType(type)]?.capacity || 1;
+// Normalise an initialCrew= value from the books to a real crew grade.
+const canonCrew = (c) => {
+  const k = String(c || '').trim().toLowerCase();
+  if (CREW_LEVELS.includes(k)) return k;
+  if (k === 'none') return 'poor';
+  return 'average'; // "oldcrew" and blanks: a serviceable default
+};
 
 /** Classify a shop-row element into a goods kind. */
 export function shopKind(node) {
@@ -100,11 +107,56 @@ export function sellTrade(state, goods, price) {
   return { ok: true };
 }
 
-/** Apply an inline <buy> (a crew upgrade, or a single item). Mutates state. */
-export function applyInlineBuy(state, { price, crew, item, bonus, ability, tags }) {
+/**
+ * Apply an inline <buy> in prose: a crew upgrade, a ship, a tool, a carried
+ * item, or a cargo unit. Charges `price`, grants one unit, and returns
+ * { ok, note? } so the view can toast a refusal (no money / no room / no ship).
+ * The view enforces the quantity= cap (max buys per visit).
+ */
+export function applyInlineBuy(state, opts = {}) {
+  const { price = 0, crew, item, tool, ship: shipType, shipName, initialCrew,
+    cargo, bonus = 0, ability = null, tags = [] } = opts;
+  if (price > 0 && state.data.shards < price) return { ok: false, note: 'Not enough Shards.' };
+
+  if (crew) {
+    const ship = state.ships[0];
+    if (!ship) return { ok: false, note: 'You have no ship.' };
+    if (price) state.adjustMoney(-price);
+    ship.crew = crew;
+    state.changed();
+    return { ok: true };
+  }
+  if (shipType) {
+    if (price) state.adjustMoney(-price);
+    state.addShip({ type: canonShipType(shipType), name: shipName || 'Ship', crew: canonCrew(initialCrew), cargo: [], docked: null });
+    return { ok: true };
+  }
+  if (cargo != null) {
+    return buyTrade(state, { kind: 'cargo', cargoName: cargo, name: cargo }, price); // capacity checked there
+  }
+  // a carried possession: a tool (with its ability/bonus) or a plain item
+  if (state.freeSlots() <= 0) return { ok: false, note: 'You can carry only 12 items.' };
   if (price) state.adjustMoney(-price);
-  const ship = state.ships[0];
-  if (crew && ship) ship.crew = crew;
-  else if (item) state.addItem(makeItem('item', item, bonus || 0, ability || null, tags || []));
+  state.addItem(makeItem(tool ? 'tool' : 'item', tool || item, bonus || 0, ability || null, tags || []));
+  return { ok: true };
+}
+
+/** Sell one carried item by name for `gain` Shards. Returns { ok }. */
+export function sellInlineItem(state, name, gain) {
+  const it = state.findItems(name)[0];
+  if (!it) return { ok: false };
+  state.removeItemById(it.id);
+  if (gain) state.adjustMoney(gain);
+  return { ok: true };
+}
+
+/** Give up one Cargo Unit of `cargoType` (from any ship carrying it), optionally
+ *  for `gain` Shards. The barter-reward side stays in the view. Returns { ok }. */
+export function sellCargo(state, cargoType, gain) {
+  const ship = state.ships.find((s) => (s.cargo || []).includes(cargoType));
+  if (!ship) return { ok: false };
+  ship.cargo.splice(ship.cargo.indexOf(cargoType), 1);
+  if (gain) state.adjustMoney(gain);
   state.changed();
+  return { ok: true };
 }

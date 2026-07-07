@@ -7,14 +7,14 @@
 //   * revealed branches only appear (and only apply their effects) once resolved.
 
 import {
-  evaluateCondition, applyEffect, boolAttr, resolveValue, isDiceExpr,
+  evaluateCondition, applyEffect, applyEffectBody, boolAttr, resolveValue, isDiceExpr,
   rollDifficulty, rollRankCheck, rollTraining, rollDice, matchRange, childAdjustment,
   applyRest, buyResurrectionDeal, abilityChoiceOptions,
 } from './engine.js';
 import { makeFight, fightRound } from './combat.js';
-import { shopKind, goodsFrom, ownsGoods, buyTrade, sellTrade, applyInlineBuy } from './market.js';
+import { shopKind, goodsFrom, ownsGoods, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo } from './market.js';
 import { normalize, makeItem, parseTags } from './state.js';
-import { ABILITY_LABEL } from './rules.js';
+import { ABILITY_LABEL, CREW_LEVELS } from './rules.js';
 import { bookTitle, availableBooks } from './data.js';
 import { animateDice, modal } from './ui.js';
 
@@ -25,7 +25,7 @@ const ROLL_TAGS = new Set(['difficulty', 'random', 'rankcheck', 'training']);
 // MODIFIER (a child of <difficulty>/<random>/<rankcheck>, consumed by
 // childAdjustment) — never a passive effect. Auto-applying it on view would
 // silently upgrade the crew ("<adjust crew='good'>") or bump codeword counters.
-const PASSIVE_TAGS = new Set(['lose', 'tick', 'gain', 'set', 'curse', 'disease', 'poison']);
+const PASSIVE_TAGS = new Set(['lose', 'tick', 'gain', 'set', 'curse', 'disease', 'poison', 'adjustmoney']);
 
 export class Story {
   constructor(rootEl, state, opts) {
@@ -44,7 +44,7 @@ export class Story {
     this.sectionEl = sectionEl;
     this.book = book;
     this.section = section;
-    this.ctx = { applied: new Set(), rolls: new Map(), fights: new Map() };
+    this.ctx = { applied: new Set(), rolls: new Map(), fights: new Map(), buys: new Map() };
     this.render();
   }
 
@@ -207,6 +207,21 @@ export class Story {
     if (span.textContent.trim() || span.querySelector('*')) container.appendChild(span);
   }
 
+  // Render an element for display only: show its prose but apply NO effects and
+  // leave any controls it produced disabled. Used for <flee>/<fightdamage>, whose
+  // effects must fire on an event (fleeing / being wounded), not on render.
+  renderInert(container, node, path) {
+    const span = document.createElement('span');
+    span.className = 'fx ' + node.tagName.toLowerCase();
+    const prev = this.inactive;
+    this.inactive = true;              // suppress effect application (see renderPassive)
+    this.appendChildren(span, node, path);
+    this.inactive = prev;
+    span.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+    if (span.textContent.trim() || span.querySelector('*')) container.appendChild(span);
+    return span;
+  }
+
   appendText(container, raw) {
     if (raw == null) return;
     let t = raw.replace(/\s+/g, ' ');
@@ -277,6 +292,12 @@ export class Story {
         return this.renderTraining(container, node, path);
       case 'fight':
         return this.renderFight(container, node, path);
+      // <flee>/<fightdamage> describe a consequence that fires on an EVENT (the
+      // player fleeing, or the enemy landing a blow), never on render. Show their
+      // prose but render them inert — combat.js/the Flee button apply the effects.
+      case 'flee':
+      case 'fightdamage':
+        return this.renderInert(container, node, path);
       case 'market':
         return this.renderMarket(container, node, path);
       case 'buy':
@@ -285,6 +306,12 @@ export class Story {
         return this.renderInlineSell(container, node, path);
       case 'rest':
         return this.renderRest(container, node, path);
+      case 'moneycache':
+        return this.renderMoneyCache(container, node, path);
+      case 'itemcache':
+        return this.renderItemCache(container, node, path);
+      case 'transfer':
+        return this.renderTransfer(container, node, path);
       case 'resurrection':
         return this.renderResurrection(container, node, path);
       case 'reroll': {
@@ -758,6 +785,7 @@ export class Story {
     const god = node.getAttribute('god');
     const emptyvar = node.getAttribute('emptyvar');
     const bookNum = node.getAttribute('book');
+    const isFlee = boolAttr(node.getAttribute('flee')); // "flee at any time" option
 
     // gating
     const reasons = [];
@@ -789,6 +817,14 @@ export class Story {
       btn.title = reasons.join('; ');
     } else {
       btn.addEventListener('click', () => {
+        // A flee="t" choice IS the flee action: apply the <flee> consequence
+        // (parting wound / codeword) before leaving, and mark the fight fled.
+        if (isFlee) {
+          const fleeNode = this.sectionEl && this.sectionEl.querySelector('flee');
+          if (fleeNode) applyEffectBody(fleeNode, this.state);
+          if (this.sectionFight) this.sectionFight.outcome = 'fled';
+          if (this.state.isDead()) { this.rerender(); return; }
+        }
         if (pay && cost) this.state.adjustMoney(-cost);
         if (pay && itemReq) { const it = this.state.findItems(itemReq)[0]; if (it) this.state.removeItemById(it.id); }
         if (section == null) return;
@@ -1087,7 +1123,10 @@ export class Story {
         const tag = ch.tagName.toLowerCase();
         if (tag === 'fight') { seenFight = true; recent = ''; walk(ch, true); continue; }
         const childSkip = skip || tag === 'flee' || tag === 'fightdamage'; // Flee/fightdamage own gotos aren't gated
-        if (seenFight && !skip && (tag === 'goto' || tag === 'choice' || tag === 'return')) {
+        // A <choice flee="t"> is "flee at any time" — never gate it (book3/662),
+        // so the player can bail mid-fight.
+        const isFleeChoice = tag === 'choice' && boolAttr(ch.getAttribute('flee'));
+        if (seenFight && !skip && !isFleeChoice && (tag === 'goto' || tag === 'choice' || tag === 'return')) {
           navNodes.add(ch);
           if (LOSE.test(recent) && !WIN.test(recent)) loseNodes.add(ch);
           recent = '';
@@ -1139,8 +1178,11 @@ export class Story {
       this.ctx.fights.set(key, fight);
     }
     this.sectionFight = fight; // the section's fight, for the gate + death guard
-    const dmgNode = this.findSibling(node, 'fightdamage');
-    const fleeNode = this.findSibling(node, 'flee');
+    // Find the section's <fightdamage>/<flee> ANYWHERE (they may sit inside a <p>,
+    // or even before the <fight> — book2/152/207/297/313 etc.), not just as a
+    // forward same-level sibling.
+    const dmgNode = this.findInSection('fightdamage');
+    const fleeNode = this.findInSection('flee');
 
     const box = document.createElement('div');
     box.className = 'fight';
@@ -1149,10 +1191,10 @@ export class Story {
     return box;
   }
 
-  findSibling(node, tag) {
-    let n = node.nextElementSibling;
-    while (n) { if (n.tagName.toLowerCase() === tag) return n; n = n.nextElementSibling; }
-    return null;
+  // The first element with `tag` anywhere in the current section (sections carry
+  // at most one <flee>/<fightdamage>), regardless of nesting or order vs <fight>.
+  findInSection(tag) {
+    return this.sectionEl ? this.sectionEl.querySelector(tag) : null;
   }
 
   drawFight(box, fight, node, dmgNode, fleeNode, key) {
@@ -1212,11 +1254,20 @@ export class Story {
       flee.className = 'btn-secondary';
       flee.textContent = 'Flee';
       flee.addEventListener('click', () => {
+        // Apply the flee consequence NOW (the parting wound / "ran away" codeword)
+        // — it lives in <flee> and must fire on the flee, never on render.
+        applyEffectBody(fleeNode, this.state);
         fight.outcome = 'fled';
+        if (this.state.isDead()) { this.rerender(); return; } // a fatal parting wound
         const fgoto = fleeNode.querySelector('goto');
-        const sec = fgoto?.getAttribute('section');
-        if (sec) this.navigate(fgoto.getAttribute('book') ? Number(fgoto.getAttribute('book')) : this.book, sec);
-        else this.rerender();
+        const fchoice = this.sectionEl && this.sectionEl.querySelector('choice[flee="t"][section]');
+        if (fgoto && fgoto.getAttribute('section') != null) {
+          this.navigate(fgoto.getAttribute('book') ? Number(fgoto.getAttribute('book')) : this.book, fgoto.getAttribute('section'));
+        } else if (fchoice) {
+          this.navigate(fchoice.getAttribute('book') ? Number(fchoice.getAttribute('book')) : this.book, fchoice.getAttribute('section'));
+        } else {
+          this.rerender(); // no target: the flee unlocks a box-gated choice (e.g. §207 → §22)
+        }
       });
       controls.appendChild(flee);
     }
@@ -1314,13 +1365,14 @@ export class Story {
     return row;
   }
 
-  // Inline <buy> in prose (e.g. crew upgrades: "…it costs <buy crew=… shards=…/>…").
+  // Inline <buy> in prose: a crew upgrade, a ship, a tool, a carried item, or a
+  // cargo unit. Charges shards= and grants one unit; quantity= caps how many
+  // times it can be bought per visit (each buy memoised so it can't repeat
+  // forever). Ships/tools/items/cargo route through market.applyInlineBuy.
   renderInlineBuy(container, node, path) {
     const shards = node.getAttribute('shards');
     const price = shards != null ? resolveValue(this.state, shards) : 0;
     const crew = node.getAttribute('crew');
-    const item = node.getAttribute('item');
-    const cargo = node.getAttribute('cargo');
     const flag = node.getAttribute('flag');
 
     // A flag-linked buy is the *reward* side of a barter whose cost is a matching
@@ -1335,54 +1387,99 @@ export class Story {
       return null;
     }
 
-    // Add a Cargo Unit to the ship (many sections grant free cargo, shards="0").
-    if (cargo != null) {
+    // Crew upgrade: one grade at a time (poor→average→good→excellent), so the
+    // offer is usable only when your crew is exactly the grade below the target.
+    if (crew) {
+      const crewRank = (c) => CREW_LEVELS.indexOf(c);
+      const ship = this.state.ships[0];
+      const usable = !!ship && crewRank(ship.crew) === crewRank(crew) - 1;
       const btn = document.createElement('button');
       btn.className = 'btn-mini';
       const inner = document.createElement('span');
       this.appendChildren(inner, node, path);
-      btn.textContent = inner.textContent.trim() || (price ? `Buy ${price} Shards` : `Take a Cargo Unit of ${titleCase(cargo)}`);
-      const hasShip = this.state.ships.length > 0;
-      btn.disabled = !hasShip || (price > 0 && this.state.data.shards < price);
-      btn.title = !hasShip ? 'You need a ship to carry cargo.' : (price > 0 && this.state.data.shards < price ? 'Not enough Shards' : '');
+      btn.textContent = inner.textContent.trim() || (price ? `Hire ${titleCase(crew)} crew (${price} Shards)` : `${titleCase(crew)} crew`);
+      btn.disabled = (price > 0 && this.state.data.shards < price) || !usable;
+      if (!usable) btn.title = ship ? `Your crew must be ${CREW_LEVELS[crewRank(crew) - 1] || '—'} first.` : 'You have no ship.';
       btn.addEventListener('click', () => {
-        const res = buyTrade(this.state, { kind: 'cargo', cargoName: cargo, name: cargo }, price);
+        const res = applyInlineBuy(this.state, { price, crew });
         if (!res.ok) { if (res.note) this.notify(res.note, 'warn'); return; }
         this.rerender();
       });
       container.appendChild(btn);
       return btn;
     }
-    const btn = document.createElement('button');
-    btn.className = 'btn-mini';
-    const inner = document.createElement('span');
-    this.appendChildren(inner, node, path);
-    btn.textContent = inner.textContent.trim() || (price ? `${price} Shards` : 'Buy');
 
-    const crewRank = (c) => ['poor', 'average', 'good', 'excellent'].indexOf(c);
-    const ship = this.state.ships[0];
-    let usable = true;
-    // Crew upgrades are one grade at a time (poor→average→good→excellent), so a
-    // "buy crew=X" offer is only usable when your crew is exactly the grade below X.
-    if (crew) usable = !!ship && crewRank(ship.crew) === crewRank(crew) - 1;
-    btn.disabled = (price > 0 && this.state.data.shards < price) || !usable;
-    btn.addEventListener('click', () => {
-      applyInlineBuy(this.state, {
-        price, crew, item,
-        bonus: node.getAttribute('bonus') ? parseInt(node.getAttribute('bonus'), 10) : 0,
-        ability: node.getAttribute('ability'),
-        tags: parseTags(node.getAttribute('buytags') || node.getAttribute('tags')),
+    // ship / tool / item / cargo — capped at quantity= buys per visit.
+    const shipType = node.getAttribute('ship');
+    const tool = node.getAttribute('tool');
+    const item = node.getAttribute('item');
+    const cargo = node.getAttribute('cargo');
+    const quantity = node.getAttribute('quantity') ? Math.max(1, parseInt(node.getAttribute('quantity'), 10) || 1) : 1;
+    const kind = shipType ? 'ship' : (cargo != null ? 'cargo' : (tool ? 'tool' : 'item'));
+    const memo = 'buy@' + path;
+    const bought = this.ctx.buys.get(memo) || 0;
+    const done = bought >= quantity;
+
+    // Label from the buy's own prose (direct text only, ignoring an <effect> child
+    // — task 29), else a generated one; show the price and any remaining count.
+    const directText = Array.from(node.childNodes).filter((c) => c.nodeType === Node.TEXT_NODE).map((c) => c.nodeValue).join(' ').replace(/\s+/g, ' ').trim();
+    const thing = directText || titleCase(tool || item || cargo || shipType || 'it');
+    let label = price > 0 ? `Buy ${thing} (${price} Shards)` : `Take ${thing}`;
+    if (quantity > 1) label += ` — ${Math.max(0, quantity - bought)} left`;
+
+    const btn = document.createElement('button');
+    btn.className = 'btn-mini' + (done ? ' done' : '');
+    btn.textContent = (done ? '☑ ' : '') + label;
+
+    let reason = '';
+    if (done) reason = 'done';
+    else if (price > 0 && this.state.data.shards < price) reason = 'Not enough Shards';
+    else if ((kind === 'tool' || kind === 'item') && this.state.freeSlots() <= 0) reason = 'No room (12-item limit)';
+    else if (kind === 'cargo' && this.state.ships.length === 0) reason = 'You need a ship to carry cargo.';
+    btn.disabled = !!reason;
+    if (reason && reason !== 'done') btn.title = reason;
+
+    if (!reason) {
+      btn.addEventListener('click', () => {
+        const res = applyInlineBuy(this.state, {
+          price, ship: shipType, shipName: node.getAttribute('name'), initialCrew: node.getAttribute('initialCrew'),
+          tool, item, cargo,
+          bonus: node.getAttribute('bonus') ? parseInt(node.getAttribute('bonus'), 10) : 0,
+          ability: node.getAttribute('ability'),
+          tags: parseTags(node.getAttribute('buytags') || node.getAttribute('tags')),
+        });
+        if (!res.ok) { if (res.note) this.notify(res.note, 'warn'); return; }
+        this.ctx.buys.set(memo, bought + 1);
+        this.rerender();
       });
-      this.rerender();
-    });
+    }
     container.appendChild(btn);
     return btn;
   }
 
-  // Inline <sell> in prose: sell a Cargo Unit for Shards, or (when price="<flag>"
-  // is a name rather than a number) barter it — give up a cargo unit and receive
-  // the linked [flag=<name>] <buy> reward atomically (e.g. §538 swap for minerals).
+  // Inline <sell> in prose. Two forms:
+  //  • item="X" shards="N" — sell a carried possession for Shards (book 5's rime
+  //    ice / selenium ore income, the §30 treasure-map buy-back). Repeatable while
+  //    you own one.
+  //  • cargo="X" — give up a Cargo Unit for Shards, or (price="<flag>") barter it
+  //    for the linked [flag] <buy> reward (§538). One-shot per visit.
   renderInlineSell(container, node, path) {
+    const item = node.getAttribute('item');
+    if (item != null) {
+      const gain = node.getAttribute('shards') != null ? resolveValue(this.state, node.getAttribute('shards'))
+        : (node.getAttribute('price') != null ? resolveValue(this.state, node.getAttribute('price')) : 0);
+      const directText = Array.from(node.childNodes).filter((c) => c.nodeType === Node.TEXT_NODE).map((c) => c.nodeValue).join(' ').replace(/\s+/g, ' ').trim();
+      const owned = this.state.hasItem(item);
+      const btn = document.createElement('button');
+      btn.className = 'btn-mini';
+      btn.textContent = gain ? `Sell ${titleCase(item)} (${gain} Shards)` : `Sell ${titleCase(item)}`;
+      btn.disabled = !owned;
+      btn.title = owned ? '' : `You have no ${item} to sell`;
+      btn.addEventListener('click', () => { if (sellInlineItem(this.state, item, gain).ok) this.rerender(); });
+      container.appendChild(btn);
+      return btn;
+    }
+
     const cargo = node.getAttribute('cargo');
     const priceAttr = node.getAttribute('price');
     const isFlag = priceAttr != null && !/^\d/.test(String(priceAttr).trim());
@@ -1400,7 +1497,7 @@ export class Story {
       container.appendChild(span);
       return null;
     }
-    if (cargo == null) { // non-cargo sells are unused in this corpus — show as prose
+    if (cargo == null) { // no item= and no cargo= — nothing to transact; show prose
       const span = document.createElement('span');
       this.appendChildren(span, node, path);
       container.appendChild(span);
@@ -1423,13 +1520,11 @@ export class Story {
           : await modal({ title: 'Give which cargo?', body: 'Choose a Cargo Unit to give up:', buttons: kinds.map((k) => ({ label: titleCase(k), value: k })) });
         if (!type) return; // cancelled
       }
-      const idx = ship.cargo.indexOf(type);
-      if (idx < 0) return;
-      ship.cargo.splice(idx, 1);
-      if (shardsGain) this.state.adjustMoney(shardsGain);
-      if (isFlag) this.applyLinkedCargoBuys(priceAttr); // the barter reward (minerals)
+      // The cargo→Shards transaction now lives in market.js (task 34); the barter
+      // reward (adding the linked commodity) stays here as it's view-linked.
+      if (!sellCargo(this.state, type, shardsGain).ok) return;
+      if (isFlag) this.applyLinkedCargoBuys(priceAttr);
       this.ctx.applied.add(memo);
-      this.state.changed();
       this.rerender();
     });
     container.appendChild(btn);
@@ -1465,6 +1560,159 @@ export class Story {
     box.appendChild(btn);
     container.appendChild(box);
     return box;
+  }
+
+  // ---- caches: banks / investment boxes / villa strongrooms ----------------
+  // A <moneycache> is a deposit/withdraw widget for a named money stash: a bank
+  // account (MerchantBank), a guild investment box, or a gambling pot. Deposits
+  // may be capped (max=) and constrained to multiples= of N; withdrawals may
+  // levy a withdrawCharge= fee. The stashed sum persists across sections.
+  renderMoneyCache(container, node, path) {
+    const name = node.getAttribute('name');
+    if (!name) return null;
+    const text = node.getAttribute('text') || 'Money stashed';
+    const max = node.getAttribute('max') ? parseInt(node.getAttribute('max'), 10) : 0;
+    const mult = node.getAttribute('multiples') ? parseInt(node.getAttribute('multiples'), 10) : 1;
+    const charge = node.getAttribute('withdrawCharge') ? parseFloat(node.getAttribute('withdrawCharge')) : 0;
+
+    const box = document.createElement('div');
+    box.className = 'cache money-cache';
+    const bal = document.createElement('div');
+    bal.className = 'cache-balance';
+    bal.innerHTML = `<span class="cache-label">${escapeHtml(text)}</span><span class="cache-sum">${this.state.cacheMoney(name)} Shards</span>`;
+    box.appendChild(bal);
+
+    const controls = document.createElement('div');
+    controls.className = 'cache-controls';
+    const input = document.createElement('input');
+    input.type = 'number'; input.min = '0'; input.step = String(mult > 0 ? mult : 1);
+    input.value = String(mult > 0 ? mult : 1);
+    input.className = 'cache-amount';
+    controls.appendChild(input);
+
+    const roundMult = (n) => (mult > 1 ? Math.floor(n / mult) * mult : Math.floor(n));
+    const dep = document.createElement('button');
+    dep.className = 'btn-mini';
+    dep.textContent = 'Deposit';
+    dep.addEventListener('click', () => {
+      let amt = roundMult(Number(input.value) || 0);
+      if (max > 0) amt = Math.min(amt, max - this.state.cacheMoney(name)); // max caps the stash total
+      amt = Math.min(amt, this.state.data.shards);
+      if (amt > 0) { this.state.depositCacheMoney(name, amt); this.rerender(); }
+    });
+    const wd = document.createElement('button');
+    wd.className = 'btn-mini';
+    wd.textContent = charge ? `Withdraw (−${Math.round(charge * 100)}%)` : 'Withdraw';
+    wd.addEventListener('click', () => {
+      const amt = roundMult(Number(input.value) || 0);
+      if (amt > 0 && this.state.cacheMoney(name) > 0) { this.state.withdrawCacheMoney(name, amt, charge); this.rerender(); }
+    });
+    controls.appendChild(dep); controls.appendChild(wd);
+    box.appendChild(controls);
+    container.appendChild(box);
+    return box;
+  }
+
+  // An <itemcache> is a strongroom: possessions left here persist across visits.
+  // Lists what's stored (with Take-back buttons) and lets the player deposit a
+  // carried item (respecting an optional itemlimit= on the stash and the 12-item
+  // carry cap on retrieval).
+  renderItemCache(container, node, path) {
+    const name = node.getAttribute('name');
+    if (!name) return null;
+    const text = node.getAttribute('text') || 'Stored here';
+    const limit = node.getAttribute('itemlimit') ? parseInt(node.getAttribute('itemlimit'), 10) : 0;
+    const stored = this.state.cacheItems(name);
+
+    const box = document.createElement('div');
+    box.className = 'cache item-cache';
+    const head = document.createElement('div');
+    head.className = 'cache-label';
+    head.textContent = text;
+    box.appendChild(head);
+
+    const list = document.createElement('div');
+    list.className = 'cache-list';
+    if (!stored.length) {
+      const e = document.createElement('span');
+      e.className = 'cache-empty';
+      e.textContent = '(nothing stored)';
+      list.appendChild(e);
+    }
+    stored.slice().forEach((it) => {
+      const row = document.createElement('div');
+      row.className = 'cache-item';
+      row.appendChild(document.createTextNode(itemLabel(it)));
+      const take = document.createElement('button');
+      take.className = 'btn-mini';
+      take.textContent = 'Take';
+      const noRoom = this.state.freeSlots() <= 0;
+      take.disabled = noRoom;
+      if (noRoom) take.title = 'No room (12-item carry limit)';
+      take.addEventListener('click', () => {
+        const removed = this.state.cacheRemoveItem(name, it.id);
+        if (removed) this.state.addItem(removed);
+        this.rerender();
+      });
+      row.appendChild(take);
+      list.appendChild(row);
+    });
+    box.appendChild(list);
+
+    // Deposit a carried possession (unless the stash is at its item limit).
+    const atLimit = limit > 0 && stored.length >= limit;
+    const carried = this.state.data.items;
+    if (carried.length && !atLimit) {
+      const dep = document.createElement('div');
+      dep.className = 'cache-deposit';
+      carried.slice().forEach((it) => {
+        const store = document.createElement('button');
+        store.className = 'btn-mini';
+        store.textContent = 'Store ' + itemLabel(it);
+        store.addEventListener('click', () => {
+          const removed = this.state.removeItemById(it.id);
+          if (removed) this.state.cacheAddItem(name, removed);
+          this.rerender();
+        });
+        dep.appendChild(store);
+      });
+      box.appendChild(dep);
+    }
+    container.appendChild(box);
+    return box;
+  }
+
+  // <transfer> — move money/equipment between the Adventure Sheet and a named
+  // cache. A forced transfer (default) applies once on view (confiscate-and-return
+  // scenes, hidden="t"); an optional one (force="f") becomes a click-to-apply
+  // button so the player opts in to stashing.
+  renderTransfer(container, node, path) {
+    const hidden = boolAttr(node.getAttribute('hidden'));
+    const optional = node.getAttribute('force') != null && !boolAttr(node.getAttribute('force'), true);
+    const memo = 'xfer@' + path;
+
+    // Inside an untaken conditional branch: show the words, apply nothing.
+    if (this.inactive) {
+      if (!hidden) { const s = document.createElement('span'); s.className = 'fx'; this.appendChildren(s, node, path); if (s.textContent.trim()) container.appendChild(s); }
+      return null;
+    }
+
+    if (optional) {
+      const done = this.ctx.applied.has(memo);
+      const inner = document.createElement('span');
+      this.appendChildren(inner, node, path);
+      const btn = document.createElement('button');
+      btn.className = 'btn-mini' + (done ? ' done' : '');
+      btn.textContent = (done ? '☑ ' : '') + (inner.textContent.trim() || 'Stash it');
+      btn.disabled = done;
+      if (!done) btn.addEventListener('click', () => { applyEffect(node, this.state, {}); this.ctx.applied.add(memo); this.rerender(); });
+      container.appendChild(btn);
+      return btn;
+    }
+
+    if (!this.ctx.applied.has(memo)) { this.ctx.applied.add(memo); applyEffect(node, this.state, {}); }
+    if (!hidden) { const s = document.createElement('span'); s.className = 'fx'; this.appendChildren(s, node, path); if (s.textContent.trim()) container.appendChild(s); }
+    return null;
   }
 
   // ---- resurrection --------------------------------------------------------
@@ -1526,3 +1774,12 @@ const MARKET_TITLES = {
 };
 function titleCase(s) { return (s || '').replace(/\b\w/g, (c) => c.toUpperCase()); }
 function diceWord(n) { return n === 1 ? '1 die' : `${n} dice`; }
+function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+// A short display label for a stored item (name + its bonus tier, like an award).
+function itemLabel(it) {
+  const name = titleCase(it.name || it.kind || 'item');
+  if (it.kind === 'weapon' && it.bonus) return `${name} (Combat +${it.bonus})`;
+  if (it.kind === 'armour' && it.bonus) return `${name} (Defence +${it.bonus})`;
+  if (it.kind === 'tool' && it.bonus && it.ability) return `${name} (${titleCase(it.ability)} +${it.bonus})`;
+  return it.bonus ? `${name} (+${it.bonus})` : name;
+}

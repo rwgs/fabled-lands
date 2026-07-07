@@ -5,7 +5,7 @@
 // and merely calls fightRound() when the player clicks Attack, then redraws
 // from the mutated `fight` object.
 
-import { rollDice, applyEffect, boolAttr } from './engine.js';
+import { rollDice, applyEffectBody, boolAttr } from './engine.js';
 
 /** Build a fresh fight-state from a <fight> element's attributes. */
 export function makeFight(node) {
@@ -50,9 +50,15 @@ export function fightRound(state, fight, dmgNode) {
       const total = r.total + fight.combat;
       const def = state.defence();
       const dmg = Math.max(0, total - def);
-      state.damageStamina(dmg);
-      fight.log.push(`${fight.name} rolls ${r.total}+${fight.combat}=${total} vs your Def ${def} → ${dmg ? '−' + dmg + ' your Stamina' : 'miss'}`);
-      if (dmg > 0 && dmgNode) applyEffect(dmgNode.firstElementChild || dmgNode, state, {});
+      // <fightdamage type="replace"> substitutes its own effect for the Stamina
+      // loss (e.g. §5.356: lose an ability point instead); type="add" (or none)
+      // applies the effect ON TOP of the Stamina loss (e.g. §1.105 ScorpionSting).
+      const replace = dmg > 0 && dmgNode && (dmgNode.getAttribute('type') || '').toLowerCase() === 'replace';
+      if (dmg > 0 && !replace) state.damageStamina(dmg);
+      fight.log.push(`${fight.name} rolls ${r.total}+${fight.combat}=${total} vs your Def ${def} → ${dmg ? (replace ? 'a telling blow' : '−' + dmg + ' your Stamina') : 'miss'}`);
+      // Apply the whole <fightdamage> body (all children, rolls + if-chains), not
+      // just its first element — only when the blow actually lands.
+      if (dmg > 0 && dmgNode) applyEffectBody(dmgNode, state);
       if (state.isDead()) break;
     }
   }

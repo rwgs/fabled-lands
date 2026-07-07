@@ -12,9 +12,7 @@ the view/app/infra layer, with every finding verified against both the code and
 the book XML corpus.
 
 **HIGH**
-- [ ] 20. Implement caches, banks, `<adjustmoney>` and `<transfer>`
-- [ ] 21. Fix `<flee>`/`<fightdamage>`: no render-time auto-apply, find them anywhere, honour `flee="t"`, `type="replace"`
-- [ ] 23. Make inline `<buy>`/`<sell>` functional (ships, tools, quantity, item sells)
+- *(all clear — 20, 21, 23 done)*
 
 **MEDIUM**
 - [ ] 5. Implement `<items group … limit="N">` "choose up to N" pickup
@@ -42,6 +40,8 @@ the book XML corpus.
 - [ ] 35. iOS home-screen icons: provide PNG apple-touch-icon
 - [ ] 36. Minor rule divergences (grab-bag)
 - [ ] 37. Fix the `safeAddGodd` typo in the source XML
+- [ ] 38. Gate cache widgets on `lock`/`unlock` under the single-pass render (book1/91 gamble)
+- [ ] 39. Defer confiscate-and-return `<transfer … from=>` until a fight resolves (book2/462)
 
 **Done**
 - [x] 1. Gate combat progression / model fight outcomes
@@ -54,7 +54,10 @@ the book XML corpus.
 - [x] 17. Recognise all spec'd `<if>` attributes; stop defaulting unknown conditions to true
 - [x] 18. Preserve item `tags` and support tag-filtered item conditions
 - [x] 19. Implement the curse / disease / poison system end-to-end
+- [x] 20. Implement caches, banks, `<adjustmoney>` and `<transfer>`
+- [x] 21. Fix `<flee>`/`<fightdamage>`: no render-time auto-apply, find them anywhere, honour `flee="t"`, `type="replace"`
 - [x] 22. Render `<success>`/`<failure>`/`<outcome>` children of `<choices>`
+- [x] 23. Make inline `<buy>`/`<sell>` functional (ships, tools, quantity, item sells)
 
 ---
 
@@ -424,57 +427,87 @@ difficultyCurse/difficultyRestore) remain **task 36**.
 
 ---
 
-## 20. Implement caches, banks, `<adjustmoney>` and `<transfer>`  — HIGH
+## 20. Implement caches, banks, `<adjustmoney>` and `<transfer>`  — **done**
 
-The whole stash/bank economy is missing: `state.data.caches` (state.js:45) is
-declared but written by nothing; `cache=` is ignored on `<if>`/`<lose>`/`<tick>`;
-and there are no handlers for `<moneycache>` (25×), `<itemcache>` (31×),
-`<transfer>` (25×), `<adjustmoney>` (89×) or `<tick special="lock|unlock"
-cache=…>` (~50×). Player-visible today:
-- The gambling/investment mechanic does nothing — book1/91's guild investment
-  (×5/×2/×0), book2/62/107/108/134/177/594, book4/263/355, book5/116,
-  book6/198/483/496; "lose half your money" (`<adjustmoney multiply="0.5">`,
-  book2/745, book3/640, book6/139/191) shows as prose and takes nothing.
-- Bank conditions test *pocket* money: `<if cache="MerchantBank" shards="150">`.
-- Confiscate-and-return scenes (`<transfer weapon="*" to="2.462">`) leave the
-  player fully armed.
-- One real **inventory corruption**: `<lose item="?" cache="4.468">` (book4/468
-  chain) ignores `cache=` and removes the player's own first possession.
+The whole stash/bank economy now works. A cache is a named stash the books
+address by key (`state.data.caches[name] = {money, items, locked}`): an
+investment box, a bank account (`MerchantBank`), a gambling pot, or a villa
+strongroom.
 
-Implement the cache store (keyed by cache name), route `cache=` on
-if/lose/tick, implement adjustmoney (add/multiply, clamped), transfer, and the
-lock/unlock specials, plus renderers for the money/item cache widgets. Fix the
-`cache=`-on-lose corruption first — it destroys player data. Unit tests for
-deposit/withdraw/lock and the ×N payouts.
+- **Cache store** (`state.js`): `_cache`/`cacheMoney`/`cacheItems`,
+  `deposit/withdrawCacheMoney` (the latter with a `withdrawCharge` fee, rounded
+  in the house's favour), `set/adjust/multiplyCacheMoney` (all floored, ≥0),
+  `cacheAddItem`/`cacheRemoveItem`, and `lock/unlock/isCacheLocked`.
+- **`<adjustmoney multiply="N">`** (`engine.js applyAdjustMoney`, added to
+  `applyEffect` + `PASSIVE_TAGS`): scales a named cache (`name=`/`cache=`) or,
+  with no name, the purse — book1/91 gamble (×5/×2/×0), book2/107/108,
+  book5/116, and "lose half your money" (book6/139 et al.).
+- **`<transfer>`** (`engine.js applyTransfer`): moves shards/weapon/armour/
+  tool/item between the sheet and a cache — `to=` deposits, `from=` withdraws;
+  `*`/`?`/name select; `limit=`/`x<kind>=` narrow. Confiscate-and-return
+  (book2/462 vampire). A `force="f"` transfer is opt-in (a click in the view);
+  a forced one applies on view.
+- **lock/unlock** (`engine.js applySpecial`): `<tick special="lock|unlock"
+  cache=…>` toggles a cache's `locked` flag.
+- **`cache=` routing**: `<if cache=…>` already read the stash (task 17) and now
+  it is populated; `<lose … cache=…>` and `<tick … cache=…>` (deposit / item
+  enchant via `addtag`/`addbonus`) redirect to the cache. **The `cache=`-on-lose
+  corruption is fixed first** — `<lose item="?" cache="4.468">` (book4/468) now
+  takes from the villa stash, never the player's carried possessions.
+- **Widgets** (`render.js`): `renderMoneyCache` (deposit/withdraw, honouring
+  `max=`/`multiples=`/`withdrawCharge=`) and `renderItemCache` (store/take
+  possessions, honouring `itemlimit=` and the 12-item carry cap), plus CSS.
+
+Known limitation: because the section re-renders in a single memoized pass, the
+lock/unlock bracket used by book1/91's gamble doesn't gate the widget's
+interactivity (the primitive exists and is tested, but the widget stays live).
+This affects only the "can't change your bet after rolling" nicety; deposits,
+withdrawals, investments, banking and the villa stash all work. §91 renders
+clean.
+
+Verified: 18 new headless assertions (deposit/withdraw incl. bank fee; named-
+cache multiply incl. ×0 wipe; purse-multiply floor; `if cache` threshold; the
+§4.468 stash-not-inventory loss; `lose shards="*" cache`; lock/unlock; `tick
+shards cache` deposit; transfer disarm/return round trip; `transfer shards="*"`;
+§49 money-cache widget deposit; §468 item-cache widget renders) + full
+render-every-section scan. `RESULT ALL PASS pass=187 fail=0`.
 
 ---
 
-## 21. Fix `<flee>`/`<fightdamage>`: no render-time auto-apply, find them anywhere, honour `flee="t"`, `type="replace"`  — HIGH
+## 21. Fix `<flee>`/`<fightdamage>`: no render-time auto-apply, find them anywhere, honour `flee="t"`, `type="replace"`  — **done**
 
-Four related defects around fights:
-1. **Render-time auto-apply (worst):** `renderElement`'s default case
-   (render.js:307) recurses into unknown containers, so the `<lose>`/`<tick>`
-   children of `<flee>` and `<fightdamage>` apply the moment the section
-   renders. Entering book2/207 immediately costs the 1d6-Stamina flee penalty
-   and sets the "ran away" codeword even if you fight and win (~13 flee
-   sections: book2/207/297/581/595/770, book3/73/85/326/662, book4/171,
-   book5/657, book6/305); book1/105's ScorpionSting codeword is set unwounded,
-   then double-applied per wound (all 14 `<fightdamage>` sections).
-2. **Discovery:** `findSibling` (render.js:1050) scans only forward same-level
-   siblings of `<fight>`, so a `<flee>` inside a `<p>` (book3/662, book2/207) or
-   before the fight (book2/297) gets no Flee button, and a `<fightdamage>`
-   placed before the fight (book2/152/208/313) never reaches `fightRound`.
-3. **Gate:** `applyFightGate` disables `<choice flee="t">` (15×) until the
-   fight resolves — book3/662's "flee at any time" becomes win-or-die.
-4. **Semantics:** `<fightdamage type="replace">` should *replace* the Stamina
-   loss, but combat.js:53–55 still applies it and then applies only
-   `firstElementChild` — book5/356 (hangman) wrongly loses Stamina and the
-   replacement never runs; multi-node bodies dropped (book5/489/565, book4/238).
+All four defects fixed:
+1. **Render-time auto-apply (worst):** `renderElement` now has explicit
+   `case 'flee'`/`case 'fightdamage'` → `renderInert`, which shows the prose but
+   applies **no** effects and disables any controls it produces (using the same
+   `this.inactive` suppression as an untaken branch). Entering book2/207 no
+   longer costs the flee wound, and book1/105's ScorpionSting is no longer set on
+   view (nor double-applied).
+2. **Discovery:** `findSibling` (forward same-level only) is replaced by
+   `findInSection(tag)` (`sectionEl.querySelector`), so a `<flee>`/`<fightdamage>`
+   is found wherever it sits — inside a `<p>`, or before the `<fight>`
+   (book2/152/207/297/313).
+3. **Gate:** `computeFightGate` now skips `<choice flee="t">` (never added to
+   `navNodes`), so book3/662's "flee at any time" stays live mid-fight. The
+   flee="t" choice itself applies the `<flee>` consequence on click.
+4. **Semantics:** the enemy-attack branch in `combat.js` honours
+   `type="replace"` (no Stamina loss; apply the body instead — book5/356 hangman)
+   vs the default `type="add"` (Stamina loss **plus** the body — book1/105), and
+   a new headless `engine.applyEffectBody` walks the **whole** `<fightdamage>`/
+   `<flee>` subtree per wound (all children, rolling any `<random>`/`<rankcheck>`/
+   `<difficulty>` and honouring `<if>`/`<elseif>`/`<else>` chains), not just
+   `firstElementChild`.
 
-Render flee/fightdamage as inert containers (children display but never
-auto-apply), search the whole section subtree for them, exempt `flee="t"`
-choices from the gate, honour `type="replace"`, and apply **all** child nodes
-per wound. Extend the fight tests in `web/_test.html`.
+The Flee button and any `flee="t"` choice both call `applyEffectBody(fleeNode)`
+on the flee event (a fatal parting wound routes to death), then navigate to the
+flee's inner `<goto>`, else the `flee="t"` choice's section, else re-render so a
+box-gated flee choice unlocks (book2/207 → §22).
+
+Verified: 9 new assertions (§207 no auto-apply + Flee button applies wound +
+codeword; §105 ScorpionSting unset on render; fightdamage type=add effect +
+Stamina loss per wound; type=replace loses an ability not Stamina; §662 normal
+post-fight choice gated while flee="t" stays live and applies its wound → §407) +
+full render-every-section scan. `RESULT ALL PASS pass=196 fail=0`.
 
 ---
 
@@ -496,28 +529,35 @@ test (`RESULT ALL PASS pass=169 fail=0`).
 
 ---
 
-## 23. Make inline `<buy>`/`<sell>` functional (ships, tools, quantity, item sells)  — HIGH
+## 23. Make inline `<buy>`/`<sell>` functional (ships, tools, quantity, item sells)  — **done**
 
-**Buys:** `renderInlineBuy` (render.js:1216) forwards only `crew`/`item` to
-`market.applyInlineBuy` (market.js:103), so `buy ship=` (8 sections) and
-`buy tool=` (5) deduct Shards and grant nothing — book3/406's 320-Shard barque
-and book5/548's up-to-2000-Shard wands are pure money sinks, and the
-plot-critical free/cheap ships (book2/663, book3/393, book4/114 galleon,
-book4/559/658, book5/192) are never granted, breaking all subsequent sea play.
-The buy button also has no `ctx.applied` memo and ignores `quantity=`, so any
-inline item buy (e.g. book1/30 treasure map) repeats indefinitely per visit.
+**Buys:** `market.applyInlineBuy` now returns `{ok, note?}` and handles every
+inline-buy kind — crew upgrade, **ship** (type canonicalised via a new
+`rules.canonShipType`, with `name=`/`initialCrew=`), **tool** (with `ability=`/
+`bonus=`), **item**, and **cargo** (routed through `buyTrade` so ship capacity is
+enforced). `renderInlineBuy` reads `ship=`/`tool=` and honours `quantity=` as a
+per-visit purchase cap, memoised in a new `ctx.buys` counter so a buy can no
+longer repeat forever (book1/30 map, book1/359 "up to three lanterns"). The
+plot-critical ships (book2/663, book3/393/406/710, book4/114/559/658, book5/192)
+and priced tools (book1/299 mandolin, book5/548 wands, book6/421 talismans) are
+granted; `buy ship="brig"/"gall"` canonicalise to brigantine/galleon.
 
-**Sells:** `renderInlineSell` (render.js:1282) reads only `cargo=`/`price=`,
-but 5 of the 6 inline sells in the corpus use `item=` + `shards=` — book 5's
-main income (rime ice at 350 Shards, book5/457; also book1/30,
-book5/141/446/594) renders as inert prose or an invisible empty span. The
-comment at render.js:1300 claiming non-cargo sells are unused is wrong — fix it.
+**Sells:** `renderInlineSell` now handles `item=` + `shards=` sells (book 5's
+rime-ice / selenium-ore income at book5/141/446/457/594; the book1/30 treasure-
+map buy-back), repeatable while owned, via a new `market.sellInlineItem`. The
+misleading "non-cargo sells unused" branch is gone.
 
-Extend `market.applyInlineBuy` with ship (canonicalised — task 24) and tool
-branches plus quantity, memoise applied buys, implement item sells in
-`market.js`, and while there move the existing inline cargo-sell transaction
-(render.js:1313–1331 mutates `ship.cargo`/money directly in the view) into
-`market.js` too (task 34). Test a buy-ship and a sell-item round trip.
+**Rules-out-of-view (task 34 slice):** the inline cargo→Shards transaction moved
+from `renderInlineSell`'s click handler into `market.sellCargo` (the view keeps
+only the barter-reward wiring); the crew-upgrade grade check uses `CREW_LEVELS`
+from `rules.js`.
+
+Verified: 15 new assertions (buy ship grants a named ship; galleon holds 3 cargo
+units, 4th refused; `brig`→brigantine + `none`→poor crew; buy tool grants a
+bonus tool and charges; buy refused when short; sell-item round trip; §359
+lantern quantity-3 cap with the light tag preserved; §30 treasure-map buy
+memoised at quantity 1 + buy-back sell round trip) + full render-every-section
+scan. `RESULT ALL PASS pass=211 fail=0`.
 
 ---
 
@@ -707,10 +747,40 @@ removed. (Find it with `grep -rl 'safeAddGodd' books`.)
 ## 36. Minor rule divergences (grab-bag)  — LOW
 
 Small confirmed divergences to sweep in one pass, each with a test:
-- `applySpecial` (engine.js:265) gaps: `bonus="s"` parses NaN→0 (book6/183);
+- `applySpecial` (engine.js) gaps: `bonus="s"` parses NaN→0 (book6/183);
   `godless` doesn't clear the current god (book6/118); `armourlock`/
-  `weaponlock`, `lock`/`unlock` (cache locks — task 20) and `difficultyCurse`/
-  `difficultyRestore` (one-die difficulty rolls, book3/91 — pairs with task 19)
-  are unimplemented.
+  `weaponlock` and `difficultyCurse`/`difficultyRestore` (one-die difficulty
+  rolls, book3/91 — pairs with task 19) are unimplemented. (`lock`/`unlock`
+  cache locks are now implemented — task 20.)
 - Anything newly discovered of similar size should be appended here rather
   than left in conversation (per the workflow in `AGENTS.md`).
+
+---
+
+## 38. Gate cache widgets on `lock`/`unlock` under the single-pass render  — LOW
+
+`<tick special="lock|unlock" cache=…>` now toggles a cache's `locked` flag
+(task 20), and the flag is exposed via `isCacheLocked`, but the money/item cache
+widgets do **not** disable their deposit/withdraw controls while locked. The
+reason is the section re-renders in one memoized pass: in book1/91 the gamble
+brackets the roll between a `lock` (inside a `force="t"` group, applied on click)
+and an `unlock` (a passive applied once on entry), so reading the live lock state
+at widget-render time is unreliable and would leave the widget stuck locked. The
+practical loss is only the "you can't change your bet after rolling" nicety;
+deposits, withdrawals, banking, investments and villa stashes all work, and §91
+renders clean. To do it properly, pre-scan the section for its net lock state (or
+make lock/unlock re-render-aware) and gate the widget on that. Add a §91 test.
+
+---
+
+## 39. Defer confiscate-and-return `<transfer … from=>` until a fight resolves  — LOW
+
+`<transfer>` is implemented (task 20), but in book2/462 the return leg
+(`<if dead="f"><transfer item="*" from="2.462"/></if>`) is active from entry —
+the player is "not dead" throughout the fight, not only after winning — so the
+weapons/armour stashed at the top are handed straight back and the vampire is
+fought armed (the same net effect as the old do-nothing behaviour, so no
+regression, but not the intended weaponless fight). Non-fight transfers (villa
+stashing, banking) are correct. Fix: defer effects that appear after a `<fight>`
+and are gated on `dead="f"` until the fight actually resolves (relates to the
+fight-gate machinery and task 28's `dead="t"` handling). Add a §462 test.

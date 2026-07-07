@@ -61,6 +61,15 @@ export const SHIP_TYPES = {
   galleon: { label: 'Galleon', capacity: 3 },
 };
 
+// The books abbreviate ship types on some rows (<trade ship="brig">, "gall").
+// Canonicalise to the full SHIP_TYPES key so capacity and <if ship=…> checks
+// agree. (Task 24 wires this into the trade rows and conditions too.)
+const SHIP_TYPE_ALIASES = { brig: 'brigantine', gall: 'galleon', galley: 'galleon' };
+export function canonShipType(t) {
+  const k = String(t || '').trim().toLowerCase();
+  return SHIP_TYPE_ALIASES[k] || k;
+}
+
 export const CREW_LEVELS = ['poor', 'average', 'good', 'excellent'];
 export const CREW_LABEL = { poor: 'Poor', average: 'Average', good: 'Good', excellent: 'Excellent' };
 

@@ -279,18 +279,71 @@ export function applyEffect(el, state, opts = {}) {
     case 'curse': return applyAffliction(el, state, 'curse');
     case 'disease': return applyAffliction(el, state, 'disease');
     case 'poison': return applyAffliction(el, state, 'poison');
+    case 'adjustmoney': return applyAdjustMoney(el, state);
+    case 'transfer': return applyTransfer(el, state, opts);
     case 'effect': return applyItemEffect(el, state, opts);
     default: return '';
+  }
+}
+
+// Tags applyEffectBody applies directly; anything else it recurses into.
+const PASSIVE_BODY_TAGS = new Set(['lose', 'tick', 'gain', 'set', 'curse', 'disease', 'poison', 'adjustmoney', 'transfer']);
+const ROLL_BODY_TAGS = new Set(['random', 'rankcheck', 'difficulty']);
+
+/** Apply an effect *body* headlessly: a <fightdamage>/<flee> subtree (or any
+ *  wrapper). Walks children in order — rolling any <random>/<rankcheck>/
+ *  <difficulty> (storing its var=), honouring <if>/<elseif>/<else> chains, and
+ *  applying each passive effect. Used at wound-time (fightdamage) and when the
+ *  player flees, where the effect must fire on the event, never on render. */
+export function applyEffectBody(parent, state) {
+  let inChain = false, chainMatched = false;
+  for (const node of Array.from(parent.children)) {
+    const tag = node.tagName.toLowerCase();
+    if (tag === 'if' || tag === 'elseif' || tag === 'else') {
+      let active;
+      if (tag === 'if') { inChain = true; active = evaluateCondition(node, state); chainMatched = active; }
+      else if (!inChain) active = false;
+      else if (chainMatched) active = false;
+      else if (tag === 'else') { active = true; chainMatched = true; }
+      else { active = evaluateCondition(node, state); chainMatched = active; }
+      if (active) applyEffectBody(node, state);
+      continue;
+    }
+    inChain = false; chainMatched = false;
+    if (ROLL_BODY_TAGS.has(tag)) {
+      const varName = node.getAttribute('var');
+      if (tag === 'random') {
+        const dice = node.hasAttribute('dice') ? parseInt(node.getAttribute('dice'), 10) : 2;
+        const r = rollDice(dice);
+        if (varName) state.setVar(varName, r.total + childAdjustment(node, state));
+      } else if (tag === 'rankcheck') {
+        const res = rollRankCheck(state, parseInt(node.getAttribute('dice') || '1', 10), parseInt(node.getAttribute('add') || '0', 10), childAdjustment(node, state));
+        if (varName) state.setVar(varName, res.margin);
+      } else {
+        const res = rollDifficulty(state, node.getAttribute('ability'), resolveValue(state, node.getAttribute('level')), childAdjustment(node, state));
+        if (varName) state.setVar(varName, res.margin);
+      }
+      continue;
+    }
+    if (PASSIVE_BODY_TAGS.has(tag)) { applyEffect(node, state); continue; }
+    applyEffectBody(node, state); // wrapper (e.g. <p>/<text>): descend
   }
 }
 
 function applyLose(el, state, opts) {
   const get = (a) => el.getAttribute(a);
   const notes = [];
+  // cache= redirects a shards/item loss to a named stash (a bank/villa/investment)
+  // rather than the player's purse/inventory. Without this, <lose item="?"
+  // cache="4.468"> destroyed the player's own first possession — see task 20.
+  const cacheN = get('cache');
 
   if (get('codeword') != null) { get('codeword').split(/[|,]/).forEach((c) => state.removeCodeword(c.trim())); notes.push('lost codeword'); }
   if (get('shards') != null) {
-    if (get('shards') === '*') { if (state.data.shards) { state.data.shards = 0; state.changed(); notes.push('lost all Shards'); } }
+    if (cacheN != null) {
+      if (get('shards') === '*') { if (state.cacheMoney(cacheN)) { state.setCacheMoney(cacheN, 0); notes.push('emptied stash'); } }
+      else { state.adjustCacheMoney(cacheN, -resolveValue(state, get('shards'))); }
+    } else if (get('shards') === '*') { if (state.data.shards) { state.data.shards = 0; state.changed(); notes.push('lost all Shards'); } }
     else { const n = resolveValue(state, get('shards')); state.adjustMoney(-n); notes.push(`−${n} Shards`); }
   }
   if (get('stamina') != null) {
@@ -327,25 +380,28 @@ function applyLose(el, state, opts) {
   if (get('price') != null) { state.setFlag(get('price'), true); }
   if (get('item') != null) {
     const pattern = get('item');
+    // Pool + remover: the player's inventory, or a named cache (a villa strongroom)
+    // when cache= is present — a cache theft must never touch carried possessions.
+    const pool = () => (cacheN != null ? state.cacheItems(cacheN) : state.data.items);
+    const removeById = (id) => (cacheN != null ? state.cacheRemoveItem(cacheN, id) : state.removeItemById(id));
     if (pattern === '*') {
       // "Lose all your possessions." chance="x/y" (rare) makes each item's loss
       // probabilistic; a "keep"-tagged item is never taken.
       const chance = get('chance');
       const [num, den] = chance && chance.includes('/') ? chance.split('/').map((x) => parseInt(x, 10)) : [1, 1];
       let removed = 0;
-      state.data.items = state.data.items.filter((it) => {
-        if ((it.tags || []).map(normalize).includes('keep')) return true;
+      for (const it of pool().slice()) {
+        if ((it.tags || []).map(normalize).includes('keep')) continue;
         const lose = !chance || (den > 0 && Math.random() < num / den);
-        if (lose) removed++;
-        return !lose;
-      });
-      if (removed) { state.reconcileEquipment(); state.changed(); notes.push('lost all possessions'); }
+        if (lose) { removeById(it.id); removed++; }
+      }
+      if (removed) notes.push(cacheN != null ? 'stash emptied' : 'lost all possessions');
     } else {
       // "?" is the books' wildcard for "any possession" (the §521/§248/§373 thefts);
       // a real name matches by name/tag. A tags= filter narrows the wildcard to
       // items carrying every listed tag — awarded/bought items now preserve their
       // tags (task 18), so e.g. a tag-filtered "?" can target a light source.
-      let matches = pattern === '?' ? state.data.items.slice() : state.findItems(pattern);
+      let matches = pattern === '?' ? pool().slice() : matchItems(pool(), pattern);
       const tags = get('tags');
       if (pattern === '?' && tags) {
         const want = tags.split(/[,|]/).map((t) => normalize(t));
@@ -356,7 +412,7 @@ function applyLose(el, state, opts) {
       if (matches.length > count) {
         toLose = opts.chooser ? opts.chooser(matches, count, 'lose') : matches.slice(0, count);
       }
-      toLose.slice(0, count).forEach((it) => state.removeItemById(it.id));
+      toLose.slice(0, count).forEach((it) => removeById(it.id));
       if (toLose.length) notes.push('lost item');
     }
   }
@@ -419,9 +475,15 @@ function applyTick(el, state, opts) {
   const get = (a) => el.getAttribute(a);
   const notes = [];
   let did = false;
+  const cacheN = get('cache');
 
   if (get('codeword') != null) { get('codeword').split(/[|,]/).forEach((c) => state.addCodeword(c.trim())); notes.push('codeword gained'); did = true; }
-  if (get('shards') != null) { const n = resolveValue(state, get('shards')); state.adjustMoney(n); notes.push(`+${n} Shards`); did = true; }
+  if (get('shards') != null) {
+    const n = resolveValue(state, get('shards'));
+    if (cacheN != null) { state.adjustCacheMoney(cacheN, n); notes.push('stash credited'); }
+    else { state.adjustMoney(n); notes.push(`+${n} Shards`); }
+    did = true;
+  }
   if (get('blessing') != null) { state.addBlessing(get('blessing')); notes.push('blessing'); did = true; }
   if (get('curse') != null) { state.addCurse(get('curse')); did = true; }
   if (get('god') != null) { state.setGod(get('god')); did = true; }
@@ -442,9 +504,20 @@ function applyTick(el, state, opts) {
   if (get('special') != null) { applySpecial(el, state); did = true; }
   if (get('crew') != null && state.ships[0]) { state.ships[0].crew = get('crew'); state.changed(); did = true; }
   if (get('cargo') != null && state.ships[0]) { (state.ships[0].cargo ||= []).push(get('cargo')); state.changed(); did = true; }
-  if (get('addbonus') != null && get('item') != null) {
-    const it = state.findItems(get('item'))[0];
-    if (it) { it.bonus = (it.bonus || 0) + resolveValue(state, get('addbonus')); state.reconcileEquipment(); state.changed(); did = true; }
+  // Enchant one or more items in place: addbonus= raises the bonus, addtag=
+  // stamps a tag. item= selects them from the inventory, or from a cache when
+  // cache= is set (the Molherned weapon-blessing stashes — book §…).
+  if ((get('addbonus') != null || get('addtag') != null) && get('item') != null) {
+    const pattern = get('item');
+    const pool = cacheN != null ? state.cacheItems(cacheN) : state.data.items;
+    const targets = pattern === '*' ? pool.slice() : (pattern === '?' ? pool.slice(0, 1) : matchItems(pool, pattern));
+    const addb = get('addbonus') != null ? resolveValue(state, get('addbonus')) : 0;
+    const addt = get('addtag');
+    targets.forEach((it) => {
+      if (addb) it.bonus = (it.bonus || 0) + addb;
+      if (addt) { it.tags = it.tags || []; if (!it.tags.map(normalize).includes(normalize(addt))) it.tags.push(addt); }
+    });
+    if (targets.length) { if (cacheN == null) state.reconcileEquipment(); state.changed(); did = true; }
   }
 
   // Bare <tick> (no meaningful attrs): tick the visit box(es) for this section.
@@ -459,10 +532,92 @@ function applyTick(el, state, opts) {
 function applySpecial(el, state) {
   const kind = el.getAttribute('special');
   const bonus = el.getAttribute('bonus') ? parseInt(el.getAttribute('bonus'), 10) : 3;
+  // lock/unlock a named cache: the books bracket a gamble/theft resolution
+  // between <tick special="lock"> and <tick special="unlock"> so the stashed
+  // sum can't be altered mid-event (cache= names the stash).
+  if (kind === 'lock' || kind === 'unlock') {
+    const cacheN = el.getAttribute('cache');
+    if (cacheN != null) { state.lockCache(cacheN, kind === 'lock'); return; }
+  }
   if (kind === 'defence') state.data.effects.push({ ability: 'combat', bonus, type: 'blessing', text: 'Defence blessing', uses: 1 });
   else if (kind === 'attack') state.data.effects.push({ ability: 'combat', bonus, type: 'blessing', text: 'Attack blessing', uses: 1 });
   else if (kind === 'godless') state.data.godless = true;
   state.changed();
+}
+
+// <adjustmoney multiply="N"> — scale a money pot by a factor (the investment/
+// gambling payout, or "lose half your money"). With name=/cache= it scales that
+// named cache; otherwise it scales the player's purse. Losses/profits floor
+// (round in the house's favour), keeping Shards integral.
+function applyAdjustMoney(el, state) {
+  const name = el.getAttribute('name') != null ? el.getAttribute('name') : el.getAttribute('cache');
+  const mult = el.getAttribute('multiply');
+  if (mult != null) {
+    const f = parseFloat(mult);
+    if (isNaN(f)) return '';
+    if (name != null) { state.multiplyCacheMoney(name, f); return 'stash adjusted'; }
+    state.data.shards = Math.max(0, Math.floor(state.data.shards * f)); state.changed();
+    return 'money adjusted';
+  }
+  // add=/amount= (spec-complete; not used in the current corpus)
+  const addAttr = el.getAttribute('add') != null ? el.getAttribute('add') : el.getAttribute('amount');
+  if (addAttr != null) {
+    const n = resolveValue(state, addAttr);
+    if (name != null) state.adjustCacheMoney(name, n); else state.adjustMoney(n);
+  }
+  return '';
+}
+
+// <transfer …/> — move money/equipment between the Adventure Sheet and a named
+// cache. to="X" deposits INTO cache X; from="X" withdraws OUT of it. The kind
+// attribute (weapon|armour|tool|item|shards) with "*" (all) / "?" (one) / a name
+// selects what moves. Used for confiscate-and-return scenes (§2.462 vampire) and
+// villa/bank stashing. Optional force="f" transfers are opt-in (handled by the
+// view as a click); a forced transfer applies here.
+function applyTransfer(el, state, opts = {}) {
+  const get = (a) => el.getAttribute(a);
+  const to = get('to'), from = get('from');
+  const cacheN = to || from;
+  if (!cacheN) return '';
+  const toCache = to != null;
+  const limit = get('limit') != null ? (parseInt(get('limit'), 10) || 0) : 0;
+
+  // shards
+  if (get('shards') != null) {
+    const spec = get('shards');
+    if (toCache) {
+      let amt;
+      if (spec === '*') amt = state.data.shards;
+      else if (spec === 'tenth') amt = Math.floor(state.data.shards / 10);
+      else amt = Math.min(state.data.shards, resolveValue(state, spec));
+      if (amt > 0) { state.data.shards -= amt; state._cache(cacheN).money += amt; state.changed(); }
+    } else {
+      const c = state._cache(cacheN);
+      let amt = spec === '*' ? c.money : Math.min(c.money, resolveValue(state, spec));
+      if (amt > 0) { c.money -= amt; state.data.shards += amt; state.changed(); }
+    }
+  }
+
+  // equipment / items
+  for (const kind of ['weapon', 'armour', 'tool', 'item']) {
+    if (get(kind) == null) continue;
+    const spec = get(kind);
+    // item="*" means "every possession of any kind"; weapon/armour/tool filter.
+    const src = () => {
+      const base = toCache ? state.data.items : state.cacheItems(cacheN);
+      return kind === 'item' ? base.slice() : base.filter((it) => it.kind === kind);
+    };
+    let movers = spec === '*' ? src() : (spec === '?' ? src().slice(0, 1) : matchItems(src(), spec));
+    // x<kind>= excludes matching items from the move (e.g. keep the keys behind).
+    const xspec = get('x' + kind);
+    if (xspec) movers = movers.filter((it) => !xspec.split('|').some((a) => globMatch(a, it.name)));
+    if (limit > 0 && movers.length > limit) movers = movers.slice(0, limit);
+    movers.forEach((it) => {
+      if (toCache) { const removed = state.removeItemById(it.id); if (removed) state.cacheAddItem(cacheN, removed); }
+      else { const removed = state.cacheRemoveItem(cacheN, it.id); if (removed) state.addItem(removed); }
+    });
+  }
+  return '';
 }
 
 function applyAdjust(el, state) {

@@ -256,9 +256,58 @@ export class GameState {
 
   hasItem(pattern) { return this.findItems(pattern).length > 0; }
 
-  // ---- caches (read side; task 20 populates the store) ----------------
+  // ---- caches: named stashes / banks (money + items, lockable) --------
+  // A cache is a stash the books address by name: an investment box, a bank
+  // account (e.g. "MerchantBank"), a gambling pot, or a villa strongroom where
+  // you leave possessions. Keyed by name → {money, items, locked}. Money and
+  // items persist across sections/visits until withdrawn or looted.
+  _cache(name) {
+    const c = (this.data.caches[name] ||= { money: 0, items: [], locked: false });
+    if (c.money == null) c.money = 0;
+    if (!Array.isArray(c.items)) c.items = [];
+    return c;
+  }
   cacheMoney(name) { const c = this.data.caches[name]; return (c && c.money) || 0; }
-  cacheItems(name) { const c = this.data.caches[name]; return (c && c.items) || []; }
+  cacheItems(name) { const c = this.data.caches[name]; return (c && Array.isArray(c.items)) ? c.items : []; }
+  isCacheLocked(name) { const c = this.data.caches[name]; return !!(c && c.locked); }
+  lockCache(name, on = true) { this._cache(name).locked = !!on; this.changed(); }
+
+  setCacheMoney(name, v) { this._cache(name).money = Math.max(0, Math.floor(v)); this.changed(); }
+  adjustCacheMoney(name, delta) { const c = this._cache(name); c.money = Math.max(0, c.money + Math.floor(delta)); this.changed(); }
+  // <adjustmoney multiply="N"> on a cache — losses/profits round in the house's
+  // favour (floor), matching JaFL's integer-Shard economy.
+  multiplyCacheMoney(name, factor) { const c = this._cache(name); c.money = Math.max(0, Math.floor(c.money * factor)); this.changed(); }
+
+  /** Move Shards from the purse into a cache (a deposit). Returns the amount moved. */
+  depositCacheMoney(name, amount) {
+    const amt = Math.min(Math.max(0, Math.floor(amount)), this.data.shards);
+    if (amt <= 0) return 0;
+    this.data.shards -= amt;
+    this._cache(name).money += amt;
+    this.changed();
+    return amt;
+  }
+  /** Move Shards from a cache back to the purse. `charge` (0..1) is a withdrawal
+   *  fee kept by the house, rounded up (in the house's favour). Returns the gross
+   *  amount withdrawn (the purse gains gross − fee). */
+  withdrawCacheMoney(name, amount, charge = 0) {
+    const c = this._cache(name);
+    const amt = Math.min(Math.max(0, Math.floor(amount)), c.money);
+    if (amt <= 0) return 0;
+    c.money -= amt;
+    const fee = Math.ceil(amt * (charge || 0));
+    this.data.shards += Math.max(0, amt - fee);
+    this.changed();
+    return amt;
+  }
+
+  cacheAddItem(name, item) { if (!item.id) item.id = nid(); this._cache(name).items.push(item); this.changed(); return item; }
+  cacheRemoveItem(name, id) {
+    const c = this._cache(name);
+    const i = c.items.findIndex((x) => x.id === id);
+    if (i >= 0) { const [it] = c.items.splice(i, 1); this.changed(); return it; }
+    return null;
+  }
 
   // ---- money -----------------------------------------------------------
   adjustMoney(delta) {
