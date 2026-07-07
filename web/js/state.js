@@ -381,9 +381,21 @@ export class GameState {
   // ---- boxes / visit ticks --------------------------------------------
   boxKey(book, section) { return `${book ?? this.data.book}.${section ?? this.data.section}`; }
   tickCount(book, section) { return this.data.boxes[this.boxKey(book, section)] || 0; }
+  // The current section's boxes= count, set by the renderer on entry (transient,
+  // not persisted). Caps addTick so a repeat visit can't over-tick — see below.
+  setSectionBoxes(n) { this._sectionBoxes = n > 0 ? n : 0; }
   addTick(book, section, n = 1) {
     const k = this.boxKey(book, section);
-    this.data.boxes[k] = (this.data.boxes[k] || 0) + n;
+    let next = (this.data.boxes[k] || 0) + n;
+    // Cap the CURRENT section's box ticks at its boxes= count. Mirrors JaFL, whose
+    // SectionNode.addTicks only fills unselected boxes. Without this, book1/16
+    // (boxes="1") over-ticks: on a repeat visit the matched <if ticks="1"> guard
+    // shows its goto, but the sibling bare <tick/> still fires and pushes the count
+    // to 2, so the guard never matches again and the one-time dragon-hoard loot is
+    // re-offered from visit 3 on. A boxless section (cap 0) or a tick aimed at
+    // another section is left uncapped.
+    if (k === this.boxKey() && this._sectionBoxes > 0) next = Math.min(next, this._sectionBoxes);
+    this.data.boxes[k] = next;
     this.changed();
   }
 

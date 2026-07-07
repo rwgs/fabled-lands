@@ -22,8 +22,8 @@ the book XML corpus.
 - [x] 24. Canonicalise ship types (`brig`, `gall`) and fix crew-upgrade steps
 - [x] 25. Fix value/expression parsing: vars containing "d", unary minus, division
 - [x] 26. Implement the remaining `<fight>` attributes
-- [ ] 27. Cap visit-box ticks and make `ticks=` guards robust
-- [ ] 28. Honour `dead="t"` on `<goto>`/`<choice>`
+- [x] 27. Cap visit-box ticks and make `ticks=` guards robust
+- [x] 28. Honour `dead="t"` on `<goto>`/`<choice>`
 - [ ] 29. Market & item polish: currency items, `currency=`, pipe names, headers, item `<effect>`s
 - [ ] 30. Gate `<random flag=…>` rolls behind their payment
 - [ ] 31. `<rest>` with no `stamina=` should restore to full
@@ -758,31 +758,64 @@ render-every-section scan (4369). `RESULT ALL PASS pass=303 fail=0`.
 
 ---
 
-## 27. Cap visit-box ticks and make `ticks=` guards robust  — MEDIUM
+## 27. Cap visit-box ticks and make `ticks=` guards robust  — **done**
 
-`state.addTick` (state.js:268) has no cap at the section's `boxes=` count and
-`<if ticks="1">` matches with strict equality (engine.js:70). In book1/16
+`state.addTick` had no cap at the section's `boxes=` count. In book1/16
 (`boxes="1"`): visit 1 ticks the box; on visit 2 the `<if ticks="1">` guard
 matches (goto 251) but the sibling bare `<tick/>` still fires → count 2; from
-visit 3 on the guard never matches and the one-time dragon-hoard loot is
-offered again. The `ticks="1"` guard pattern appears in ~30 sections in book 1
-alone. Cap `addTick` at the section's box count (the section's `boxes=` needs
-to reach state) and/or match guards with `>=` after verifying JaFL's own
-behaviour; add a three-visit regression test.
+visit 3 on the guard (strict `==`) never matches again and the one-time
+dragon-hoard loot is re-offered. The `ticks="N"` guard pattern appears in ~30
+sections in book 1 alone.
+
+Resolution: the guard stays strict equality — the Java engine's
+`IfNode.meetsConditions()` also uses `getTickCount(section) == ticks`, so `>=`
+would diverge. The real fix is the **cap**, mirroring JaFL's
+`SectionNode.addTicks`, which only fills *unselected* boxes (never exceeding the
+`boxes=` count) — its guarded `<goto>` also fires immediately and short-circuits
+the sibling `<tick/>`, which the JS single-pass render can't. Changes:
+- **`state.js`** — a transient `setSectionBoxes(n)` records the current section's
+  `boxes=` count (not persisted), and `addTick` caps the current section's total
+  at it (`Math.min`). A boxless section (cap 0) or a tick aimed at another section
+  is left uncapped, so nothing else changes.
+- **`render.js`** — `render()` calls `state.setSectionBoxes(nBoxes)` before the
+  section body renders, so the bare `<tick/>` is capped as it fires.
+
+Verified: 5 new headless assertions (three successive visits to §1.16 each leave
+the count at 1, not 2; the `<if ticks="1">` guard still matches on a repeat
+visit; a boxless section stays uncapped) + full render-every-section scan (4369).
+`RESULT ALL PASS pass=308 fail=0`.
 
 ---
 
-## 28. Honour `dead="t"` on `<goto>`/`<choice>`  — MEDIUM
+## 28. Honour `dead="t"` on `<goto>`/`<choice>`  — **done**
 
-61 `<goto dead="t">` and 11 `<choice dead="t">` occurrences render as normal
-enabled navigation for living players (render.js renderGoto/renderChoice) — a
-book4/16 trample survivor sees an enabled link "7" into the you-are-dead
-section, whose dead-end fallback then funnels them into real death. Fight
-sections are mostly covered by the lose-branch prose heuristic, but 15
-non-fight sections have no protection (book2/555, book3/550,
-book4/16/37/60/151/203/578/679, book5/104/271/344/426/617/640). Hide (or
-disable) `dead="t"` navigation while the player is alive, and prefer it over
-the prose heuristic as the fight gate's lose-branch signal where present.
+61 `<goto dead="t">` and 11 `<choice dead="t">` rendered as normal enabled
+navigation for a living player, so a book4/16 trample *survivor* could click the
+link "7" into the you-are-dead section (whose dead-end fallback then funnelled
+them into real death). Only `dead="t"` occurs in the corpus (no `dead="f"`), but
+both are handled.
+
+Fix (`web/js/render.js`):
+- A new **`deadGate(node, btn)`** disables a nav button whose `dead=` doesn't
+  match the player's state — `dead="t"` is blocked while alive ("Only if you are
+  dead."), `dead="f"` while dead. Wired into `renderGoto` (button disable) and
+  `renderChoice` (a gating reason). A dead player can still take a `dead="t"`
+  link, and a living player still takes the normal (`dead`-less) branch — book4/16
+  survivor → §666, not §7.
+- **`computeFightGate`** now marks any post-fight `dead="t"` goto/choice as a
+  lose-branch node directly, preferring that precise "you are killed" marker over
+  the prose heuristic; it's disabled on a win and is the branch offered on a loss
+  (and makes `hasLosePath` true so death is deferred to it).
+
+Death routing itself (the `handleDeath` resurrection/undo modal) is unchanged, so
+resurrection deals still take priority — this task only stops the living from
+using death-only links and sharpens the fight gate's lose-branch detection.
+
+Verified: 5 new headless assertions (§4.16 dead="t" §7 disabled while alive but
+enabled when dead; living §666 stays enabled; a dead="t" choice disabled while
+alive; the fight gate marking a dead="t" goto as the lose-branch) + existing
+fight/resurrection tests still green + full render-every-section scan (4369).
+`RESULT ALL PASS pass=313 fail=0`.
 
 ---
 

@@ -74,6 +74,7 @@ export class Story {
     // Tick boxes for this section (the empty boxes printed beside the number in
     // the books). Filled ones reflect how many times the box has been ticked.
     const nBoxes = parseInt(el.getAttribute('boxes') || '0', 10);
+    this.state.setSectionBoxes(nBoxes); // cap this section's box ticks (task 27)
     if (nBoxes > 0) {
       const ticked = this.state.tickCount(this.book, this.section);
       const boxRow = document.createElement('div');
@@ -664,6 +665,22 @@ export class Story {
     return b ? Number(b) : this.book;
   }
 
+  // A dead="t"/"f" attribute gates navigation on the player's alive/dead state:
+  // dead="t" is a "you are dead" link (only for a dead player) — while alive it
+  // must not be clickable, else a survivor walks into the you-are-dead section
+  // (book4/16's trample → §7). dead="f" is the mirror (only while alive). Returns
+  // true (and disables the button) when the node is gated out. (task 28)
+  deadGate(node, btn) {
+    const d = node.getAttribute('dead');
+    if (d == null) return false;
+    const needDead = boolAttr(d);
+    if (needDead === this.state.isDead()) return false;
+    btn.disabled = true;
+    btn.classList.add('gated');
+    btn.title = needDead ? 'Only if you are dead.' : 'Only while you live.';
+    return true;
+  }
+
   renderGoto(container, node, path) {
     const section = node.getAttribute('section');
     if (section == null) return null;
@@ -684,6 +701,7 @@ export class Story {
     link.appendChild(inner.textContent.trim() ? inner : document.createTextNode(String(section)));
 
     if (!canSail) { link.disabled = true; link.title = 'You need a ship here.'; }
+    this.deadGate(node, link); // dead="t" only for a dead player, dead="f" only while alive
 
     link.addEventListener('click', () => {
       if (!bookAvailable) { this.notify(`“${bookTitle(targetBook)}” (Book ${targetBook}) isn’t included in this edition.`, 'warn'); return; }
@@ -838,6 +856,9 @@ export class Story {
     if (god && !this.state.hasGod(god)) reasons.push('requires ' + god);
     if (emptyvar && this.state.hasVar(emptyvar)) reasons.push('unavailable');
     if (bookNum && !availableBooks().includes(Number(bookNum))) reasons.push('book not in edition');
+    // dead="t" choices are only for a dead player (and dead="f" only while alive) — task 28.
+    const deadAttr = node.getAttribute('dead');
+    if (deadAttr != null && boolAttr(deadAttr) !== this.state.isDead()) reasons.push(boolAttr(deadAttr) ? 'only if you are dead' : 'only while you live');
 
     if (cost) {
       const tag = document.createElement('span');
@@ -1169,7 +1190,9 @@ export class Story {
         const isFleeChoice = tag === 'choice' && boolAttr(ch.getAttribute('flee'));
         if (seenFight && !skip && !isFleeChoice && (tag === 'goto' || tag === 'choice' || tag === 'return')) {
           navNodes.add(ch);
-          if (LOSE.test(recent) && !WIN.test(recent)) loseNodes.add(ch);
+          // An explicit dead="t" goto/choice IS the "you are killed" branch — prefer
+          // that precise marker over the prose heuristic for the lose-branch (task 28).
+          if (boolAttr(ch.getAttribute('dead')) || (LOSE.test(recent) && !WIN.test(recent))) loseNodes.add(ch);
           recent = '';
         }
         walk(ch, childSkip);

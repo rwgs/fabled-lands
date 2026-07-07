@@ -894,6 +894,57 @@ async function run() {
     const s192 = await data.getSection(6,'192'); storyGr.begin(s192,6,'192');
     ok('§6.192 draws one combined group widget (not three)', cgr.querySelectorAll('.fight').length === 1 && /3 foes/.test(cgr.textContent), `boxes=${cgr.querySelectorAll('.fight').length}`);
 
+    // --- task 27: cap visit-box ticks so a matched <if ticks="N"> guard stays matched ---
+    const gtk = GameState.create({ name:'TK', gender:'m', profession:'Warrior', book:1, adv });
+    const renderTk = async () => {
+      const c = document.createElement('div');
+      const st = new Story(c, gtk, { navigate(){}, onDeath(){}, notify(){} });
+      gtk.data.book = 1; gtk.data.section = '16';
+      const el = await data.getSection(1, '16'); st.begin(el, 1, '16');
+      return c;
+    };
+    await renderTk();
+    ok('§1.16 visit 1 ticks the box once', gtk.tickCount(1, '16') === 1, `t=${gtk.tickCount(1,'16')}`);
+    await renderTk();
+    ok('§1.16 visit 2 stays capped at boxes=1 (was 2 before the fix)', gtk.tickCount(1, '16') === 1, `t=${gtk.tickCount(1,'16')}`);
+    await renderTk();
+    ok('§1.16 visit 3 still capped at 1', gtk.tickCount(1, '16') === 1, `t=${gtk.tickCount(1,'16')}`);
+    gtk.data.book = 1; gtk.data.section = '16';
+    ok('§1.16 <if ticks="1"> guard still matches on a repeat visit', eng.evaluateCondition(parse('<if ticks="1"/>'), gtk) === true);
+    // a boxless section is left uncapped (existing behaviour preserved).
+    const gtk0 = GameState.create({ name:'TK0', gender:'m', profession:'Warrior', book:1, adv });
+    gtk0.setSectionBoxes(0); gtk0.data.section = '999'; gtk0.addTick(); gtk0.addTick();
+    ok('boxless section tick is uncapped', gtk0.tickCount(1, '999') === 2, `t=${gtk0.tickCount(1,'999')}`);
+
+    // --- task 28: honour dead="t" on <goto>/<choice> ---
+    // §4.16: a living survivor must NOT be able to click the dead="t" link into §7.
+    const gAlive = GameState.create({ name:'DA', gender:'m', profession:'Warrior', book:4, adv });
+    gAlive.data.stamina = 100; gAlive.data.staminaMax = 100;
+    const cAlive = document.createElement('div');
+    const stAlive = new Story(cAlive, gAlive, { navigate(){}, onDeath(){}, notify(){} });
+    const s416 = await data.getSection(4, '16'); stAlive.begin(s416, 4, '16');
+    const gotosA = Array.from(cAlive.querySelectorAll('.goto'));
+    const g7A = gotosA.find((b) => b.textContent.trim() === '7');
+    const g666A = gotosA.find((b) => b.textContent.trim() === '666');
+    ok('§4.16 dead="t" goto §7 is disabled while alive', !!g7A && g7A.disabled === true, `found=${!!g7A} dis=${g7A && g7A.disabled}`);
+    ok('§4.16 living goto §666 stays enabled', !!g666A && g666A.disabled === false, `found=${!!g666A} dis=${g666A && g666A.disabled}`);
+    // A dead player CAN take the dead="t" link.
+    const gDead = GameState.create({ name:'DD', gender:'m', profession:'Warrior', book:4, adv });
+    gDead.data.stamina = 0;
+    const cDead = document.createElement('div');
+    const stDead = new Story(cDead, gDead, { navigate(){}, onDeath(){}, notify(){} });
+    const s416b = await data.getSection(4, '16'); stDead.begin(s416b, 4, '16');
+    const g7D = Array.from(cDead.querySelectorAll('.goto')).find((b) => b.textContent.trim() === '7');
+    ok('§4.16 dead="t" goto §7 is enabled when the player is dead', !!g7D && g7D.disabled === false, `found=${!!g7D} dis=${g7D && g7D.disabled}`);
+    // A dead="t" <choice> is likewise gated while alive.
+    const deadChoiceBtn = stAlive.renderChoice(parse('<choice dead="t" section="99">enter the death section</choice>'), 'dc');
+    ok('dead="t" choice disabled while the player lives', deadChoiceBtn.disabled === true);
+    // The fight gate prefers an explicit dead="t" goto as the lose-branch signal.
+    const fgSec = parse('<section><fight name="X" combat="5" defence="5" stamina="5"/><p>If you win, <goto section="10"/>. If you are killed, <goto section="7" dead="t"/>.</p></section>');
+    const gate = stAlive.computeFightGate(fgSec);
+    const deadGoto = fgSec.querySelector('goto[dead="t"]');
+    ok('fight gate marks a dead="t" goto as the lose-branch', !!gate && gate.loseNodes.has(deadGoto) && gate.hasLosePath === true, `has=${!!gate && gate.loseNodes.has(deadGoto)}`);
+
     // buy a tool: grants a bonus tool tied to an ability and charges the price
     const gbtool = GameState.create({ name:'BT', gender:'m', profession:'Warrior', book:5, adv });
     gbtool.data.shards = 500;
