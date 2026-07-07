@@ -4,6 +4,7 @@ import * as data from './data.js';
 import { GameState, loadSlotMeta, deleteSlot, nextFreeSlot, readSlotData, importSave } from './state.js';
 import { ABILITIES, ABILITY_LABEL, ABILITY_BLURB, PROFESSIONS, rankTitle, ordinal } from './rules.js';
 import { Story } from './render.js';
+import { useItemEffect } from './engine.js';
 import { renderSheet, modal, toast, escapeHtml } from './ui.js';
 import { VERSION } from './version.js';
 import { Narrator } from './tts.js'; // [TTS] optional narration — remove this + the [TTS] hooks below to drop the feature
@@ -517,7 +518,23 @@ function iconBtn(glyph, title, fn) { const b = el('button', 'icon-btn', glyph); 
 
 function refreshSheet() {
   const pane = $('#sheet-pane');
-  if (pane && state) renderSheet(state, pane);
+  if (pane && state) renderSheet(state, pane, { onUse: onUseItem });
+}
+
+// Use/Drink/Consult a usable item effect from the Adventure Sheet (task 41). Applies
+// the effect's action body (rest/cure/…) or grants a potion's ability boost, consumes
+// a charge (removing the item when spent), and follows any inner <goto> use-target
+// (the Vade Mecum consult). State mutations trigger the onChange sheet refresh.
+function onUseItem(item, effect) {
+  if (!state || !effect) return;
+  let bodyNode = null;
+  if (effect.body) {
+    try { bodyNode = data.parseXml(`<effect>${effect.body}</effect>`); } catch { bodyNode = null; }
+  }
+  const res = useItemEffect(state, item, effect, bodyNode);
+  if (res.removeItem) state.removeItemById(item.id);
+  if (res.goto && res.goto.section != null) { navigate(res.goto.book || (story && story.book) || state.data.book, res.goto.section); return; }
+  if (story) story.rerender();
 }
 
 function toggleSheet(force) {

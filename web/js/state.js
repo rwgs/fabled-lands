@@ -51,6 +51,8 @@ function freshData() {
     diseases: [],         // {name, type:'disease', effects:[]}  (task 19 populates)
     poisons: [],          // {name, type:'poison', effects:[]}   (task 19 populates)
     caches: {},           // name -> {items:[], money:0}         (task 20 populates)
+    currencies: {},       // name -> amount (alternate-currency markets, e.g. Mithral — task 40)
+    potionBonus: {},      // ability -> +N temporary boost from a drunk potion (task 41)
     book: 1,
     section: null,
     startBook: 1,
@@ -161,12 +163,43 @@ export class GameState {
     return sum;
   }
 
+  /** Passive item-effect bonus for an ability key (task 41): a `type="aura"` effect
+   *  counts while the item is carried; `type="wielded"` only while it is the
+   *  wielded weapon / worn armour. `ability="*"` boosts every core ability. Used for
+   *  the elemental swords (+2 to an ability), the rings, and the Jade Defender. */
+  auraBonus(key) {
+    const k = String(key || '').toLowerCase();
+    let sum = 0;
+    for (const it of this.data.items) {
+      for (const e of (it.effects || [])) {
+        const passive = e.type === 'aura' || (e.type === 'wielded' && (it.wielded || it.worn));
+        if (!passive) continue;
+        const ea = String(e.ability || '').toLowerCase();
+        if (ea === k || (ea === '*' && ABILITIES.includes(k))) sum += (e.bonus || 0);
+      }
+    }
+    return sum;
+  }
+
+  /** A drunk potion's temporary +N to an ability (task 41). Section-scoped — cleared
+   *  on entering a new section (Story.begin), matching JaFL's "for that one roll or
+   *  fight only" in practice (a section usually holds a single relevant roll/fight). */
+  potionBonusFor(ability) { return (this.data.potionBonus && this.data.potionBonus[ability]) || 0; }
+  addPotionBonus(ability, n = 1) {
+    const p = (this.data.potionBonus ||= {});
+    p[ability] = (p[ability] || 0) + n;
+    this.changed();
+  }
+  clearPotionBonuses() {
+    if (this.data.potionBonus && Object.keys(this.data.potionBonus).length) { this.data.potionBonus = {}; this.changed(); }
+  }
+
   /** Affected ability score, including item/effect/affliction bonuses, clamped
    *  1..12. The fixed/cursed flags are deliberately NOT applied here — like JaFL,
    *  the displayed/derived score is the real one; the flags bite only in checks. */
   ability(ability) {
     const base = this.data.abilities[ability] || 0;
-    return clampAbility(base + this.itemBonus(ability) + this.effectBonus(ability) + this.afflictionBonus(ability));
+    return clampAbility(base + this.itemBonus(ability) + this.effectBonus(ability) + this.afflictionBonus(ability) + this.auraBonus(ability) + this.potionBonusFor(ability));
   }
 
   /** Ability score as seen by a check (difficulty/rank/if): a cursed ability
@@ -194,8 +227,9 @@ export class GameState {
   }
 
   defence() {
-    // COMBAT (incl. weapon bonus) + Rank + best armour bonus
-    return this.ability('combat') + this.data.rank + this.armourBonus();
+    // COMBAT (incl. weapon bonus) + Rank + best armour bonus, plus any item aura
+    // that boosts Defence directly (sword of stone, ring of guarding, Jade Defender).
+    return this.ability('combat') + this.data.rank + this.armourBonus() + this.auraBonus('defence');
   }
 
   wieldedWeapon() {
@@ -316,6 +350,25 @@ export class GameState {
   // ---- money -----------------------------------------------------------
   adjustMoney(delta) {
     this.data.shards = Math.max(0, this.data.shards + delta);
+    this.changed();
+  }
+
+  // ---- alternate currencies (Mithral etc. — task 40) -------------------
+  // A named-currency pool the player spends in a <market currency="Name"> or a
+  // <choice currency="Name">, kept separate from the Shards purse. Shards is the
+  // default (isShardsCurrency), so only genuinely foreign coin lives here.
+  /** Balance of a named currency (0 if the player has none). */
+  currencyBalance(name) { return Math.max(0, Math.floor((this.data.currencies && this.data.currencies[name]) || 0)); }
+  /** Adjust a named currency by delta (floored at 0, integer). */
+  adjustCurrency(name, delta) {
+    const cs = (this.data.currencies ||= {});
+    cs[name] = Math.max(0, Math.floor((cs[name] || 0) + delta));
+    this.changed();
+  }
+  /** Scale a named currency by factor (floored at 0). */
+  multiplyCurrency(name, factor) {
+    const cs = (this.data.currencies ||= {});
+    cs[name] = Math.max(0, Math.floor((cs[name] || 0) * factor));
     this.changed();
   }
 
@@ -561,8 +614,25 @@ function sanitizeItem(it) {
     bonus: asNum(it.bonus, 0, { int: true }),
     ability: typeof it.ability === 'string' ? it.ability : null,
     tags: asArr(it.tags).filter((t) => typeof t === 'string'),
+    effects: asArr(it.effects).map(sanitizeEffect).filter(Boolean),
     wielded: asBool(it.wielded),
     worn: asBool(it.worn),
+  };
+}
+
+// A stored item <effect> (task 41). Keeps only the known, serialisable shape so a
+// hostile save can't smuggle in odd fields; body is the effect's action XML.
+function sanitizeEffect(e) {
+  const o = asObj(e);
+  const type = ['use', 'aura', 'wielded', 'ability', 'tool'].includes(o.type) ? o.type : 'aura';
+  return {
+    type,
+    ability: typeof o.ability === 'string' ? o.ability : null,
+    bonus: asNum(o.bonus, 0, { int: true }),
+    uses: asNum(o.uses, -1, { int: true }),
+    verb: typeof o.verb === 'string' ? o.verb : null,
+    text: typeof o.text === 'string' ? o.text : null,
+    body: typeof o.body === 'string' ? o.body : null,
   };
 }
 
@@ -647,6 +717,10 @@ export function sanitizeData(raw) {
     const o = asObj(v);
     out.caches[k] = { money: asNum(o.money, 0, { min: 0, int: true }), items: asArr(o.items).map(sanitizeItem).filter(Boolean), locked: asBool(o.locked) };
   }
+  out.currencies = {};
+  for (const [k, v] of Object.entries(asObj(d.currencies))) { const n = asNum(v, 0, { min: 0, int: true }); if (n > 0) out.currencies[k] = n; }
+  out.potionBonus = {};
+  for (const [k, v] of Object.entries(asObj(d.potionBonus))) { const n = asNum(v, 0, { int: true }); if (n && ABILITIES.includes(k)) out.potionBonus[k] = n; }
 
   out.book = asNum(d.book, base.book, { min: 1, int: true });
   out.section = d.section == null ? null : asStr(d.section);
@@ -673,8 +747,11 @@ function describeSaveError(e) {
   return 'Your browser is blocking storage, so your progress can’t be saved (this often happens in private-browsing mode). Export this adventure to a file to keep it safe.';
 }
 
-export function makeItem(kind, name, bonus = 0, ability = null, tags = []) {
-  return { id: nid(), kind: kind || 'item', name, bonus: bonus || 0, ability: ability || null, tags: tags || [], wielded: false, worn: false };
+export function makeItem(kind, name, bonus = 0, ability = null, tags = [], effects = []) {
+  // effects: [{type:'use'|'aura'|'wielded', ability, bonus, uses, verb, text, body}]
+  // aura/wielded fold into ability()/defence() while carried/wielded; use = a
+  // Drink/Consult/Use action fired from the Adventure Sheet (task 41).
+  return { id: nid(), kind: kind || 'item', name, bonus: bonus || 0, ability: ability || null, tags: tags || [], effects: effects || [], wielded: false, worn: false };
 }
 
 /** Parse a comma/pipe-separated tags attribute into a clean string array. */
@@ -691,6 +768,13 @@ export function normalize(s) {
 export function currencyAward(name) {
   const m = /^\s*(\d+)\s+shards\s*$/i.exec(String(name || ''));
   return m ? parseInt(m[1], 10) : null;
+}
+
+/** A market/choice currency= that means the default Shards purse: null, blank, or
+ *  "Shards"/"Shard" (case-insensitive). Any other name is a foreign coin held in a
+ *  named-currency pool (e.g. Mithral — book2/495/545). (task 40) */
+export function isShardsCurrency(name) {
+  return !name || /^shards?$/i.test(String(name).trim());
 }
 
 /** Split a multi-name goods label ("fur cloak|wolf pelt") into a display name and

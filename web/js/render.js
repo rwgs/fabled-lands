@@ -9,11 +9,11 @@
 import {
   evaluateCondition, applyEffect, applyEffectBody, boolAttr, resolveValue, isDiceExpr,
   rollDifficulty, rollRankCheck, rollTraining, rollDice, matchRange, childAdjustment,
-  applyRest, buyResurrectionDeal, abilityChoiceOptions,
+  applyRest, buyResurrectionDeal, abilityChoiceOptions, readItemEffects,
 } from './engine.js';
 import { makeFight, fightRound, groupFightRound, isDefeated } from './combat.js';
 import { shopKind, goodsFrom, ownsGoods, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo } from './market.js';
-import { normalize, makeItem, parseTags, currencyAward, splitItemName } from './state.js';
+import { normalize, makeItem, parseTags, currencyAward, splitItemName, isShardsCurrency } from './state.js';
 import { ABILITY_LABEL, CREW_LEVELS } from './rules.js';
 import { bookTitle, availableBooks } from './data.js';
 import { animateDice, modal } from './ui.js';
@@ -44,6 +44,9 @@ export class Story {
     this.sectionEl = sectionEl;
     this.book = book;
     this.section = section;
+    // A drunk-potion boost lasts only for the section it was used in (task 41):
+    // clear it on entering a new section so it can't be carried forward.
+    this.state.clearPotionBonuses();
     this.ctx = { applied: new Set(), rolls: new Map(), fights: new Map(), buys: new Map(), groupLimits: new Map(), groupPicks: new Map() };
     // Pre-scan grouped-award controllers (<items group="X" limit="N"/>) so the
     // individual award rows know their "choose up to N" cap no matter whether the
@@ -876,9 +879,10 @@ export class Story {
     } else {
       btn.textContent = 'Take ' + display;
       const tags = [...parseTags(node.getAttribute('tags')), ...alts];
+      const effects = readItemEffects(node); // <effect> use/aura/wielded children (task 41)
       btn.addEventListener('click', () => {
         if (currency != null) this.state.adjustMoney(currency); // stackable "N Shards" treasure
-        else this.state.addItem(makeItem(kind, name, bonus, ability, tags));
+        else this.state.addItem(makeItem(kind, name, bonus, ability, tags, effects));
         this.ctx.applied.add(key);
         if (limit != null) this.ctx.groupPicks.set(group, groupCount + 1);
         this.rerender();
@@ -923,6 +927,11 @@ export class Story {
     const section = node.getAttribute('section');
     const targetBook = node.getAttribute('book') ? Number(node.getAttribute('book')) : this.book;
     const shards = node.getAttribute('shards');
+    // A currency="Mithral" cost is paid in that foreign coin, not Shards (book2/545).
+    const currency = node.getAttribute('currency');
+    const foreignCoin = !isShardsCurrency(currency);
+    const coinLabel = foreignCoin ? currency : 'Shards';
+    const wallet = foreignCoin ? this.state.currencyBalance(currency) : this.state.data.shards;
     const pay = node.getAttribute('shards') != null && !(node.getAttribute('pay') != null && !boolAttr(node.getAttribute('pay')));
     const itemReq = node.getAttribute('item');
     const boxWord = node.getAttribute('box');
@@ -935,7 +944,7 @@ export class Story {
     // gating
     const reasons = [];
     const cost = shards != null ? resolveValue(this.state, shards) : 0;
-    if (shards != null && this.state.data.shards < cost) reasons.push(`needs ${cost} Shards`);
+    if (shards != null && wallet < cost) reasons.push(`needs ${cost} ${coinLabel}`);
     if (itemReq && !this.state.hasItem(itemReq)) reasons.push(`needs ${itemReq}`);
     if (boxWord && !this.state.hasCodeword(boxWord)) reasons.push('box not ticked');
     if (profession && normalize(profession) !== normalize(this.state.data.profession)) reasons.push(profession + ' only');
@@ -951,7 +960,7 @@ export class Story {
     if (cost) {
       const tag = document.createElement('span');
       tag.className = 'choice-cost';
-      tag.textContent = `${cost} Shards`;
+      tag.textContent = `${cost} ${coinLabel}`;
       btn.appendChild(tag);
     }
     if (boxWord) {
@@ -975,7 +984,7 @@ export class Story {
           if (this.sectionFight) this.sectionFight.outcome = 'fled';
           if (this.state.isDead()) { this.rerender(); return; }
         }
-        if (pay && cost) this.state.adjustMoney(-cost);
+        if (pay && cost) { if (foreignCoin) this.state.adjustCurrency(currency, -cost); else this.state.adjustMoney(-cost); }
         if (pay && itemReq) { const it = this.state.findItems(itemReq)[0]; if (it) this.state.removeItemById(it.id); }
         if (section == null) return;
         this.navigate(targetBook, section);
@@ -1535,6 +1544,12 @@ export class Story {
   renderMarket(container, node, path) {
     const box = document.createElement('div');
     box.className = 'market';
+    // A currency="Mithral" market trades in a foreign coin, not Shards (book2/495) —
+    // prices/buttons and the wallet check use that named pool (task 40).
+    const currency = node.getAttribute('currency');
+    // Market-level <sold item="?" tags="…"> hooks fire when a matching good is sold
+    // (book3/318 marks a codeword when a free item is resold) — task 41.
+    const marketSolds = Array.from(node.children).filter((c) => c.tagName.toLowerCase() === 'sold');
     let hasHeader = false;
     Array.from(node.children).forEach((child, i) => {
       const tag = child.tagName.toLowerCase();
@@ -1549,7 +1564,7 @@ export class Story {
         h.textContent = title;
         box.appendChild(h);
       } else if (tag === 'trade' || tag === 'armour' || tag === 'weapon' || tag === 'tool' || tag === 'item' || tag === 'cargo') {
-        box.appendChild(this.renderShopRow(child, path + '.r' + i));
+        box.appendChild(this.renderShopRow(child, path + '.r' + i, currency, marketSolds));
       }
     });
     if (!hasHeader) {
@@ -1562,7 +1577,7 @@ export class Story {
     return box;
   }
 
-  renderShopRow(node, path) {
+  renderShopRow(node, path, currency = null, marketSolds = []) {
     const kind = shopKind(node);
     const name = node.getAttribute('name') || node.getAttribute(kind) || node.getAttribute('item') || (kind === 'weapon' ? 'weapon' : kind);
     const bonus = node.getAttribute('bonus') ? parseInt(node.getAttribute('bonus'), 10) : 0;
@@ -1571,6 +1586,11 @@ export class Story {
     const sell = node.getAttribute('sell');
     const carryable = kind === 'weapon' || kind === 'armour' || kind === 'tool' || kind === 'item';
     const goods = goodsFrom(node, kind, name, bonus);
+    goods.effects = readItemEffects(node); // carry any <effect> onto the bought item (task 41)
+    // Foreign-currency market (Mithral): prices/wallet use that pool, not Shards (task 40).
+    const foreign = !isShardsCurrency(currency);
+    const coin = foreign ? ` ${currency}` : '';
+    const balance = foreign ? this.state.currencyBalance(currency) : this.state.data.shards;
 
     const row = document.createElement('div');
     row.className = 'trade';
@@ -1590,12 +1610,12 @@ export class Story {
       const price = resolveValue(this.state, buy);
       const b = document.createElement('button');
       b.className = 'btn-mini';
-      b.textContent = `Buy ${price}`;
+      b.textContent = `Buy ${price}${coin}`;
       const noSlot = carryable && this.state.freeSlots() <= 0;
-      b.disabled = this.state.data.shards < price || noSlot;
-      b.title = this.state.data.shards < price ? 'Not enough Shards' : (noSlot ? 'No room (12-item limit)' : '');
+      b.disabled = balance < price || noSlot;
+      b.title = balance < price ? `Not enough ${foreign ? currency : 'Shards'}` : (noSlot ? 'No room (12-item limit)' : '');
       b.addEventListener('click', () => {
-        const res = buyTrade(this.state, goods, price);
+        const res = buyTrade(this.state, goods, price, currency);
         if (!res.ok) { if (res.note) this.notify(res.note, 'warn'); return; }
         this.rerender();
       });
@@ -1606,10 +1626,14 @@ export class Story {
       const owned = ownsGoods(this.state, goods);
       const s = document.createElement('button');
       s.className = 'btn-mini';
-      s.textContent = `Sell ${price}`;
+      s.textContent = `Sell ${price}${coin}`;
       s.disabled = !owned;
       s.title = owned ? '' : 'You have none to sell';
-      s.addEventListener('click', () => { if (sellTrade(this.state, goods, price).ok) this.rerender(); });
+      s.addEventListener('click', () => {
+        if (!sellTrade(this.state, goods, price, currency).ok) return;
+        this.runSoldHooks(node, goods, marketSolds); // <sold> side-effects (task 41)
+        this.rerender();
+      });
       actions.appendChild(s);
     }
     if (buy == null && sell == null) {
@@ -1620,6 +1644,23 @@ export class Story {
     }
     row.appendChild(actions);
     return row;
+  }
+
+  // Fire the <sold> side-effects when a good is sold (task 41): the row's own
+  // <sold> child (book3/86 pirate captain's head), plus any market-level
+  // <sold item="?" tags="…"> whose filter matches this good (book3/318 free items).
+  runSoldHooks(rowNode, goods, marketSolds) {
+    const own = rowNode.querySelector(':scope > sold');
+    if (own) applyEffectBody(own, this.state);
+    (marketSolds || []).forEach((s) => { if (this.soldMatches(s, goods)) applyEffectBody(s, this.state); });
+  }
+
+  // Does a market-level <sold> filter (item="?"/name + tags=) match a sold good?
+  soldMatches(soldNode, goods) {
+    const item = soldNode.getAttribute('item');
+    if (item && item !== '?' && item !== '*' && normalize(item) !== normalize(goods.name)) return false;
+    const tags = parseTags(soldNode.getAttribute('tags'));
+    return tags.every((t) => (goods.tags || []).some((g) => normalize(g) === normalize(t)));
   }
 
   // Inline <buy> in prose: a crew upgrade, a ship, a tool, a carried item, or a
@@ -1704,6 +1745,7 @@ export class Story {
           bonus: node.getAttribute('bonus') ? parseInt(node.getAttribute('bonus'), 10) : 0,
           ability: node.getAttribute('ability'),
           tags: parseTags(node.getAttribute('buytags') || node.getAttribute('tags')),
+          effects: readItemEffects(node), // <buy item="potion of strength"><effect .../></buy> (task 41)
         });
         if (!res.ok) { if (res.note) this.notify(res.note, 'warn'); return; }
         this.ctx.buys.set(memo, bought + 1);

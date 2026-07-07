@@ -76,8 +76,9 @@ export function modal({ title, body, buttons = [{ label: 'OK', value: true }], d
 }
 
 // ---- Adventure Sheet -------------------------------------------------------
-export function renderSheet(state, container) {
+export function renderSheet(state, container, opts = {}) {
   const d = state.data;
+  const onUse = opts.onUse || null; // (item, effect) => void — fires a usable item effect (task 41)
   container.innerHTML = '';
 
   const head = el('div', 'sheet-head');
@@ -133,6 +134,18 @@ export function renderSheet(state, container) {
     if (it.wielded) nm.classList.add('wielded');
     if (it.worn) nm.classList.add('worn');
     li.appendChild(nm);
+
+    // Use/Drink/Consult a usable item effect (potions, Vade Mecum) — task 41. Shown
+    // while the effect has charges left (uses>0) or is reusable (uses=-1).
+    if (onUse) {
+      (it.effects || []).forEach((eff) => {
+        if (eff.type !== 'use' || eff.uses === 0) return;
+        const use = el('button', 'item-use', eff.verb || 'Use');
+        use.title = eff.text || `${eff.verb || 'Use'} the ${it.name}`;
+        use.addEventListener('click', () => onUse(it, eff));
+        li.appendChild(use);
+      });
+    }
 
     // Reorder controls: the list order decides what a "possessions listed first"
     // theft (§521/§248) takes, so the player can move valuables down out of reach.

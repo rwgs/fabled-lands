@@ -2,7 +2,7 @@
 // Reads attributes off the parsed XML elements and applies them to a GameState.
 
 import { ABILITIES, canonShipType, CREW_LEVELS } from './rules.js';
-import { makeItem, normalize, matchItems } from './state.js';
+import { makeItem, normalize, matchItems, isShardsCurrency } from './state.js';
 import { availableBooks } from './data.js';
 
 // ---- dice ------------------------------------------------------------------
@@ -353,6 +353,9 @@ export function applyEffectBody(parent, state) {
       continue;
     }
     if (PASSIVE_BODY_TAGS.has(tag)) { applyEffect(node, state); continue; }
+    // A <rest> inside an effect body (potion of restoration heals all Stamina —
+    // task 41): a bare/blank stamina= restores to full (task 31), else that amount.
+    if (tag === 'rest') { applyRest(state, node.getAttribute('stamina'), node.getAttribute('shards') != null ? resolveValue(state, node.getAttribute('shards')) : 0); continue; }
     applyEffectBody(node, state); // wrapper (e.g. <p>/<text>): descend
   }
 }
@@ -586,10 +589,15 @@ function applySpecial(el, state) {
 // (round in the house's favour), keeping Shards integral.
 function applyAdjustMoney(el, state) {
   const name = el.getAttribute('name') != null ? el.getAttribute('name') : el.getAttribute('cache');
+  // currency="Mithral" (etc.) targets a named-currency pool, not Shards/a cache —
+  // lets a section grant or scale a foreign coin used in a currency market (task 40).
+  const currency = el.getAttribute('currency');
+  const useCur = !isShardsCurrency(currency);
   const mult = el.getAttribute('multiply');
   if (mult != null) {
     const f = parseFloat(mult);
     if (isNaN(f)) return '';
+    if (useCur) { state.multiplyCurrency(currency, f); return 'currency adjusted'; }
     if (name != null) { state.multiplyCacheMoney(name, f); return 'stash adjusted'; }
     state.data.shards = Math.max(0, Math.floor(state.data.shards * f)); state.changed();
     return 'money adjusted';
@@ -598,7 +606,9 @@ function applyAdjustMoney(el, state) {
   const addAttr = el.getAttribute('add') != null ? el.getAttribute('add') : el.getAttribute('amount');
   if (addAttr != null) {
     const n = resolveValue(state, addAttr);
-    if (name != null) state.adjustCacheMoney(name, n); else state.adjustMoney(n);
+    if (useCur) state.adjustCurrency(currency, n);
+    else if (name != null) state.adjustCacheMoney(name, n);
+    else state.adjustMoney(n);
   }
   return '';
 }
@@ -718,8 +728,64 @@ function readEffects(el) {
 }
 
 function applyItemEffect(el, state) {
-  // <effect> as a child of an item — handled at item creation; standalone rare.
+  // <effect> as a child of an item is captured at award/buy time (readItemEffects)
+  // and lives on the possession; there is nothing to apply when it is merely
+  // rendered. A standalone <effect> is not used in the corpus. (task 41)
   return '';
+}
+
+/** Read the <effect> children of an <item>/<weapon>/<armour>/<tool> node into
+ *  serialisable effect records stored on the possession (task 41). Mirrors JaFL's
+ *  Effect.createEffect / UseEffect: type defaults to "aura"; a "use" effect with an
+ *  ability but no explicit uses= is a one-shot potion (verb "Drink"); its action
+ *  children are serialised into `body` for applyEffectBody at use-time. A <desc>
+ *  child is display-only and dropped. */
+export function readItemEffects(node) {
+  const out = [];
+  if (!node || !node.querySelectorAll) return out;
+  node.querySelectorAll(':scope > effect').forEach((e) => {
+    const type = (e.getAttribute('type') || 'aura').toLowerCase();
+    const ability = e.getAttribute('ability');
+    const bonus = parseInt(String(e.getAttribute('bonus') || '0').replace(/^\+/, ''), 10) || 0;
+    // Serialise the action children (rest/goto/lose/…) as the use body; skip <desc>.
+    const bodyParts = [];
+    Array.from(e.children).forEach((c) => {
+      if (c.tagName.toLowerCase() === 'desc') return;
+      try { bodyParts.push(new XMLSerializer().serializeToString(c)); } catch { /* non-DOM env */ }
+    });
+    const body = bodyParts.join('') || null;
+    let uses = e.hasAttribute('uses') ? (parseInt(e.getAttribute('uses'), 10) || 0) : -1;
+    if (type === 'use' && ability && !e.hasAttribute('uses')) uses = 1; // ability potion: one shot
+    // verb may sit on the effect or (book1/342 potion of restoration) on the item.
+    let verb = e.getAttribute('verb') || node.getAttribute('verb');
+    if (!verb) verb = (type === 'use' && ability) ? 'Drink' : 'Use';
+    out.push({ type, ability: ability || null, bonus, uses, verb, text: e.getAttribute('text') || null, body });
+  });
+  return out;
+}
+
+/** Fire an item's `type="use"` effect (task 41). Applies its action body headlessly
+ *  (rest/lose/…) via applyEffectBody, grants a temporary ability boost for a bare
+ *  potion (+bonus, default +1), decrements uses, and reports an inner <goto> target
+ *  so the caller can navigate (the Vade Mecum consult). `bodyNode` is the parsed
+ *  <effect> body (pass null when there is none). Returns { removeItem, goto }. */
+export function useItemEffect(state, item, effect, bodyNode = null) {
+  let goto = null;
+  if (bodyNode) {
+    applyEffectBody(bodyNode, state); // rest/lose/tick/… (a <goto> inside is inert here)
+    const g = bodyNode.querySelector(':scope > goto') || bodyNode.querySelector('goto');
+    if (g) goto = { book: g.getAttribute('book') ? Number(g.getAttribute('book')) : null, section: g.getAttribute('section') };
+  } else if (effect.ability) {
+    // A bare potion: +bonus (default +1) to the ability for this section (JaFL potion bonus).
+    state.addPotionBonus(effect.ability, effect.bonus || 1);
+  }
+  let removeItem = false;
+  if (effect.uses > 0) {
+    effect.uses -= 1;
+    if (effect.uses === 0) removeItem = true; // consumed (disposable)
+    state.changed();
+  }
+  return { removeItem, goto };
 }
 
 /** Evaluate a <set value="..."> expression. A recursive-descent parser over the

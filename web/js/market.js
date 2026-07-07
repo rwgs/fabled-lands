@@ -4,10 +4,17 @@
 // returns { ok, note? } so the renderer can decide whether to redraw and what
 // (if anything) to toast. No DOM — unit-testable headlessly.
 
-import { makeItem, parseTags, splitItemName } from './state.js';
+import { makeItem, parseTags, splitItemName, isShardsCurrency } from './state.js';
 import { SHIP_TYPES, CREW_LEVELS, canonShipType } from './rules.js';
 
 const shipCap = (type) => SHIP_TYPES[canonShipType(type)]?.capacity || 1;
+
+// A market's currency= (task 40): Shards is the default purse; any other name is a
+// foreign-coin pool (e.g. Mithral). These route a trade's payment/receipt to the
+// right store so a <market currency="Mithral"> spends Mithral, never Shards.
+const walletBalance = (state, currency) => (isShardsCurrency(currency) ? state.data.shards : state.currencyBalance(currency));
+const walletSpend = (state, currency, amount) => { if (isShardsCurrency(currency)) state.adjustMoney(-amount); else state.adjustCurrency(currency, -amount); };
+const walletEarn = (state, currency, amount) => { if (isShardsCurrency(currency)) state.adjustMoney(amount); else state.adjustCurrency(currency, amount); };
 // Normalise an initialCrew= value from the books to a real crew grade.
 const canonCrew = (c) => {
   const k = String(c || '').trim().toLowerCase();
@@ -62,50 +69,52 @@ export function ownsGoods(state, goods) {
   return state.hasItem(name);
 }
 
-/** Buy `goods` for `price`. Mutates state. Returns { ok, note? }. */
-export function buyTrade(state, goods, price) {
-  if (state.data.shards < price) return { ok: false };
-  const { kind, name, bonus, ability, tags, shipType, cargoName, initialCrew } = goods;
+/** Buy `goods` for `price` in `currency` (Shards by default). Mutates state.
+ *  Returns { ok, note? }. */
+export function buyTrade(state, goods, price, currency = null) {
+  if (walletBalance(state, currency) < price) return { ok: false };
+  const { kind, name, bonus, ability, tags, effects, shipType, cargoName, initialCrew } = goods;
   if (kind === 'ship') {
-    state.adjustMoney(-price);
+    walletSpend(state, currency, price);
     state.addShip({ type: canonShipType(shipType), name: 'Ship', crew: canonCrew(initialCrew), cargo: [], docked: null });
   } else if (kind === 'cargo') {
     const ship = state.ships.find((s) => (s.cargo || []).length < shipCap(s.type));
     if (!ship) return { ok: false, note: 'No cargo space.' };
-    state.adjustMoney(-price);
+    walletSpend(state, currency, price);
     (ship.cargo ||= []).push(cargoName);
     state.changed();
   } else {
     if (state.freeSlots() <= 0) return { ok: false, note: 'You can carry only 12 items.' };
-    state.adjustMoney(-price);
+    walletSpend(state, currency, price);
     // A "fur cloak|wolf pelt" row is one item: store it under its first name, with
     // the alternatives as tags so <if item="wolf pelt"> and re-selling match (task 29).
     const { name: itemName, alts } = splitItemName(name);
-    state.addItem(makeItem(kind, itemName, bonus, ability, [...tags, ...alts]));
+    state.addItem(makeItem(kind, itemName, bonus, ability, [...tags, ...alts], effects || []));
   }
   return { ok: true };
 }
 
-/** Sell `goods` for `price`. Mutates state. Returns { ok }. */
-export function sellTrade(state, goods, price) {
+/** Sell `goods` for `price` in `currency` (Shards by default). Mutates state.
+ *  Returns { ok }. */
+export function sellTrade(state, goods, price, currency = null) {
   const { kind, name, bonus, named, shipType, cargoName } = goods;
   if (kind === 'ship') {
     const i = state.ships.findIndex((s) => canonShipType(s.type) === canonShipType(shipType));
     if (i < 0) return { ok: false };
-    state.ships.splice(i, 1); state.adjustMoney(price); state.changed();
+    state.ships.splice(i, 1); walletEarn(state, currency, price); state.changed();
   } else if (kind === 'cargo') {
     const ship = state.ships.find((s) => (s.cargo || []).includes(cargoName));
     if (!ship) return { ok: false };
-    ship.cargo.splice(ship.cargo.indexOf(cargoName), 1); state.adjustMoney(price); state.changed();
+    ship.cargo.splice(ship.cargo.indexOf(cargoName), 1); walletEarn(state, currency, price); state.changed();
   } else if (kind === 'armour' || (kind === 'weapon' && !named)) {
     // Armour (any name) and generic weapons are valued by bonus: sell one of that tier.
     const it = state.data.items.find((x) => x.kind === kind && (x.bonus || 0) === bonus);
     if (!it) return { ok: false };
-    state.removeItemById(it.id); state.adjustMoney(price);
+    state.removeItemById(it.id); walletEarn(state, currency, price);
   } else {
     const it = state.findItems(name)[0];
     if (!it) return { ok: false };
-    state.removeItemById(it.id); state.adjustMoney(price);
+    state.removeItemById(it.id); walletEarn(state, currency, price);
   }
   return { ok: true };
 }
@@ -118,7 +127,7 @@ export function sellTrade(state, goods, price) {
  */
 export function applyInlineBuy(state, opts = {}) {
   const { price = 0, crew, item, tool, ship: shipType, shipName, initialCrew,
-    cargo, bonus = 0, ability = null, tags = [] } = opts;
+    cargo, bonus = 0, ability = null, tags = [], effects = [] } = opts;
   if (price > 0 && state.data.shards < price) return { ok: false, note: 'Not enough Shards.' };
 
   if (crew) {
@@ -140,7 +149,7 @@ export function applyInlineBuy(state, opts = {}) {
   // a carried possession: a tool (with its ability/bonus) or a plain item
   if (state.freeSlots() <= 0) return { ok: false, note: 'You can carry only 12 items.' };
   if (price) state.adjustMoney(-price);
-  state.addItem(makeItem(tool ? 'tool' : 'item', tool || item, bonus || 0, ability || null, tags || []));
+  state.addItem(makeItem(tool ? 'tool' : 'item', tool || item, bonus || 0, ability || null, tags || [], effects || []));
   return { ok: true };
 }
 

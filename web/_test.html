@@ -5,7 +5,7 @@ import * as data from './js/data.js';
 import { GameState, readSlotData, importSave, loadSlotMeta, deleteSlot, makeItem, nextFreeSlot, sanitizeData, currencyAward, splitItemName } from './js/state.js';
 import * as eng from './js/engine.js';
 import { fightRound, makeFight, groupFightRound, isDefeated } from './js/combat.js';
-import { goodsFrom, buyTrade, applyInlineBuy, sellInlineItem, sellCargo } from './js/market.js';
+import { goodsFrom, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo } from './js/market.js';
 import { Story } from './js/render.js';
 import { Narrator } from './js/tts.js';
 import { renderSheet } from './js/ui.js';
@@ -1216,6 +1216,181 @@ async function run() {
     ok('ephemeral save reports success, no error', gsv.save() === true && gsv.lastSaveError === null);
     gsv.ephemeral = false;
     deleteSlot(12); // cleanup
+
+    // --- alternate-currency markets: <market currency="Mithral"> (task 40) ---
+    {
+      const gcy = GameState.create({ name: 'Cy', gender: 'm', profession: 'Warrior', book: 2, adv });
+      gcy.data.shards = 5000;
+      const clover = () => goodsFrom(parse('<item name="four-leaf clover" buy="25" sell="20"/>'), 'item', 'four-leaf clover', 0);
+      // buy in a Mithral market with 0 Mithral: refused, and Shards untouched.
+      const shBefore = gcy.data.shards;
+      const rNoMith = buyTrade(gcy, clover(), 25, 'Mithral');
+      ok('currency market: buy refused with 0 Mithral', rNoMith.ok === false && !gcy.hasItem('four-leaf clover'));
+      ok('currency market: refusal leaves Shards untouched', gcy.data.shards === shBefore, `sh=${gcy.data.shards}`);
+      ok('currencyBalance 0 for unheld currency', gcy.currencyBalance('Mithral') === 0);
+      // grant a Mithral pool (e.g. via <adjustmoney currency=…>) then the buy goes through.
+      eng.applyEffect(parse('<adjustmoney currency="Mithral" add="100"/>'), gcy);
+      ok('adjustmoney currency= grants a Mithral pool', gcy.currencyBalance('Mithral') === 100, `m=${gcy.currencyBalance('Mithral')}`);
+      const rMith = buyTrade(gcy, clover(), 25, 'Mithral');
+      ok('currency market: buy succeeds once Mithral is held', rMith.ok === true && gcy.hasItem('four-leaf clover'));
+      ok('currency market: buy debits Mithral, not Shards', gcy.currencyBalance('Mithral') === 75 && gcy.data.shards === shBefore, `m=${gcy.currencyBalance('Mithral')} sh=${gcy.data.shards}`);
+      // sell credits the Mithral pool, not Shards.
+      const rSell = sellTrade(gcy, clover(), 20, 'Mithral');
+      ok('currency market: sell credits Mithral, not Shards', rSell.ok === true && gcy.currencyBalance('Mithral') === 95 && gcy.data.shards === shBefore && !gcy.hasItem('four-leaf clover'), `m=${gcy.currencyBalance('Mithral')} sh=${gcy.data.shards}`);
+      // Shards-currency (or blank) still uses the purse — no regression.
+      const gsh = GameState.create({ name: 'Sh', gender: 'm', profession: 'Warrior', book: 2, adv });
+      gsh.data.shards = 100;
+      ok('blank currency still spends Shards', buyTrade(gsh, clover(), 25, null).ok === true && gsh.data.shards === 75 && gsh.currencyBalance('Mithral') === 0);
+      // multiplyCurrency floors and clamps.
+      gcy.multiplyCurrency('Mithral', 0.5);
+      ok('multiplyCurrency floors', gcy.currencyBalance('Mithral') === 47, `m=${gcy.currencyBalance('Mithral')}`);
+
+      // render §2.495: the Mithral market's Buy buttons are disabled with 0 Mithral
+      // (Shards can't be spent there) and priced in Mithral.
+      const gr = GameState.create({ name: 'Rr', gender: 'm', profession: 'Warrior', book: 2, adv });
+      gr.data.shards = 9999;
+      const cr = document.createElement('div');
+      const st495 = new Story(cr, gr, { navigate(){}, onDeath(){}, notify(){} });
+      const sec495 = await data.getSection(2, '495');
+      st495.begin(sec495, 2, '495');
+      const buyBtns = Array.from(cr.querySelectorAll('.market .btn-mini')).filter((b) => /^Buy /.test(b.textContent));
+      ok('§2.495 renders Mithral Buy buttons', buyBtns.length > 0, `n=${buyBtns.length}`);
+      ok('§2.495 Buy buttons priced in Mithral', buyBtns.some((b) => /Mithral/.test(b.textContent)), buyBtns[0] && buyBtns[0].textContent);
+      ok('§2.495 Buy disabled with 0 Mithral despite Shards', buyBtns.every((b) => b.disabled), `enabled=${buyBtns.filter((b)=>!b.disabled).length}`);
+
+      // render §2.545: a <choice shards="1" currency="Mithral"> is gated on Mithral.
+      const cr2 = document.createElement('div');
+      const st545 = new Story(cr2, gr, { navigate(){}, onDeath(){}, notify(){} });
+      const sec545 = await data.getSection(2, '545');
+      st545.begin(sec545, 2, '545');
+      const payChoice = Array.from(cr2.querySelectorAll('.choice')).find((b) => /Mithral/.test(b.textContent));
+      ok('§2.545 Mithral choice priced in Mithral', !!payChoice && /1 Mithral/.test(payChoice.textContent), payChoice && payChoice.textContent);
+      ok('§2.545 pay-Mithral choice disabled with 0 Mithral', !!payChoice && payChoice.disabled === true);
+    }
+
+    // --- item <effect> system: use / aura / wielded / ability + <sold> (task 41) ---
+    {
+      const mk = (kind, name, bonus, node) => makeItem(kind, name, bonus, null, [], eng.readItemEffects(node));
+
+      // aura: while carried, an item adds to an ability / Defence.
+      const gaura = GameState.create({ name: 'Au', gender: 'm', profession: 'Warrior', book: 5, adv });
+      const stoneNode = parse('<weapon name="sword of stone"><effect type="aura" ability="defence" bonus="3"/></weapon>');
+      const stoneEff = eng.readItemEffects(stoneNode);
+      ok('readItemEffects: aura defence+3 parsed', stoneEff.length === 1 && stoneEff[0].type === 'aura' && stoneEff[0].ability === 'defence' && stoneEff[0].bonus === 3, JSON.stringify(stoneEff));
+      const defBefore = gaura.defence();
+      gaura.addItem(mk('weapon', 'sword of stone', 0, stoneNode));
+      ok('aura defence+3 raises Defence', gaura.defence() === defBefore + 3, `${defBefore}->${gaura.defence()}`);
+      const combBefore = gaura.ability('combat');
+      gaura.addItem(mk('weapon', 'sword of metal', 0, parse('<weapon name="sword of metal"><effect type="aura" ability="combat" bonus="2"/></weapon>')));
+      ok('aura combat+2 raises COMBAT while carried', gaura.ability('combat') === combBefore + 2, `${combBefore}->${gaura.ability('combat')}`);
+
+      // aura ability="*": +1 to every core ability (ring of ultimate power).
+      const gring = GameState.create({ name: 'Ri', gender: 'm', profession: 'Warrior', book: 5, adv });
+      const chB = gring.ability('charisma'), scB = gring.ability('scouting');
+      gring.addItem(mk('item', 'ring of ultimate power', 0, parse('<item name="ring of ultimate power"><effect type="aura" ability="*" bonus="1"/></item>')));
+      ok('aura *+1 raises every ability', gring.ability('charisma') === chB + 1 && gring.ability('scouting') === scB + 1);
+
+      // wielded: bonus counts only while the item is the wielded weapon.
+      const gjd = GameState.create({ name: 'Jd', gender: 'm', profession: 'Warrior', book: 5, adv });
+      gjd.data.items = gjd.data.items.filter((it) => it.kind !== 'weapon'); gjd.reconcileEquipment();
+      const jdDefBefore = gjd.defence();
+      gjd.addItem(mk('weapon', 'Jade Defender', 3, parse('<weapon name="Jade Defender" bonus="3"><effect type="wielded" ability="defence" bonus="3"/></weapon>')));
+      ok('wielded weapon adds its bonus (combat) and wielded aura (defence)', gjd.defence() === jdDefBefore + 3 + 3, `${jdDefBefore}->${gjd.defence()}`);
+      gjd.addItem(makeItem('weapon', 'greatsword', 5)); // now the wielded weapon; Jade Defender is not
+      ok('wielded aura drops when the item is not wielded', gjd.auraBonus('defence') === 0, `aura=${gjd.auraBonus('defence')}`);
+
+      // use potion (ability): a Drink that boosts the ability for the section, one shot.
+      const gpot = GameState.create({ name: 'Po', gender: 'm', profession: 'Warrior', book: 4, adv });
+      const potEff = eng.readItemEffects(parse('<item name="potion of strength"><effect type="use" ability="combat"/></item>'));
+      ok('use potion parsed: use/combat, uses=1, verb Drink, no body', potEff[0].type === 'use' && potEff[0].ability === 'combat' && potEff[0].uses === 1 && potEff[0].verb === 'Drink' && potEff[0].body === null, JSON.stringify(potEff));
+      gpot.addItem(makeItem('item', 'potion of strength', 0, null, [], potEff));
+      const pit = gpot.data.items[gpot.data.items.length - 1];
+      const combB2 = gpot.ability('combat');
+      const pr = eng.useItemEffect(gpot, pit, pit.effects[0], null);
+      ok('drink potion: +1 COMBAT and item consumed (uses→0)', gpot.ability('combat') === combB2 + 1 && pr.removeItem === true, `combat ${combB2}->${gpot.ability('combat')} rm=${pr.removeItem}`);
+
+      // potion bonus is section-scoped: cleared on entering a new section.
+      gpot.addPotionBonus('scouting', 1);
+      ok('potion bonus present before section change', gpot.potionBonusFor('scouting') === 1);
+      const stClr = new Story(document.createElement('div'), gpot, { navigate(){}, onDeath(){}, notify(){} });
+      stClr.begin(parse('<section name="9"><p>x</p></section>'), 4, '9');
+      ok('potion bonus clears on entering a new section', gpot.potionBonusFor('scouting') === 0);
+
+      // use with a body: potion of restoration heals all Stamina and cures poison/disease.
+      const grest = GameState.create({ name: 'Re', gender: 'm', profession: 'Warrior', book: 1, adv });
+      grest.damageStamina(6);
+      grest.addAffliction('poison', { name: 'Scorpion Poison', effects: [], cumulative: false, lift: null });
+      const restEff = eng.readItemEffects(parse('<item name="potion of restoration"><effect type="use" uses="1" verb="Drink"><rest/><lose poison="*"/><lose disease="*"/></effect></item>'));
+      ok('restoration parsed: uses=1, body has rest+lose', restEff[0].uses === 1 && /rest/.test(restEff[0].body || '') && /lose/.test(restEff[0].body || ''), restEff[0].body);
+      grest.addItem(makeItem('item', 'potion of restoration', 0, null, [], restEff));
+      const rit = grest.data.items[grest.data.items.length - 1];
+      const rBody = parse('<effect>' + rit.effects[0].body + '</effect>');
+      const rr = eng.useItemEffect(grest, rit, rit.effects[0], rBody);
+      ok('drink restoration: full Stamina, poison cured, consumed', grest.data.stamina === grest.data.staminaMax && !grest.hasPoison('Scorpion Poison') && rr.removeItem === true, `st=${grest.data.stamina}/${grest.data.staminaMax} poison=${grest.hasPoison('Scorpion Poison')}`);
+
+      // use with an inner <goto>: the Vade Mecum consult navigates and is reusable.
+      const gvm = GameState.create({ name: 'Vm', gender: 'm', profession: 'Warrior', book: 5, adv });
+      const vmEff = eng.readItemEffects(parse('<item name="Vade Mecum"><effect type="use" verb="Consult" text="x"><desc>x</desc><goto book="5" section="550" hidden="t"/></effect></item>'));
+      ok('vade mecum parsed: uses=-1 (reusable), verb Consult, goto body', vmEff[0].uses === -1 && vmEff[0].verb === 'Consult' && /goto/.test(vmEff[0].body || '') && !/desc/.test(vmEff[0].body || ''), JSON.stringify(vmEff));
+      gvm.addItem(makeItem('item', 'Vade Mecum', 0, null, [], vmEff));
+      const vit = gvm.data.items[gvm.data.items.length - 1];
+      const vr = eng.useItemEffect(gvm, vit, vit.effects[0], parse('<effect>' + vit.effects[0].body + '</effect>'));
+      ok('consult vade mecum: goto 5/550, not consumed', vr.goto && vr.goto.book === 5 && vr.goto.section === '550' && vr.removeItem === false && gvm.hasItem('Vade Mecum'), JSON.stringify(vr));
+
+      // type="ability" effects (book4/332 Red Ague) apply via the affliction system.
+      const gdis = GameState.create({ name: 'Di', gender: 'm', profession: 'Warrior', book: 4, adv });
+      const chB2 = gdis.ability('charisma'), coB2 = gdis.ability('combat');
+      eng.applyEffect(parse('<disease name="Red Ague"><effect type="ability" ability="charisma" bonus="-1"/><effect type="ability" ability="combat" bonus="-1"/></disease>'), gdis);
+      ok('type=ability disease penalties apply (charisma-1, combat-1)', gdis.ability('charisma') === chB2 - 1 && gdis.ability('combat') === coB2 - 1 && gdis.hasDisease('Red Ague'));
+
+      // market buy preserves item effects.
+      const gbuy = GameState.create({ name: 'By', gender: 'm', profession: 'Warrior', book: 4, adv });
+      gbuy.data.shards = 200;
+      const potRow = parse('<item name="potion of strength" buy="100" sell="90"><effect type="use" ability="combat"/></item>');
+      const potGoods = goodsFrom(potRow, 'item', 'potion of strength', 0);
+      potGoods.effects = eng.readItemEffects(potRow);
+      buyTrade(gbuy, potGoods, 100);
+      const boughtPot = gbuy.findItems('potion of strength')[0];
+      ok('market buy preserves item <effect>', boughtPot && (boughtPot.effects || []).length === 1 && boughtPot.effects[0].type === 'use', JSON.stringify(boughtPot && boughtPot.effects));
+
+      // <sold> item-level hook (book3/86): selling the pirate captain's head marks a codeword.
+      const gs86 = GameState.create({ name: 'S8', gender: 'm', profession: 'Warrior', book: 3, adv });
+      gs86.addItem(makeItem('item', "pirate captain's head"));
+      const cs86 = document.createElement('div');
+      const st86 = new Story(cs86, gs86, { navigate(){}, onDeath(){}, notify(){} });
+      st86.begin(await data.getSection(3, '86'), 3, '86');
+      const row86 = Array.from(cs86.querySelectorAll('.trade')).find((r) => /Pirate Captain/i.test(r.textContent));
+      const sell86 = row86 && Array.from(row86.querySelectorAll('.btn-mini')).find((b) => /Sell/.test(b.textContent));
+      ok('§3.86 pirate head row has a Sell button', !!sell86);
+      sell86 && sell86.click();
+      ok('§3.86 selling fires item <sold> → codeword 3.86.sold', gs86.hasCodeword('3.86.sold') && !gs86.hasItem("pirate captain's head"));
+
+      // <sold> market-level hook (book3/318): selling a 318.free item marks a codeword.
+      const gs318 = GameState.create({ name: 'S3', gender: 'm', profession: 'Warrior', book: 3, adv });
+      gs318.addItem(makeItem('item', 'candle', 0, null, ['318.free', 'light', 'useonce']));
+      const cs318 = document.createElement('div');
+      const st318 = new Story(cs318, gs318, { navigate(){}, onDeath(){}, notify(){} });
+      st318.begin(await data.getSection(3, '318'), 3, '318');
+      const row318 = Array.from(cs318.querySelectorAll('.trade')).find((r) => /Candle/i.test(r.textContent));
+      const sell318 = row318 && Array.from(row318.querySelectorAll('.btn-mini')).find((b) => /Sell/.test(b.textContent));
+      ok('§3.318 candle row has a Sell button', !!sell318);
+      sell318 && sell318.click();
+      ok('§3.318 selling a 318.free item fires market <sold> → codeword 3.318.sold', gs318.hasCodeword('3.318.sold'));
+
+      // Adventure Sheet Use affordance (ui.js): a usable item shows a verb button that
+      // fires the onUse callback; a non-usable item (aura sword) shows none.
+      const gsheet = GameState.create({ name: 'Sh', gender: 'm', profession: 'Warrior', book: 4, adv });
+      gsheet.data.items = [];
+      gsheet.addItem(makeItem('item', 'potion of strength', 0, null, [], eng.readItemEffects(parse('<item name="potion of strength"><effect type="use" ability="combat"/></item>'))));
+      gsheet.addItem(makeItem('weapon', 'sword of stone', 0, null, [], eng.readItemEffects(parse('<weapon name="sword of stone"><effect type="aura" ability="defence" bonus="3"/></weapon>'))));
+      const sheetBox = document.createElement('div');
+      let used = null;
+      renderSheet(gsheet, sheetBox, { onUse: (it, eff) => { used = { it, eff }; } });
+      const useBtns = Array.from(sheetBox.querySelectorAll('.item-use'));
+      ok('sheet shows exactly one Use button (potion, not the aura sword)', useBtns.length === 1 && /Drink/.test(useBtns[0].textContent), `n=${useBtns.length} txt=${useBtns[0] && useBtns[0].textContent}`);
+      useBtns[0] && useBtns[0].click();
+      ok('sheet Use button fires onUse with the item + effect', !!used && used.it.name === 'potion of strength' && used.eff.type === 'use');
+    }
 
     // --- save-slot exhaustion never silently overwrites slot 0 (task 4) ---
     {

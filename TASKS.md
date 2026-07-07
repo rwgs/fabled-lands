@@ -27,8 +27,8 @@ the book XML corpus.
 - [x] 29. Market & item polish: currency items, pipe names, headers *(parts 2 & 5 split → 40, 41)*
 - [x] 30. Gate `<random flag=…>` rolls behind their payment
 - [x] 31. `<rest>` with no `stamina=` should restore to full
-- [ ] 40. `<market currency="…">` alternate-currency markets
-- [ ] 41. Item `<effect>` system (use/aura/wielded/ability) and `<sold>` sell-hooks
+- [x] 40. `<market currency="…">` alternate-currency markets
+- [x] 41. Item `<effect>` system (use/aura/wielded/ability) and `<sold>` sell-hooks
 
 **LOW**
 - [ ] 9. Centralise tag dispatch into a registry
@@ -46,6 +46,7 @@ the book XML corpus.
 - [ ] 39. Defer confiscate-and-return `<transfer … from=>` until a fight resolves (book2/462)
 - [ ] 42. `<rest>` (and other roll/action children) inside a `<group>` are ignored
 - [ ] 43. price/flag "choose one" purchases over-apply every linked reward
+- [ ] 44. Fold the ring of ultimate power's `Rank`/`Stamina` auras (book5/564)
 
 **Done**
 - [x] 1. Gate combat progression / model fight outcomes
@@ -1037,44 +1038,101 @@ fight-gate machinery and task 28's `dead="t"` handling). Add a §462 test.
 
 ---
 
-## 40. `<market currency="…">` alternate-currency markets  — MEDIUM
+## 40. `<market currency="…">` alternate-currency markets  — **done**
 
 Split from task 29 (part 2). `<market currency="Mithral">` (book2/495, the Trau
-trader) currently deducts **Shards** — `market.js`/`renderShopRow` have no
-`currency=` support. Note that in the shipped corpus there is no way to *acquire*
-Mithral (no `<item name="Mithral">`, `<gain>` or `<adjustmoney currency=…>`), so
-the practical bug is only that the market wrongly lets you spend Shards; a correct
-implementation should let the player spend/receive only the named currency (of
-which they have none → nothing is buyable). Options: (a) a named-currency pool
-`state.data.currencies[name]` threaded through `buyTrade`/`sellTrade`/`renderShopRow`
-(clean, general — also lets a future section grant Mithral), or (b) the minimal
-fix — disable buy buttons in a non-Shards-currency market and price them in that
-currency. Prefer (a); add tests (buy refused with 0 Mithral; a granted Mithral
-pool lets a buy through and is debited; Shards untouched).
+trader) deducted **Shards**, and the paired `<choice shards="1" currency="Mithral">`
+(book2/545, the parting toll) charged Shards too. Implemented option (a) — a
+named-currency pool kept separate from the Shards purse:
+
+- **`state.js`** — `freshData()`/`sanitizeData()` gain a `currencies` map
+  (`name → amount`, sanitised like `boxes`); `currencyBalance(name)`,
+  `adjustCurrency(name, delta)` and `multiplyCurrency(name, factor)` manage a
+  named pool (floored at 0, integer). A new exported `isShardsCurrency(name)`
+  treats `null`/blank/`"Shards"`/`"Shard"` (case-insensitive) as the default purse
+  so only genuinely foreign coin lives in a pool.
+- **`market.js`** — `buyTrade`/`sellTrade` take an optional `currency` argument;
+  small `walletBalance`/`walletSpend`/`walletEarn` helpers route the
+  payment/receipt to the Shards purse (default) or the named pool. Inline buys are
+  always Shards in the corpus, so they pass none.
+- **`render.js`** — `renderMarket` reads `currency=` and threads it to
+  `renderShopRow`, which prices/labels the Buy/Sell buttons in that coin
+  (`Buy 25 Mithral`), checks affordability against the pool, and passes it to
+  `buyTrade`/`sellTrade`. `renderChoice` reads a `<choice currency=>`: the cost
+  chip, the affordability gate and the click-time deduction all use the named
+  pool. Because the player can hold no Mithral in the shipped corpus, every
+  Mithral Buy is correctly disabled (Shards can no longer be spent there).
+- **`engine.js`** — `applyAdjustMoney` honours `currency=` (grant/scale a foreign
+  coin), so approach (a) is genuinely general — a future section can stock a
+  Mithral pool via `<adjustmoney currency="Mithral" add="N"/>`. No corpus section
+  uses this yet, so behaviour is unchanged for existing sections.
+
+Covers book2/495 (Trau market) and book2/545 (Mithral toll choice) — the only two
+`currency=` uses in the corpus.
+
+Verified: 14 new headless assertions (buy refused with 0 Mithral + Shards
+untouched; `currencyBalance` 0; `<adjustmoney currency>` grants a pool; buy
+succeeds once held and debits **Mithral** not Shards; sell credits Mithral;
+blank-currency buy still spends Shards; `multiplyCurrency` floors; §2.495 renders
+Mithral-priced Buy buttons all disabled with 0 Mithral; §2.545 pay-Mithral choice
+priced in Mithral and disabled with 0 Mithral) + full render-every-section scan.
+`RESULT ALL PASS pass=359 fail=0`.
 
 ---
 
-## 41. Item `<effect>` system (use/aura/wielded/ability) and `<sold>` sell-hooks  — MEDIUM
+## 41. Item `<effect>` system (use/aura/wielded/ability) and `<sold>` sell-hooks  — **done**
 
-Split from task 29 (part 5). The ~54 `<effect>` children of items are inert at
-award and purchase (`applyItemEffect`, engine.js, is a stub), and `<sold>` rows
-are unhandled. Concretely:
-- **`type="use"`** (39×) — a usable item (book4/111 potions raise an ability;
-  book5/549 Vade Mecum; `<effect type="use" uses="1" verb="Drink"><rest/></effect>`
-  potion of restoration heals all Stamina). Needs: item effects stored on the
-  possession (extend `makeItem` + the award/buy call sites so `<effect>` is
-  preserved, not discarded), a **Use/Drink** affordance in the Adventure Sheet
-  (`ui.js renderSheet` — add an `onUse` callback wired from `app.js`), the effect
-  applied via `engine.applyEffectBody` (honouring an inner `<goto>` use-target),
-  and `uses=` consumption (remove/decrement when spent).
-- **`type="aura"`** (11×) / **`type="wielded"`** (2×) — passive ability effects
-  while the item is carried/worn; fold into `state.ability()` like afflictions.
-- **`type="ability"`** (2×) — a permanent ability change applied at award.
-- **`<sold>`** (book3/86/318) — a child of an `<item>`/`<market>` holding actions
-  that fire **when the good is sold** (e.g. `<tick codeword="3.86.sold"/>`); run
-  them from the sell path (`market.sellTrade` / the inline sell), matching
-  `item=`/`tags=` for a market-level `<sold>`.
-Cover each effect type + the sell-hook with headless unit tests.
+Split from task 29 (part 5). Item `<effect>` children were discarded at award/buy
+(`applyItemEffect` was a stub) and `<sold>` rows were unhandled. All are now
+implemented, modelled on JaFL's `Effect`/`UseEffect`/`EffectSet` (reference read,
+not copied):
+
+- **Storage** — `makeItem` now carries an `effects[]` array; a new
+  `engine.readItemEffects(node)` reads an item's `<effect>` children into
+  serialisable records `{type, ability, bonus, uses, verb, text, body}` (the action
+  children are serialised into `body` for later replay; a `<desc>` child is dropped).
+  All four call sites pass them through: awards (`renderItemAward`), market buys
+  (`goodsFrom`→`buyTrade`), inline buys (`renderInlineBuy`→`applyInlineBuy`), and
+  the sanitiser (`sanitizeItem`+`sanitizeEffect`) so effects survive save/load.
+- **`type="aura"`** (carried) / **`type="wielded"`** (only while it is the wielded
+  weapon / worn armour) — a new `state.auraBonus(key)` sums matching effects and is
+  folded into `ability()` and `defence()`, with `ability="*"` boosting every core
+  ability. Covers the eight elemental swords, the sword of stone / ring of guarding
+  (Defence), the ring of ultimate power (`*`+1), and the Jade Defender (wielded).
+- **`type="use"`** — a **Use/Drink/Consult** button on the Adventure Sheet
+  (`ui.js renderSheet` gained an `onUse` callback, wired from `app.js onUseItem`).
+  `engine.useItemEffect` applies the effect: an action body (rest/cure/…) via
+  `applyEffectBody` (which now also handles `<rest>`), else a bare potion's +N
+  ability boost; it follows an inner `<goto>` use-target (the Vade Mecum consult,
+  book5/549) and consumes a charge — `uses="N"` decrements and removes the item at
+  0; an ability potion defaults to one use; a use effect with no `uses=` (Vade
+  Mecum) is reusable. Covers book4/111 & book1/342 potions and the potion of
+  restoration (`<rest/>`+cure poison/disease).
+- **`type="ability"`** (2×) — these are the Red Ague disease's effects (book4/332),
+  already applied by the affliction system (task 19); verified via a `<disease>`
+  with `type="ability"` children still landing its penalty.
+- **`<sold>`** (book3/86 item-level, book3/318 market-level `item="?"`/`tags=`) —
+  `renderShopRow` runs the matching `<sold>` body (via `applyEffectBody`) after a
+  successful sell (`runSoldHooks`/`soldMatches`), marking the codeword.
+
+Potion bonuses are **section-scoped** — folded into `ability()` (so they flow into
+difficulty rolls, combat and Defence) and cleared on entering a new section
+(`Story.begin`→`clearPotionBonuses`). JaFL consumes the bonus after the exact
+roll/fight; here it lasts the current section (which normally holds one relevant
+roll/fight) — a small, bounded simplification (it can't carry across sections).
+Known limitation: the ring of ultimate power's `Rank`+2 / `Stamina`+10 auras are
+not folded in (only its `*`+1 abilities part is); `Rank`/`Stamina` aren't derived
+through `ability()`, so wiring them would touch every rank/stamina read for one
+legendary item — deferred.
+
+Verified: 22 new headless assertions (aura Defence/COMBAT/`*` raises; wielded adds
+while wielded and drops when not; use-potion parse + Drink → +1 COMBAT + consumed;
+potion bonus clears on section change; potion of restoration heals to full + cures
+poison + consumed; Vade Mecum parse + Consult → goto 5/550, reusable;
+`type="ability"` disease penalty; market buy preserves effects; §3.86 item `<sold>`
+and §3.318 market `<sold>` fire on sell; the sheet shows one Use button for a
+potion and none for an aura sword and fires `onUse`) + full render-every-section
+scan. `RESULT ALL PASS pass=381 fail=0`.
 
 ---
 
@@ -1111,3 +1169,23 @@ sets flag `k`, reveal the `[flag="k"]` rewards as click-to-apply options (or a
 chooser) rather than auto-applying the lot; a single-reward flag (book2/202
 storm) still auto-applies as today. Add tests (§171 grants exactly one chosen
 blessing for 60; §152 lifts exactly one curse per payment).
+
+---
+
+## 44. Fold the ring of ultimate power's `Rank`/`Stamina` auras (book5/564)  — LOW
+
+Found while doing task 41. The item aura system (`state.auraBonus`) folds aura
+effects into `ability()`/`defence()`, which covers every aura/wielded effect in
+the corpus **except** the ring of ultimate power (book5/564), whose three auras are
+`ability="*" bonus="1"` (all abilities — handled), `ability="Rank" bonus="2"` and
+`ability="Stamina" bonus="10"`. The Rank and Stamina auras are **not** applied,
+because Rank and Stamina aren't derived through `ability()` — they are read as
+`state.data.rank` / `state.data.staminaMax` in many places (Defence, rank checks,
+the sheet). Wiring them would mean routing every rank/stamina read through an
+accessor that adds `auraBonus('rank')`/`auraBonus('stamina')` (and clamping current
+Stamina when the ring is dropped). It affects exactly one legendary late-game item,
+so it was deferred. Fix: add `state.rankValue()`/`state.staminaMaxValue()` (base +
+aura) and route Defence, `rollRankCheck`, `<adjust ability="rank|stamina">`, the
+`abilityForCheck` natural path and `ui.renderSheet` through them; on removing an
+aura item, re-clamp current Stamina to the new max. Add a §5.564 test (carrying the
+ring raises Rank by 2 and Stamina max by 10; dropping it restores both).

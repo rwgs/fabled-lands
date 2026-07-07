@@ -363,6 +363,9 @@ img { max-width: 100%; }
 .item { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; padding: 0.28rem 0; border-bottom: 1px dotted rgba(200,150,42,0.2); font-size: 0.92rem; }
 .item-txt.wielded::after { content: ' ⚔'; color: var(--gold-bright); }
 .item-txt.worn::after { content: ' 🛡'; }
+.item-txt { flex: 1 1 auto; min-width: 0; }
+.item-use { flex: none; background: rgba(200,150,42,0.16); border: 1px solid rgba(200,150,42,0.4); color: #ecdcb8; border-radius: 4px; font-size: 0.74rem; padding: 0.08rem 0.42rem; cursor: pointer; }
+.item-use:hover { background: rgba(200,150,42,0.3); }
 .item-drop { background: none; border: none; color: #c9704f; font-size: 0.9rem; opacity: 0.6; padding: 0 0.2rem; }
 .item-drop:hover { opacity: 1; }
 .item-controls { display: inline-flex; align-items: center; gap: 0.1rem; flex: none; }
