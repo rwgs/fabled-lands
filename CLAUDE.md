@@ -1,4 +1,4 @@
-# Fabled Lands — Web Edition
+# CLAUDE.md
 
 The full agent guide for this repo lives in `AGENTS.md` and is imported below so
 Claude Code loads it automatically every session. Keep **`AGENTS.md`** as the
