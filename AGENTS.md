@@ -31,6 +31,11 @@ the rules testable headlessly in `web/_test.html`.
 1. If you changed `books/` or `rules/`, rebuild the bundled data (this also
    stamps `version.js`):
    `powershell -ExecutionPolicy Bypass -File build/build-data.ps1`
+   If you only touched `web/` (JS/CSS/HTML — no data rebuild needed), still
+   refresh the build stamp so the in-game version and the service-worker cache
+   key move (otherwise returning players keep the cached old build):
+   `powershell -ExecutionPolicy Bypass -File build/stamp-version.ps1`
+   The stamp is a content hash of the app source, so it changes on any edit.
 2. Run the headless smoke test (serves `web/`, exercises the engine, and renders
    **every section of all six books** to confirm none throw):
    - Serve from the repo root: `python -m http.server 8848`

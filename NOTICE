@@ -23,10 +23,9 @@ LICENSE file (GPL-2.0) applies only to the first.
    ------------------------------------------------------------------------
    The *Fabled Lands* book text, game rules, world, place names, maps and
    illustrations are copyrighted works. They are reproduced here (via the JaFL
-   data files and, for Book 7, direct transcription of the published PDF) for a
-   personal, non-commercial fan project. A GPL licence on the software does NOT
-   grant any rights to this content, and the content may not be redistributed
-   without permission from the rights holders.
+   data files) for a personal, non-commercial fan project. A GPL licence on the 
+   software does NOT grant any rights to this content, and the content may not 
+   be redistributed without permission from the rights holders.
 
        Book text © Dave Morris & Jamie Thomson, 1996 (Books 1–6);
          rights held by Fabled Lands LLP.
@@ -40,4 +39,4 @@ LICENSE file (GPL-2.0) applies only to the first.
    official releases.
 
 If you are a rights holder and have any concern about this repository, please
-contact the maintainer and it will be addressed promptly.
+contact the maintainer.

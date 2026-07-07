@@ -1,11 +1,18 @@
 <#
   stamp-version.ps1
   -----------------
-  Writes web/js/version.js with a build stamp in the form yy.MM.dd.HH.<sha>
-  (hourly date + the HEAD commit's short SHA), so the version changes on every
-  commit rather than only when the clock hour rolls over. Also bumps the
-  service-worker cache key in web/sw.js to 'fl-<stamp>' so returning visitors drop
-  the old cache and pick up fresh assets after a deploy. Run after changing web/.
+  Writes web/js/version.js with a build stamp of the form yy.MM.dd.<hash>, where
+  <hash> is a short digest of the deployed app's source. Because the stamp is
+  derived from *content*, it changes whenever the app changes -- on any edit, not
+  only on a new git commit. This fixes the version freezing: the previous stamp
+  used the HEAD commit's short SHA and was only re-run by build-data.ps1 (which
+  is only needed when books/ or rules/ change), so pure web/ or engine commits
+  never moved the version at all.
+
+  It also bumps the service-worker cache key in web/sw.js to 'fl-<stamp>', so
+  returning visitors drop the old cache and pick up fresh assets after a deploy.
+  Run after changing anything under web/ (build-data.ps1 calls this for you when
+  it rebuilds the bundled data):
 
       powershell -ExecutionPolicy Bypass -File build/stamp-version.ps1
 #>
@@ -15,17 +22,27 @@ $web  = Join-Path $root 'web'
 $verFile = Join-Path $web 'js\version.js'
 $swFile  = Join-Path $web 'sw.js'
 
-# Build stamp = hourly date + the HEAD commit's short SHA, e.g. 26.07.03.17.9f3a1c2.
-# The SHA is what makes the version change on *every commit*: an mtime/date-only
-# stamp repeats for two commits in the same hour (and mtimes are identical after a
-# fresh checkout, since git doesn't preserve them), so the service-worker cache key
-# never moved. Hourly granularity is kept for the date; the SHA guarantees a fresh
-# key per commit. Falls back to date-only when git isn't available.
-$stamp = (Get-Date).ToString('yy.MM.dd.HH')
-try {
-    $sha = (& git -C $root rev-parse --short HEAD 2>$null)
-    if ($LASTEXITCODE -eq 0 -and $sha) { $stamp = "$stamp.$($sha.Trim())" }
-} catch { }
+# ---- Content hash of the shipped app ---------------------------------------
+# Hash every source file that makes up the deployed app, except the two files
+# this script rewrites (version.js and sw.js) -- including them would be
+# circular. _test.html is a dev-only harness and is left out on purpose. The
+# per-file SHA1s are sorted by path and re-hashed, so the digest is stable
+# across machines and file orderings and moves whenever any byte changes.
+$files = @()
+$files += Get-ChildItem -Path (Join-Path $web 'js')   -Filter '*.js'   -File | Where-Object { $_.Name -ne 'version.js' }
+$files += Get-ChildItem -Path (Join-Path $web 'css')  -Filter '*.css'  -File
+$files += Get-ChildItem -Path (Join-Path $web 'data') -Filter '*.json' -File
+foreach ($f in 'index.html', 'manifest.webmanifest') {
+    $p = Join-Path $web $f
+    if (Test-Path $p) { $files += Get-Item $p }
+}
+
+$joined = ($files | Sort-Object FullName | ForEach-Object { (Get-FileHash -Algorithm SHA1 -LiteralPath $_.FullName).Hash }) -join ''
+$stream = [System.IO.MemoryStream]::new([System.Text.Encoding]::UTF8.GetBytes($joined))
+$hash   = (Get-FileHash -Algorithm SHA1 -InputStream $stream).Hash.Substring(0, 7).ToLower()
+$stream.Dispose()
+
+$stamp = "$((Get-Date).ToString('yy.MM.dd')).$hash"
 
 # 1) in-game version stamp
 $content = "// Auto-generated build stamp -- run build/stamp-version.ps1 to refresh.`nexport const VERSION = '$stamp';`n"

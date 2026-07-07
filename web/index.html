@@ -11,6 +11,20 @@
   <link rel="apple-touch-icon" href="assets/icon.svg" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <script>
+    // Set the theme before first paint to avoid a light/dark flash. Honours a
+    // saved choice ('fl-theme'), else follows the OS preference. The toggle in
+    // the game header/menu writes 'fl-theme' (see app.js applyTheme()).
+    (function () {
+      try {
+        var t = localStorage.getItem('fl-theme');
+        if (t !== 'dark' && t !== 'light') {
+          t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+        document.documentElement.setAttribute('data-theme', t);
+      } catch (e) { document.documentElement.setAttribute('data-theme', 'light'); }
+    })();
+  </script>
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>

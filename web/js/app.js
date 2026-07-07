@@ -58,10 +58,58 @@ function keepDemo() {
   }
 }
 
+// ---- Theme (light / dark) --------------------------------------------------
+// The reading surfaces (story card, modals, panels) re-skin via <html
+// data-theme>; the header, sheet and title screen are dark in both. index.html
+// sets the initial theme before first paint (saved choice, else OS preference);
+// here we read/toggle it, persist the choice, and keep every toggle button in
+// sync. Game rules live elsewhere — this is pure presentation.
+const THEME_KEY = 'fl-theme';
+const currentTheme = () => (document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light');
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  try { localStorage.setItem(THEME_KEY, theme); } catch (e) {}
+  document.querySelectorAll('.theme-toggle').forEach(syncThemeBtn);
+}
+function toggleTheme() { applyTheme(currentTheme() === 'dark' ? 'light' : 'dark'); }
+function syncThemeBtn(btn) {
+  const dark = currentTheme() === 'dark';
+  btn.textContent = dark ? '☀️' : '🌙';
+  const label = dark ? 'Switch to light mode' : 'Switch to dark mode';
+  btn.title = label;
+  btn.setAttribute('aria-label', label);
+}
+
 function registerSW() {
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+  if (!('serviceWorker' in navigator)) return;
+  // If a worker already controls this page, a later controllerchange means a
+  // freshly deployed build has activated (the SW calls skipWaiting +
+  // clients.claim). Reload once so the new HTML/CSS/JS — and the version stamp —
+  // actually replace the cached shell, instead of the old cache-first shell
+  // lingering until the user happens to hard-reload. Progress autosaves to
+  // localStorage on every change, so the reload is lossless.
+  if (navigator.serviceWorker.controller) {
+    let reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloading) return;
+      reloading = true;
+      location.reload();
+    });
   }
+  navigator.serviceWorker.register('sw.js').then((reg) => {
+    reg.addEventListener('updatefound', () => {
+      const nw = reg.installing;
+      if (!nw) return;
+      nw.addEventListener('statechange', () => {
+        if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+          toast('Updating to the latest version…');
+        }
+      });
+    });
+    // Some browsers serve sw.js from the HTTP cache; ask explicitly on load so a
+    // new deploy is noticed this visit rather than the next.
+    reg.update().catch(() => {});
+  }).catch(() => {});
 }
 
 async function getAdvData(book) {
@@ -371,6 +419,10 @@ function buildGameScreen() {
   actions.appendChild(iconBtn('↩️', 'Undo last move', () => undo()));
   actions.appendChild(iconBtn('📖', 'Rules', () => showRules(true)));
   actions.appendChild(iconBtn('🗺', 'Maps', () => showMaps(state.data.book)));
+  const themeBtn = iconBtn('🌙', 'Toggle dark mode', () => toggleTheme());
+  themeBtn.classList.add('theme-toggle');
+  syncThemeBtn(themeBtn);
+  actions.appendChild(themeBtn);
   // [TTS] narration controls: play/stop, auto-narrate toggle, and speed.
   if (narrator.supported) {
     narrateBtn = iconBtn('🔊', 'Read aloud', () => narrator.toggle(currentFlow()));
@@ -547,6 +599,7 @@ async function showGameMenu() {
   add('↩️', 'Undo last move', () => undo());
   add('📖', 'Rules', () => showRules(true));
   add('🗺', 'Maps', () => showMaps(state.data.book));
+  add(currentTheme() === 'dark' ? '☀️' : '🌙', currentTheme() === 'dark' ? 'Light mode' : 'Dark mode', () => toggleTheme());
   if (narrator.supported) add('⚙️', 'Narration settings', () => showNarrationSettings()); // [TTS]
   add('📤', 'Export this save', () => exportSave(null, null));
   add('📥', 'Import a save', () => importSaveFile());
