@@ -44,7 +44,15 @@ export class Story {
     this.sectionEl = sectionEl;
     this.book = book;
     this.section = section;
-    this.ctx = { applied: new Set(), rolls: new Map(), fights: new Map(), buys: new Map() };
+    this.ctx = { applied: new Set(), rolls: new Map(), fights: new Map(), buys: new Map(), groupLimits: new Map(), groupPicks: new Map() };
+    // Pre-scan grouped-award controllers (<items group="X" limit="N"/>) so the
+    // individual award rows know their "choose up to N" cap no matter whether the
+    // controller sits before or after them in the section (both orders occur).
+    Array.from(sectionEl.querySelectorAll('items[group]')).forEach((c) => {
+      const g = c.getAttribute('group');
+      const lim = parseInt(c.getAttribute('limit') || '0', 10);
+      if (g && lim > 0) this.ctx.groupLimits.set(g, lim);
+    });
     this.render();
   }
 
@@ -273,6 +281,8 @@ export class Story {
         return this.renderGoto(container, node, path);
       case 'return':
         return this.renderReturn(container, node, path);
+      case 'items':
+        return this.renderItemsController(container, node, path);
       case 'item':
       case 'weapon':
       case 'armour':
@@ -708,6 +718,25 @@ export class Story {
   // A standalone item/weapon/armour/tool award in prose (e.g. "Catch a smoulder
   // fish. Note it on your Adventure Sheet."). Shows the item and lets you take it
   // once, respecting the 12-item carry limit.
+  // <items group="X" limit="N"/> — a controller for a "choose up to N" award
+  // group; the individual <weapon|armour|tool|item group="X"> rows share the id
+  // and enforce the cap (see renderItemAward). This element itself renders a small
+  // live status line so the player can see how many picks remain.
+  renderItemsController(container, node, path) {
+    const group = node.getAttribute('group');
+    const limit = group ? this.ctx.groupLimits.get(group) : null;
+    if (!limit) return null;
+    const taken = this.ctx.groupPicks.get(group) || 0;
+    const remaining = Math.max(0, limit - taken);
+    const status = document.createElement('span');
+    status.className = 'items-pick-status';
+    status.textContent = remaining > 0
+      ? `Choose up to ${limit} — ${remaining} left`
+      : `Chosen all ${limit}`;
+    container.appendChild(status);
+    return status;
+  }
+
   renderItemAward(container, node, path) {
     const kind = node.tagName.toLowerCase();
     const name = node.getAttribute('name') || (kind === 'weapon' ? 'weapon' : kind);
@@ -721,11 +750,21 @@ export class Story {
     const display = titleCase(name) + tag;
     const key = 'take@' + path;
     const taken = this.ctx.applied.has(key);
+    // Grouped "choose up to N" award: consult the shared group tally so the extra
+    // rows lock once the player has taken their allotment (book1/16, book4/218…).
+    const group = node.getAttribute('group');
+    const limit = group ? this.ctx.groupLimits.get(group) : null;
+    const groupCount = group ? (this.ctx.groupPicks.get(group) || 0) : 0;
+    const groupFull = limit != null && !taken && groupCount >= limit;
     const btn = document.createElement('button');
     btn.className = 'btn-mini take-item' + (taken ? ' done' : '');
     if (taken) {
       btn.disabled = true;
       btn.textContent = '☑ ' + display;
+    } else if (groupFull) {
+      btn.disabled = true;
+      btn.textContent = display;
+      btn.title = `You may choose only ${limit}`;
     } else if (this.state.freeSlots() <= 0) {
       btn.disabled = true;
       btn.textContent = display;
@@ -736,6 +775,7 @@ export class Story {
       btn.addEventListener('click', () => {
         this.state.addItem(makeItem(kind, name, bonus, ability, tags));
         this.ctx.applied.add(key);
+        if (limit != null) this.ctx.groupPicks.set(group, groupCount + 1);
         this.rerender();
       });
     }

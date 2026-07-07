@@ -657,6 +657,38 @@ async function run() {
     ok('§30 selling removes the jerkin', gsell.findItems('leather jerkin').length === 0);
     ok('§30 selling credits 45 Shards', gsell.data.shards === startShards + 45, `sh=${gsell.data.shards} start=${startShards}`);
 
+    // --- task 5: <items group=… limit="N"> "choose up to N" pickup ---
+    // §4.218 (limit=1): six reward rows share group "4.218"; taking one must lock
+    // the other five (group cap), not merely the 12-item carry cap.
+    const gpk = GameState.create({ name:'PK', gender:'m', profession:'Warrior', book:4, adv });
+    const cpk = document.createElement('div');
+    const storyPk = new Story(cpk, gpk, { navigate(){}, onDeath(){}, notify(){} });
+    const s218 = await data.getSection(4,'218'); storyPk.begin(s218,4,'218');
+    const rows218 = () => Array.from(cpk.querySelectorAll('.take-item'));
+    ok('§218 renders six award rows', rows218().length === 6, String(rows218().length));
+    ok('§218 all rows enabled before a pick', rows218().every((b) => !b.disabled));
+    ok('§218 shows a pick-status pill', !!cpk.querySelector('.items-pick-status'));
+    const before218 = gpk.itemCount();
+    rows218()[0].click();
+    ok('§218 takes exactly one item on the first pick', gpk.itemCount() === before218 + 1, `count=${gpk.itemCount()} before=${before218}`);
+    const enabled218 = rows218().filter((b) => !b.disabled);
+    const done218 = rows218().filter((b) => b.classList.contains('done'));
+    ok('§218 limit=1: one taken, the rest locked', done218.length === 1 && enabled218.length === 0, `done=${done218.length} enabled=${enabled218.length}`);
+    ok('§218 locked rows explain the cap', rows218().some((b) => /choose only 1/i.test(b.title)));
+
+    // §5.671 (limit=2): take two, then the remaining rows lock at the cap.
+    const gpk2 = GameState.create({ name:'PK2', gender:'m', profession:'Warrior', book:5, adv });
+    const cpk2 = document.createElement('div');
+    const storyPk2 = new Story(cpk2, gpk2, { navigate(){}, onDeath(){}, notify(){} });
+    const s671 = await data.getSection(5,'671'); storyPk2.begin(s671,5,'671');
+    const rows671 = () => Array.from(cpk2.querySelectorAll('.take-item'));
+    const before671 = gpk2.itemCount();
+    rows671().filter((b) => !b.disabled)[0].click();
+    ok('§671 after one pick more remain enabled', rows671().filter((b) => !b.disabled).length > 0);
+    rows671().filter((b) => !b.disabled)[0].click();
+    ok('§671 limit=2: exactly two taken', gpk2.itemCount() === before671 + 2, `count=${gpk2.itemCount()} before=${before671}`);
+    ok('§671 limit=2: remaining rows locked at the cap', rows671().filter((b) => !b.disabled).length === 0);
+
     // --- task 23: inline buy/sell — ships, tools, quantity, item sells ---
     // buy a ship (type canonicalised, named, initial crew)
     const gbship = GameState.create({ name:'BS', gender:'m', profession:'Warrior', book:4, adv });

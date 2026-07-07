@@ -15,7 +15,7 @@ the book XML corpus.
 - *(all clear — 20, 21, 23 done)*
 
 **MEDIUM**
-- [ ] 5. Implement `<items group … limit="N">` "choose up to N" pickup
+- [x] 5. Implement `<items group … limit="N">` "choose up to N" pickup
 - [ ] 6. Harden save import and migration
 - [ ] 7. Surface persistence failures to the player
 - [ ] 8. Make service-worker upgrades atomic
@@ -158,19 +158,30 @@ written. Full smoke test `RESULT ALL PASS pass=105 fail=0`.
 
 ---
 
-## 5. Implement `<items group … limit="N">` "choose up to N" pickup  — MEDIUM
+## 5. Implement `<items group … limit="N">` "choose up to N" pickup  — **done**
 
-Grouped award rows (`<weapon group=…>`, `<tool group=…>`, `<item group=…>`) are
-each rendered as an independent "Take" button by `renderItemAward`, which ignores
-the `group` and `limit` attributes; the `<items group="…" limit="N"/>` controller
-has no renderer (falls through the switch to `appendChildren`, producing nothing).
-So the "choose up to N" cap is **not enforced** — the player can take every listed
-treasure (only the global 12-item carry cap limits them). Affects 6 sections
-(`book1/16.xml`, `book4/113.xml`, `book4/137.xml`, `book4/218.xml`,
-`book5/671.xml`, `book5/709.xml`; e.g. 16's "choose up to three treasures"). The
-Java original handled this via `ItemNode` group/limit. Add an `<items>` renderer +
-a `state` group-pick that enforces the limit across the shared group id and the
-12-item carry cap.
+Grouped award rows now enforce the "choose up to N" cap. In `render.js`:
+- **Pre-scan** — `begin()` scans the section for every `<items group="X"
+  limit="N"/>` controller and records `group → limit` in `ctx.groupLimits`, so the
+  cap is known regardless of whether the controller sits before or after the award
+  rows (both orders occur in the corpus).
+- **Controller** — a new `case 'items'` → `renderItemsController` renders a small
+  live status pill (`.items-pick-status`: "Choose up to N — M left" / "Chosen all
+  N") so the player sees how many picks remain.
+- **Award rows** — `renderItemAward` reads the row's `group=`; when the group has
+  a limit it consults a per-visit `ctx.groupPicks` tally. Taking a row increments
+  the tally; once the tally reaches the limit the remaining (untaken) rows disable
+  with a "You may choose only N" tooltip. The 12-item carry cap still applies on
+  top. A group with award rows but no controller (limit unknown) falls back to the
+  prior per-row behaviour, so nothing regresses.
+
+Affected sections: `book1/16`, `book4/113`, `book4/137`, `book4/218`,
+`book5/671`, `book5/709`.
+
+Verified: 9 new headless assertions (§218 limit=1 — six rows, all enabled, status
+pill, one pick takes exactly one item and locks the other five with the cap
+tooltip; §671 limit=2 — after one pick more remain, exactly two taken, then the
+rest lock) + full render-every-section scan. `RESULT ALL PASS pass=220 fail=0`.
 
 ---
 
