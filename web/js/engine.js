@@ -1,7 +1,7 @@
 // engine.js — the rules engine: dice, condition evaluation, and passive effects.
 // Reads attributes off the parsed XML elements and applies them to a GameState.
 
-import { ABILITIES } from './rules.js';
+import { ABILITIES, canonShipType, CREW_LEVELS } from './rules.js';
 import { makeItem, normalize, matchItems } from './state.js';
 import { availableBooks } from './data.js';
 
@@ -30,8 +30,12 @@ export function rollDiceExpr(str) {
   return { dice, total: dice.reduce((a, b) => a + b, 0) + mod, mod };
 }
 
+// A real dice expression: leading digit(s), a 'd', optional faces, optional ±N —
+// "1d", "2d", "3d6", "1d6+2". A bare identifier that merely *contains* a 'd'
+// ("d", "deduct", "defence", "shards") is a variable name, not dice; the old
+// /d/i test misread every one of those as a die roll (task 25).
 export function isDiceExpr(str) {
-  return /d/i.test(String(str || ''));
+  return /^\d+\s*d\s*\d*\s*([+-]\s*\d+)?$/i.test(String(str || '').trim());
 }
 
 // ---- attribute value resolution -------------------------------------------
@@ -41,7 +45,16 @@ export function resolveValue(state, str, def = 0) {
   str = String(str).trim();
   if (/^-?\d+$/.test(str)) return parseInt(str, 10);
   if (isDiceExpr(str)) return rollDiceExpr(str).total;
-  return state.getVar(str);
+  // A bare (optionally negated) variable name — mirrors the Java engine's
+  // Node.getAttributeValue (int | -var | var; an undefined var reads as 0).
+  // Resolution here is *variable-first*, not keyword-first: <adjust
+  // amount="armour"/> must read the variable `armour` (sections set it to
+  // -armourbonus for damage reduction), never the sheet's armour rating. The
+  // keyword-aware form is the <set value=> context — see evalExpression.
+  const m = str.match(/^(-?)([A-Za-z_][A-Za-z0-9_]*)$/);
+  if (m) return (m[1] ? -1 : 1) * state.getVar(m[2]);
+  // Anything richer (parentheses, + - * /): evaluate the whole expression.
+  return evalExpression(str, state);
 }
 
 function firstAbility(attr) {
@@ -97,7 +110,10 @@ function applyAbilityChange(el, state, sign, opts) {
     return `${add ? '' : 'un-'}${kind}`;
   }
   const fatal = boolAttr(el.getAttribute('fatal'));
-  const delta = sign * resolveValue(state, el.getAttribute('amount'));
+  // <adjust> children modify the amount (the spec lists <gain>/<lose> as
+  // adjust-modifiable): book2/579 resets the unwounded Stamina score via
+  // <adjust ability="stamina" modifier="natural"/>. 0 when there are none.
+  const delta = sign * (resolveValue(state, el.getAttribute('amount')) + childAdjustment(el, state));
   const notes = [];
   for (const t of abilityTargets(spec, state, sign < 0, opts)) {
     if (t === 'rank') state.adjustRank(delta, fatal);
@@ -185,7 +201,7 @@ export function evaluateCondition(el, state) {
   add(get('tool'), () => matchEquipment(itemPool, state, 'tool', get('tool'), el));
   add(get('disease'), () => state.hasDisease(get('disease')));
   add(get('poison'), () => state.hasPoison(get('poison')));
-  add(get('ship'), () => state.ships.some((s) => s.type === get('ship')));
+  add(get('ship'), () => matchShipType(state, get('ship')));
   add(get('crew'), () => state.ships.some((s) => s.crew === get('crew')));
   add(get('cargo'), () => state.ships.some((s) => (s.cargo || []).length > 0));
   // docked="<place>" needs a ship berthed there; docked="t" means berthed anywhere.
@@ -249,6 +265,17 @@ function matchEquipment(pool, state, kind, spec, el) {
   if (s === '' || s === '?' || s === '*') return items.length > 0;
   const alts = s.split('|');
   return items.some((it) => alts.some((a) => globMatch(a, it.name)));
+}
+
+/** True if the player owns a ship whose type matches `spec`. A ship condition
+ *  may abbreviate the type (brig/gall) or list alternatives (brigantine|galleon);
+ *  both the stored type and each listed value are canonicalised so a brigantine
+ *  bought under its full name still matches an <elseif ship="brig"> (book4/11,161).
+ *  An empty spec means "any ship". */
+function matchShipType(state, spec) {
+  const want = String(spec || '').split(/[|,]/).map((t) => canonShipType(t)).filter(Boolean);
+  if (!want.length) return state.ships.length > 0;
+  return state.ships.some((s) => want.includes(canonShipType(s.type)));
 }
 
 function matchCodewords(state, spec) {
@@ -350,7 +377,10 @@ function applyLose(el, state, opts) {
     let n;
     const s = get('stamina');
     if (get('staminato') != null) { const target = resolveValue(state, get('staminato')); n = Math.max(0, state.data.stamina - target); }
-    else n = Math.max(0, resolveValue(state, s));
+    // <adjust> children reduce (or raise) the wound: "subtract your armour from
+    // the roll" (book4/679, book6/306/527/696/742) or "−1 if you worship the
+    // Three Fortunes" (book4/556). childAdjustment is 0 when there are none.
+    else n = Math.max(0, resolveValue(state, s) + childAdjustment(el, state));
     state.damageStamina(n); notes.push(`−${n} Stamina`);
   }
   if (get('ability') != null) {
@@ -451,9 +481,14 @@ function applyShipLose(el, state, opts = {}) {
   const ship = state.ships[0];
   if (!ship) return;
   if (el.getAttribute('crew') != null) {
-    const idx = ['poor', 'average', 'good', 'excellent'].indexOf(ship.crew);
+    // <lose crew="N"> shifts the crew grade by N along CREW_LEVELS: a positive N
+    // demotes, a negative N (the crew *upgrade* idiom, e.g. crew="-1"/"-2") promotes.
+    // Clamp BOTH ends — an upgrade past "excellent" used to index off the array and
+    // silently reset the crew to "poor" (book1/38 et al.); an unknown crew starts at poor.
+    const idx = Math.max(0, CREW_LEVELS.indexOf(ship.crew));
     const d = parseInt(el.getAttribute('crew'), 10) || 1;
-    ship.crew = ['poor', 'average', 'good', 'excellent'][Math.max(0, idx - d)] || 'poor';
+    const next = Math.min(CREW_LEVELS.length - 1, Math.max(0, idx - d));
+    ship.crew = CREW_LEVELS[next];
   }
   if (el.getAttribute('cargo') != null) {
     const c = el.getAttribute('cargo');
@@ -687,11 +722,16 @@ function applyItemEffect(el, state) {
   return '';
 }
 
-/** Evaluate a simple <set value="..."> expression. Supports identifiers and +,-,*. */
+/** Evaluate a <set value="..."> expression. A recursive-descent parser over the
+ *  grammar the original Java Expression class accepts — identifiers, integers, the
+ *  binary operators + - * / (integer division, truncating toward zero) and
+ *  parentheses, with a leading unary minus. Identifiers resolve *keyword-first*
+ *  (the SetVarNode.Resolver contract): the adventure-sheet quantities armour,
+ *  weapon, defence, stamina, shards, rank, crew and the ability names, then any
+ *  stored variable (undefined → 0). This is the value= side; the amount=/adjust
+ *  side is variable-first — see resolveValue. */
 export function evalExpression(expr, state) {
-  expr = String(expr).trim();
-  if (/^-?\d+$/.test(expr)) return parseInt(expr, 10);
-  const ident = (word) => {
+  const resolve = (word) => {
     const w = word.toLowerCase();
     if (w === 'stamina') return state.data.stamina;
     if (w === 'shards') return state.data.shards;
@@ -699,21 +739,35 @@ export function evalExpression(expr, state) {
     if (w === 'defence') return state.defence();
     if (w === 'armour') return state.armourBonus();
     if (w === 'weapon') return state.wieldedWeapon()?.bonus || 0;
-    if (w === 'crew') return ['poor', 'average', 'good', 'excellent'].indexOf(state.ships[0]?.crew) + 1 || 0;
+    if (w === 'crew') return CREW_LEVELS.indexOf(state.ships[0]?.crew) + 1 || 0;
     if (ABILITIES.includes(w)) return state.ability(w);
-    if (state.hasVar(word)) return state.getVar(word);
-    const n = parseInt(word, 10);
-    return isNaN(n) ? 0 : n;
+    return state.getVar(word); // stored variable; 0 when undefined
   };
-  // simple tokenizer for + - * with identifiers/numbers
-  const tokens = expr.match(/[A-Za-z_]+|\d+|[+\-*]/g);
-  if (!tokens) return 0;
-  let acc = ident(tokens[0]);
-  for (let i = 1; i < tokens.length; i += 2) {
-    const op = tokens[i]; const rhs = ident(tokens[i + 1] ?? '0');
-    if (op === '+') acc += rhs; else if (op === '-') acc -= rhs; else if (op === '*') acc *= rhs;
-  }
-  return acc;
+  const s = String(expr).replace(/\s+/g, '');
+  let i = 0;
+  // expr := term (('+'|'-') term)*
+  const parseExpr = () => {
+    let v = parseTerm();
+    while (s[i] === '+' || s[i] === '-') { const op = s[i++]; const r = parseTerm(); v = op === '+' ? v + r : v - r; }
+    return v;
+  };
+  // term := factor (('*'|'/') factor)*   — '/' is integer division (Java int math)
+  const parseTerm = () => {
+    let v = parseFactor();
+    while (s[i] === '*' || s[i] === '/') { const op = s[i++]; const r = parseFactor(); v = op === '*' ? v * r : (r === 0 ? 0 : Math.trunc(v / r)); }
+    return v;
+  };
+  // factor := '-' factor | '+' factor | '(' expr ')' | number | identifier
+  const parseFactor = () => {
+    if (s[i] === '-') { i++; return -parseFactor(); }
+    if (s[i] === '+') { i++; return parseFactor(); }
+    if (s[i] === '(') { i++; const v = parseExpr(); if (s[i] === ')') i++; return v; }
+    if (i < s.length && /[0-9]/.test(s[i])) { let j = i; while (j < s.length && /[0-9]/.test(s[j])) j++; const n = parseInt(s.slice(i, j), 10); i = j; return n; }
+    if (i < s.length && /[A-Za-z_]/.test(s[i])) { let j = i; while (j < s.length && /[A-Za-z0-9_]/.test(s[j])) j++; const word = s.slice(i, j); i = j; return resolve(word); }
+    i++; return 0; // skip an unexpected char
+  };
+  const result = parseExpr();
+  return Number.isFinite(result) ? result : 0;
 }
 
 // ---- rest ------------------------------------------------------------------
@@ -755,6 +809,7 @@ function adjustAmount(el, state) {
   if (ab != null) {
     const key = ab.split('|')[0].trim().toLowerCase();
     if (key === 'rank') return state.data.rank;
+    if (key === 'stamina') return state.data.staminaMax; // the natural/unwounded score
     if (ABILITIES.includes(key)) return state.ability(key);
   }
   const nm = el.getAttribute('name');
@@ -773,7 +828,7 @@ function adjustApplies(el, state) {
   if (get('item') != null) return get('item').split(/[|,]/).some((n) => state.hasItem(n.trim()));
   if (get('codeword') != null) return get('codeword').split(/[|,]/).some((c) => state.hasCodeword(c.trim()));
   if (get('crew') != null) return state.ships.some((s) => s.crew === get('crew'));
-  if (get('ship') != null) return state.ships.some((s) => s.type === get('ship'));
+  if (get('ship') != null) return matchShipType(state, get('ship'));
   return true;
 }
 

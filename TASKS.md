@@ -19,8 +19,8 @@ the book XML corpus.
 - [x] 6. Harden save import and migration
 - [x] 7. Surface persistence failures to the player
 - [x] 8. Make service-worker upgrades atomic
-- [ ] 24. Canonicalise ship types (`brig`, `gall`) and fix crew-upgrade steps
-- [ ] 25. Fix value/expression parsing: vars containing "d", unary minus, division
+- [x] 24. Canonicalise ship types (`brig`, `gall`) and fix crew-upgrade steps
+- [x] 25. Fix value/expression parsing: vars containing "d", unary minus, division
 - [ ] 26. Implement the remaining `<fight>` attributes
 - [ ] 27. Cap visit-box ticks and make `ticks=` guards robust
 - [ ] 28. Honour `dead="t"` on `<goto>`/`<choice>`
@@ -627,37 +627,87 @@ scan. `RESULT ALL PASS pass=211 fail=0`.
 
 ---
 
-## 24. Canonicalise ship types (`brig`, `gall`) and fix crew-upgrade steps  — MEDIUM
+## 24. Canonicalise ship types (`brig`, `gall`) and fix crew-upgrade steps  — **done**
 
-The books abbreviate ship types: `<trade ship="brig">` / `"gall"` (book4/141,
-book5/145/225) store `type:'brig'/'gall'`, so `shipCap` (market.js:10) falls to
-the default 1 cargo unit (instead of brigantine 2 / galleon 3) and none of the
-27 `<if ship="brigantine|galleon">` checks (nor `<elseif ship="brig">` on a
-brigantine bought under its full name — book4/11/161) ever match
-(engine.js:114 compares raw strings). Canonicalise the type at purchase and
-compare canonically in conditions. Also in `applyShipLose` (engine.js:214):
-`<lose crew="-1">` (a crew *upgrade*, 4×, plus one `crew="-2"`) on an excellent
-crew indexes past the array end and resets it to `'poor'` — clamp both ends.
+The books abbreviate ship types (`<trade ship="brig">` / `"gall"` — book4/141,
+book5/145/225), so `type:'brig'/'gall'` fell through `shipCap` to the default 1
+cargo unit (instead of brigantine 2 / galleon 3), and none of the 27
+`<if ship="brigantine|galleon">` checks (nor `<elseif ship="brig">` on a
+brigantine bought under its full name — book4/11/161) matched, since the raw
+strings were compared. A crew *upgrade* (`<lose crew="-1">`, 4×, plus one
+`crew="-2">`) on an excellent crew also indexed past the array end and silently
+reset the crew to `'poor'`.
+
+Fix:
+- **`rules.js`** — a `SHIP_TYPE_ALIASES` map + `canonShipType()` fold
+  `brig→brigantine`, `gall`/`galley`→`galleon` to the canonical `SHIP_TYPES`
+  key.
+- **`market.js`** — `shipCap`, `ownsGoods`, `buyTrade`, `sellTrade` and
+  `applyInlineBuy` all canonicalise the ship type at purchase/sale and compare
+  canonically; a new `canonCrew()` normalises `initialCrew=` (`none`→poor,
+  blank/`oldcrew`→average).
+- **`engine.js`** — a new `matchShipType()` canonicalises **both** the stored
+  type and every listed alternative before comparing, wired into
+  `evaluateCondition` (`<if ship=…>`) and `adjustApplies` (`<adjust ship=…>`);
+  and `applyShipLose` now shifts the crew grade along `CREW_LEVELS` with a clamp
+  on **both** ends (positive N demotes, negative N promotes; never wraps).
+- **`ui.js`** — the Adventure Sheet ship line canonicalises the type so legacy
+  saves holding an abbreviation still show the right label and capacity.
+
+Verified: 12 new headless assertions (`<trade ship="brig">` stores a brigantine
+with crew poor; a brigantine matches `<if ship="brig">`/`"brigantine">` and
+rejects barque/galleon; a legacy `gall` ship matches `galleon`/`gall`; crew
+upgrade past excellent stays excellent; `crew="-2"` from good clamps to
+excellent; demotion below poor stays poor; average→good moves one step) + full
+render-every-section scan. `RESULT ALL PASS pass=260 fail=0`.
+
+Note: the prior session's test additions had shipped with a duplicate `const
+gca` (colliding with the §... cargo test), a `SyntaxError` that had silently
+broken the *entire* headless suite; renaming the new binding to `gcma` restored
+it and confirmed all 260 assertions pass.
 
 ---
 
-## 25. Fix value/expression parsing: vars containing "d", unary minus, division  — MEDIUM
+## 25. Fix value/expression parsing: vars containing "d", unary minus, division  — **done**
 
-`resolveValue` (engine.js:39–45) tests `isDiceExpr` with `/d/i`, so any
-variable whose name contains a "d" is misparsed: `<adjust amount="d">` rolls a
-die instead of reading var `d` (book6/696/527/742 — `<set var="d"
-value="-armour"/>`), `"RandomPlus"` yields 0 (book2/322), and `"-bonus"`/`"-s"`
-(book2/726/750/770/579) look up a var literally named `-bonus` → 0.
-`evalExpression` (engine.js:337) tokenizes only `[A-Za-z_]+|\d+|[+\-*]` — no
-`/`, no parens — so `"(shards+9)/10"`, `"shards/1000"`, `"(x+1)/2"` etc.
-(book2/322/617, 8 nodes) return the undivided left-hand side, and
-`value="-armour"` (book4/679, book6/696) yields 0. Also `applyLose` never calls
-`childAdjustment`, so `<lose stamina="3d"><adjust god="The Three Fortunes"
-amount="-1"/></lose>` gives worshippers no damage reduction (book4/556, 4/679,
-6/306/527/696/742; spec lists `<lose>` as adjust-modifiable). Tighten
-`isDiceExpr` to a real dice pattern, extend the tokenizer (division, parens,
-unary minus), apply child adjustments in `applyLose`, and unit-test every
-expression form found in the corpus.
+`resolveValue` tested `isDiceExpr` with `/d/i`, so any variable whose name merely
+*contained* a "d" was misparsed — `<adjust amount="d">` rolled a die instead of
+reading var `d` (book6/696/527/742), and `deduct`/`defence`/`shards` were all
+treated as dice. `"-bonus"`/`"-s"`/`"-a"` looked up a var literally named
+`-bonus` → 0 (book2/726/750/770/579). `evalExpression` tokenized only
+`[A-Za-z_]+|\d+|[+\-*]` — no `/`, no parens, no unary minus — so
+`"(shards+9)/10"`, `"shards/1000"`, `"(x+1)/2"`, `"(900-shards)/100"` and
+`"-armour"`/`"-defence"` (book2/665, book4/679, book6/306/527/696/742) returned
+garbage or 0. And `applyLose`/`applyAbilityChange` never applied
+`childAdjustment`, so `<lose stamina="3d"><adjust .../></lose>` gave no damage
+reduction (book4/556/679, book6/306/527/696/742; the spec lists `<gain>`/`<lose>`
+as adjust-modifiable).
+
+Fix (`web/js/engine.js`):
+- **`isDiceExpr`** now matches a real dice pattern only —
+  `/^\d+\s*d\s*\d*\s*([+-]\s*\d+)?$/i` (a leading digit is required), so `1d`/`2d`/
+  `3d6`/`1d6+2` roll but `d`/`deduct`/`defence`/`shards` are variables. (Every
+  `="d"` in the corpus is the variable `d`, never a bare die.)
+- **`resolveValue`** is now *variable-first* (matching Java `Node.getAttributeValue`
+  — int | `-var` | var, undefined → 0), with a fallback to `evalExpression` for
+  any richer expression. An `<adjust amount="armour"/>` therefore reads the
+  *variable* `armour` (sections set it to `-armourbonus`), not the sheet rating.
+- **`evalExpression`** is a proper recursive-descent parser over the original Java
+  `Expression` grammar: identifiers, integers, `+ - * /` (integer division,
+  truncating toward zero) and parentheses, with a leading unary minus. Idents
+  resolve *keyword-first* (armour/weapon/defence/stamina/shards/rank/crew + ability
+  names, then stored vars) — the `<set value=>` contract.
+- **`applyLose`** (stamina) and **`applyAbilityChange`** now add
+  `childAdjustment(el, state)` to the amount; `adjustAmount` learned the `stamina`
+  keyword (→ the natural/unwounded `staminaMax`) so book2/579's "reset your
+  unwounded Stamina to the 2d roll" idiom works.
+
+Verified: 29 new headless assertions (isDiceExpr on real dice vs "d"/"deduct"/
+"defence"/"shards"; resolveValue reads `d`/`deduct` as vars and negates `-s`/
+`-bonus`; integer-division/parens/unary-minus/keyword forms of evalExpression;
+`<set var="d" value="-armour"/>` → armour-reduced stamina loss; book4/556 Three
+Fortunes −1; a plain loss unchanged; book2/579 unwounded-Stamina reset) + full
+render-every-section scan (4369 sections). `RESULT ALL PASS pass=289 fail=0`.
 
 ---
 

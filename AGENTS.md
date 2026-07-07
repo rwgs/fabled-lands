@@ -55,8 +55,20 @@ Notes:
 ## Command execution (Bitdefender on Windows)
 The build and tests **require PowerShell**; running the repo's own vetted scripts
 (`build/*.ps1`) and the documented Python/Chrome commands above is expected and
-safe. What to avoid is *suspicious* automation, which AV heuristics may block:
-- No `-EncodedCommand` / base64 / obfuscated scripts.
+safe. What to avoid is *suspicious* automation, which AV heuristics may block.
+
+**NEVER use encoded or obfuscated commands — Bitdefender flags them every time.**
+This is the single most common cause of blocked commands here, so treat it as a
+hard rule:
+- **Do not** use PowerShell `-EncodedCommand` / `-enc`, base64-encoded payloads,
+  `[Convert]::FromBase64String`, compressed/gzipped script blobs, or any
+  string-obfuscated command. Always pass plain, human-readable command text.
+- **Do not** let any tool or wrapper base64-encode a command on your behalf. If
+  an approach would require encoding to get through, choose a different approach
+  (a direct file edit, a short readable command, or a small `.ps1` script) —
+  never encode it to make it run.
+- Multi-line scripts or content should go through a **plain here-string** or a
+  committed `build/*.ps1` file, never an encoded blob.
 - No long generated one-liners that rewrite files — **prefer direct file edits**
   (Edit/Write) over shell-based search/replace.
 - Keep commands short, explicit, and readable; don't chain many together.

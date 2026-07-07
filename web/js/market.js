@@ -49,7 +49,7 @@ export function goodsFrom(node, kind, name, bonus) {
 /** Does the player own an item matching this goods descriptor (for selling)? */
 export function ownsGoods(state, goods) {
   const { kind, name, bonus, named, shipType, cargoName } = goods;
-  if (kind === 'ship') return state.ships.some((s) => s.type === shipType);
+  if (kind === 'ship') return state.ships.some((s) => canonShipType(s.type) === canonShipType(shipType));
   if (kind === 'cargo') return state.ships.some((s) => (s.cargo || []).includes(cargoName || name));
   // Armour is valued purely by its Defence bonus (its tier), so any owned armour of
   // that bonus can be sold at a named row's price — the starting "leather jerkin", a
@@ -68,7 +68,7 @@ export function buyTrade(state, goods, price) {
   const { kind, name, bonus, ability, tags, shipType, cargoName, initialCrew } = goods;
   if (kind === 'ship') {
     state.adjustMoney(-price);
-    state.addShip({ type: shipType, name: 'Ship', crew: initialCrew || 'average', cargo: [], docked: null });
+    state.addShip({ type: canonShipType(shipType), name: 'Ship', crew: canonCrew(initialCrew), cargo: [], docked: null });
   } else if (kind === 'cargo') {
     const ship = state.ships.find((s) => (s.cargo || []).length < shipCap(s.type));
     if (!ship) return { ok: false, note: 'No cargo space.' };
@@ -87,7 +87,7 @@ export function buyTrade(state, goods, price) {
 export function sellTrade(state, goods, price) {
   const { kind, name, bonus, named, shipType, cargoName } = goods;
   if (kind === 'ship') {
-    const i = state.ships.findIndex((s) => s.type === shipType);
+    const i = state.ships.findIndex((s) => canonShipType(s.type) === canonShipType(shipType));
     if (i < 0) return { ok: false };
     state.ships.splice(i, 1); state.adjustMoney(price); state.changed();
   } else if (kind === 'cargo') {

@@ -707,6 +707,108 @@ async function run() {
     applyInlineBuy(gbrig, { price: 50, ship: 'brig', initialCrew: 'none' });
     ok('buy ship="brig" canonicalises to brigantine (cap 2)', gbrig.ships[0].type === 'brigantine' && gbrig.ships[0].crew === 'poor' && gbrig.data.shards === 50, JSON.stringify(gbrig.ships[0]||{}));
 
+    // --- task 24: canonical ship-type conditions + crew-upgrade clamping ---
+    // A <trade ship="brig"> row buys a brigantine (capacity 2) — canonicalised at purchase.
+    const gtb = GameState.create({ name:'TB', gender:'m', profession:'Warrior', book:4, adv });
+    gtb.data.shards = 1000;
+    buyTrade(gtb, goodsFrom(parse('<trade ship="brig" initialCrew="poor" buy="450"/>'), 'ship', null, 0), 450);
+    ok('§4.141 trade ship="brig" stores brigantine + crew poor', gtb.ships[0] && gtb.ships[0].type === 'brigantine' && gtb.ships[0].crew === 'poor', JSON.stringify(gtb.ships[0]||{}));
+    // A brigantine (stored full name) matches an abbreviated <elseif ship="brig"> and rejects barque/galleon (book4/11,161).
+    ok('§4.11 brigantine matches <if ship="brig">', eng.evaluateCondition(parse('<if ship="brig"/>'), gtb));
+    ok('§4.11 brigantine matches full <if ship="brigantine">', eng.evaluateCondition(parse('<if ship="brigantine"/>'), gtb));
+    ok('§4.11 brigantine does NOT match <if ship="barque">', eng.evaluateCondition(parse('<if ship="barque"/>'), gtb) === false);
+    ok('§4.11 brigantine does NOT match <if ship="galleon">', eng.evaluateCondition(parse('<if ship="galleon"/>'), gtb) === false);
+    // gall alias resolves to galleon on both the stored type and the condition value.
+    const gtg = GameState.create({ name:'TG', gender:'m', profession:'Warrior', book:5, adv });
+    gtg.addShip({ type:'gall', name:'S', crew:'average', cargo:[], docked:null }); // legacy save holding the abbreviation
+    ok('legacy "gall" ship matches <if ship="galleon">', eng.evaluateCondition(parse('<if ship="galleon"/>'), gtg));
+    ok('legacy "gall" ship matches <if ship="gall">', eng.evaluateCondition(parse('<if ship="gall"/>'), gtg));
+    // crew upgrade: <lose crew="-1"> on an excellent crew stays excellent (no wrap to poor).
+    const gce = GameState.create({ name:'CE', gender:'m', profession:'Warrior', book:1, adv });
+    gce.addShip({ type:'galleon', name:'S', crew:'excellent', cargo:[], docked:null });
+    eng.applyEffect(parse('<lose crew="-1"/>'), gce, {});
+    ok('crew upgrade past excellent stays excellent', gce.ships[0].crew === 'excellent', gce.ships[0].crew);
+    // crew upgrade by 2 from good clamps to excellent (not off the end).
+    const gcg = GameState.create({ name:'CG', gender:'m', profession:'Warrior', book:1, adv });
+    gcg.addShip({ type:'galleon', name:'S', crew:'good', cargo:[], docked:null });
+    eng.applyEffect(parse('<lose crew="-2"/>'), gcg, {});
+    ok('crew upgrade -2 from good clamps to excellent', gcg.ships[0].crew === 'excellent', gcg.ships[0].crew);
+    // crew demotion: <lose crew="1"> from poor stays poor (low-end clamp).
+    const gcp = GameState.create({ name:'CP', gender:'m', profession:'Warrior', book:1, adv });
+    gcp.addShip({ type:'galleon', name:'S', crew:'poor', cargo:[], docked:null });
+    eng.applyEffect(parse('<lose crew="1"/>'), gcp, {});
+    ok('crew demotion below poor stays poor', gcp.ships[0].crew === 'poor', gcp.ships[0].crew);
+    // a mid-grade upgrade still moves one step (average → good).
+    const gcma = GameState.create({ name:'CMA', gender:'m', profession:'Warrior', book:1, adv });
+    gcma.addShip({ type:'galleon', name:'S', crew:'average', cargo:[], docked:null });
+    eng.applyEffect(parse('<lose crew="-1"/>'), gcma, {});
+    ok('crew upgrade average → good', gcma.ships[0].crew === 'good', gcma.ships[0].crew);
+
+    // --- task 25: value/expression parsing (vars containing "d", unary minus, division) ---
+    // isDiceExpr must match real NdM dice only — not identifiers that merely contain a 'd'.
+    ok('isDiceExpr "3d" true', eng.isDiceExpr('3d') === true);
+    ok('isDiceExpr "2d6+1" true', eng.isDiceExpr('2d6+1') === true);
+    ok('isDiceExpr "d" false (a var)', eng.isDiceExpr('d') === false);
+    ok('isDiceExpr "deduct" false', eng.isDiceExpr('deduct') === false);
+    ok('isDiceExpr "defence" false', eng.isDiceExpr('defence') === false);
+    ok('isDiceExpr "shards" false', eng.isDiceExpr('shards') === false);
+    // resolveValue: a var whose name contains 'd' is read as a var, not rolled.
+    const gex = GameState.create({ name:'EX', gender:'m', profession:'Warrior', book:1, adv });
+    gex.setVar('d', 4); gex.setVar('deduct', 6); gex.setVar('s', 5); gex.setVar('bonus', 3);
+    ok('resolveValue var "d" (not a die)', eng.resolveValue(gex, 'd') === 4, String(eng.resolveValue(gex,'d')));
+    ok('resolveValue var "deduct" (not a die)', eng.resolveValue(gex, 'deduct') === 6);
+    ok('resolveValue unary "-s" negates the var', eng.resolveValue(gex, '-s') === -5, String(eng.resolveValue(gex,'-s')));
+    ok('resolveValue unary "-bonus" negates the var', eng.resolveValue(gex, '-bonus') === -3);
+    ok('resolveValue "3d" still rolls (3..18)', (() => { const v = eng.resolveValue(gex, '3d'); return v >= 3 && v <= 18; })());
+    // evalExpression: integer division, parentheses, unary minus, keyword-first idents.
+    gex.data.shards = 900;
+    ok('eval shards/300 = 3', eng.evalExpression('shards/300', gex) === 3, String(eng.evalExpression('shards/300', gex)));
+    gex.data.shards = 850;
+    ok('eval (900-shards)/100 = 0 (int div)', eng.evalExpression('(900-shards)/100', gex) === 0, String(eng.evalExpression('(900-shards)/100', gex)));
+    gex.data.shards = 200;
+    ok('eval (900-shards)/100 = 7', eng.evalExpression('(900-shards)/100', gex) === 7, String(eng.evalExpression('(900-shards)/100', gex)));
+    gex.data.shards = 1;
+    ok('eval (shards+9)/10 = 1 (round-up idiom)', eng.evalExpression('(shards+9)/10', gex) === 1);
+    gex.data.shards = 11;
+    ok('eval (shards+9)/10 = 2', eng.evalExpression('(shards+9)/10', gex) === 2, String(eng.evalExpression('(shards+9)/10', gex)));
+    ok('eval -armour = -armourBonus (keyword)', eng.evalExpression('-armour', gex) === -gex.armourBonus(), String(eng.evalExpression('-armour', gex)));
+    ok('eval -defence = -defence (keyword)', eng.evalExpression('-defence', gex) === -gex.defence(), String(eng.evalExpression('-defence', gex)));
+    ok('eval 12-charisma', eng.evalExpression('12-charisma', gex) === 12 - gex.ability('charisma'));
+    ok('eval magic+rank', eng.evalExpression('magic+rank', gex) === gex.ability('magic') + gex.data.rank);
+    gex.setVar('x', 5);
+    ok('eval (x+1)/2 = 3', eng.evalExpression('(x+1)/2', gex) === 3, String(eng.evalExpression('(x+1)/2', gex)));
+    gex.data.rank = 2; gex.setVar('roll', 1);
+    ok('eval (rank+1)-roll = 2', eng.evalExpression('(rank+1)-roll', gex) === 2, String(eng.evalExpression('(rank+1)-roll', gex)));
+    gex.setVar('weaponbonus', 2);
+    ok('eval 6-weaponbonus = 4 (bare var)', eng.evalExpression('6-weaponbonus', gex) === 4, String(eng.evalExpression('6-weaponbonus', gex)));
+    // <set var="d" value="-armour"/> stores the negative armour bonus (keyword-first).
+    const gsd = GameState.create({ name:'SD', gender:'m', profession:'Warrior', book:4, adv });
+    eng.applyEffect(parse('<set var="d" value="-armour"/>'), gsd, {});
+    ok('§6.696 set d = -armour', gsd.getVar('d') === -gsd.armourBonus() && gsd.armourBonus() > 0, `d=${gsd.getVar('d')} arm=${gsd.armourBonus()}`);
+    // <lose stamina="N"><adjust amount="d"/></lose> reduces the wound by the armour bonus.
+    const st0 = gsd.data.stamina;
+    eng.applyEffect(parse('<lose stamina="10"><adjust amount="d"/></lose>'), gsd, {});
+    ok('§6.696 armour reduces stamina loss', gsd.data.stamina === st0 - (10 - gsd.armourBonus()), `st ${st0}->${gsd.data.stamina}`);
+    // book4/556: worshippers of the Three Fortunes subtract 1 from the loss.
+    const gtf = GameState.create({ name:'TF', gender:'m', profession:'Warrior', book:4, adv });
+    gtf.setGod('The Three Fortunes'); const stf = gtf.data.stamina;
+    eng.applyEffect(parse('<lose stamina="6"><adjust god="The Three Fortunes" amount="-1"/></lose>'), gtf, {});
+    ok('§4.556 Three Fortunes initiate loses 5 not 6', gtf.data.stamina === stf - 5, `st ${stf}->${gtf.data.stamina}`);
+    const gnf = GameState.create({ name:'NF', gender:'m', profession:'Warrior', book:4, adv });
+    const snf = gnf.data.stamina;
+    eng.applyEffect(parse('<lose stamina="6"><adjust god="The Three Fortunes" amount="-1"/></lose>'), gnf, {});
+    ok('§4.556 non-worshipper loses full 6', gnf.data.stamina === snf - 6, `st ${snf}->${gnf.data.stamina}`);
+    // a plain stamina loss (no <adjust> children) is unchanged (regression).
+    const gpl = GameState.create({ name:'PL', gender:'m', profession:'Warrior', book:1, adv });
+    const spl = gpl.data.stamina;
+    eng.applyEffect(parse('<lose stamina="5"/>'), gpl, {});
+    ok('plain stamina loss still 5', gpl.data.stamina === spl - 5);
+    // book2/579: reset the unwounded (max) Stamina to the rolled var s.
+    const g579 = GameState.create({ name:'R579', gender:'m', profession:'Warrior', book:2, adv });
+    g579.data.staminaMax = 20; g579.data.stamina = 20; g579.setVar('s', 7);
+    eng.applyEffect(parse('<lose ability="stamina" amount="-s"><adjust ability="stamina" modifier="natural"/></lose>'), g579, {});
+    ok('§2.579 unwounded Stamina reset to the 2d roll (7)', g579.data.staminaMax === 7, `max=${g579.data.staminaMax}`);
+
     // buy a tool: grants a bonus tool tied to an ability and charges the price
     const gbtool = GameState.create({ name:'BT', gender:'m', profession:'Warrior', book:5, adv });
     gbtool.data.shards = 500;
