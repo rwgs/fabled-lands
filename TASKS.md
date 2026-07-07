@@ -18,7 +18,7 @@ the book XML corpus.
 - [x] 5. Implement `<items group … limit="N">` "choose up to N" pickup
 - [x] 6. Harden save import and migration
 - [x] 7. Surface persistence failures to the player
-- [ ] 8. Make service-worker upgrades atomic
+- [x] 8. Make service-worker upgrades atomic
 - [ ] 24. Canonicalise ship types (`brig`, `gall`) and fix crew-upgrade steps
 - [ ] 25. Fix value/expression parsing: vars containing "d", unary minus, division
 - [ ] 26. Implement the remaining `<fight>` attributes
@@ -243,13 +243,29 @@ fail=0`.
 
 ---
 
-## 8. Make service-worker upgrades atomic  — MEDIUM
+## 8. Make service-worker upgrades atomic  — **done**
 
-`sw.js` catches individual precache misses, then `skipWaiting()`/`clients.claim()`
-activates the new worker and deletes all old caches. A partial install could
-discard the last complete offline cache. Split required shell/data assets from
-optional maps, fail installation if required assets miss, and delete older caches
-only after the new required cache is complete.
+`sw.js` used `cache.add(url).catch()` for every asset, so a missing **required**
+file didn't abort the install; `activate` then deleted *all* old caches, so a
+partial install could discard the last complete offline cache.
+
+Fix (`web/sw.js`):
+- **Split the precache list** into `REQUIRED` (app shell + all six books' data —
+  the game can't run offline without these) and `OPTIONAL` (the large map/world
+  images, fetched lazily on demand otherwise).
+- **Install is all-or-nothing for REQUIRED** — `cache.addAll(REQUIRED)` rejects
+  if any required asset fails, so the install fails and the previous complete
+  cache lives on; we never activate an incomplete shell. `OPTIONAL` assets are
+  added best-effort (`.catch`), so a map miss can't abort the upgrade.
+- **Activate deletes old caches only after verifying completeness** — it
+  re-checks that the new cache holds every `REQUIRED` asset (`cache.match`) before
+  deleting any older cache; if incomplete, it keeps the old caches as an offline
+  fallback. `skipWaiting`/`clients.claim` are preserved.
+
+The `const VERSION = '…';` line kept its shape so `stamp-version.ps1`'s cache-key
+rewrite still matches. Verified: `sw.js` compiles cleanly in headless Chrome
+(`new Function(source)` syntax check) + full render-every-section scan unaffected.
+`RESULT ALL PASS pass=249 fail=0`.
 
 ---
 
