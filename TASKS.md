@@ -26,7 +26,7 @@ the book XML corpus.
 - [x] 28. Honour `dead="t"` on `<goto>`/`<choice>`
 - [x] 29. Market & item polish: currency items, pipe names, headers *(parts 2 & 5 split → 40, 41)*
 - [x] 30. Gate `<random flag=…>` rolls behind their payment
-- [ ] 31. `<rest>` with no `stamina=` should restore to full
+- [x] 31. `<rest>` with no `stamina=` should restore to full
 - [ ] 40. `<market currency="…">` alternate-currency markets
 - [ ] 41. Item `<effect>` system (use/aura/wielded/ability) and `<sold>` sell-hooks
 
@@ -907,14 +907,27 @@ render-every-section scan (4369). `RESULT ALL PASS pass=338 fail=0`.
 
 ---
 
-## 31. `<rest>` with no `stamina=` should restore to full  — MEDIUM
+## 31. `<rest>` with no `stamina=` should restore to full  — **done**
 
-Per `rules/JaFL-XML-Tags.html`, a `<rest>` without a `stamina` attribute
-"restores Stamina to its full" — the corpus has **62** such tags (all
-"heal you of all lost Stamina points" prose: safe houses, temples, healers)
-versus 86 with an amount. `render.js:1348` defaults the missing attribute to
-`'1'` per click. Add a restore-to-max mode to `engine.applyRest`, use it when
-the attribute is absent, and unit-test both modes.
+`renderRest` defaulted a missing `stamina=` to `'1'`, so a "heal you of all lost
+Stamina points" safe house / temple / healer (62 such tags in the corpus) only
+restored **one** point per click. Fixed to match JaFL `RestNode`, which treats a
+missing `stamina` attribute as `-1` ⇒ heal *all* Stamina ("restore all your
+Stamina" in its own tooltip):
+- **`engine.applyRest`** gained a restore-to-full mode: a `null`/blank `perUse`
+  heals `staminaMax` (clamped ⇒ back to full); a numeric/dice `perUse` heals that
+  amount as before. Any `shards=` cost is still charged first. Returns the amount
+  actually healed.
+- **`render.js renderRest`** now passes `null` (not a defaulted `'1'`) when the
+  node has no `stamina=` attribute, and labels the button **"Rest (heal all
+  Stamina)"** vs **"Rest (+N Stamina)"** for the fixed/dice form. The already-at-
+  full disable and the affordability check are unchanged.
+
+Verified: 7 new headless assertions (`applyRest(null)`/`applyRest("")` restore to
+full; a fixed `applyRest("3")` heals 3 clamped to max; a full-restore rest still
+charges its cost; the `<rest stamina="2">` label vs the bare-`<rest>` "heal all"
+label; §1.114 safe house heals all lost Stamina on click) + full
+render-every-section scan (4369). `RESULT ALL PASS pass=345 fail=0`.
 
 ---
 
