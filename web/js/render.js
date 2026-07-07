@@ -13,7 +13,7 @@ import {
 } from './engine.js';
 import { makeFight, fightRound } from './combat.js';
 import { shopKind, goodsFrom, ownsGoods, buyTrade, sellTrade, applyInlineBuy } from './market.js';
-import { normalize, makeItem } from './state.js';
+import { normalize, makeItem, parseTags } from './state.js';
 import { ABILITY_LABEL } from './rules.js';
 import { bookTitle, availableBooks } from './data.js';
 import { animateDice, modal } from './ui.js';
@@ -25,7 +25,7 @@ const ROLL_TAGS = new Set(['difficulty', 'random', 'rankcheck', 'training']);
 // MODIFIER (a child of <difficulty>/<random>/<rankcheck>, consumed by
 // childAdjustment) — never a passive effect. Auto-applying it on view would
 // silently upgrade the crew ("<adjust crew='good'>") or bump codeword counters.
-const PASSIVE_TAGS = new Set(['lose', 'tick', 'gain', 'set', 'curse']);
+const PASSIVE_TAGS = new Set(['lose', 'tick', 'gain', 'set', 'curse', 'disease', 'poison']);
 
 export class Story {
   constructor(rootEl, state, opts) {
@@ -705,8 +705,9 @@ export class Story {
       btn.title = 'No room (12-item carry limit)';
     } else {
       btn.textContent = 'Take ' + display;
+      const tags = parseTags(node.getAttribute('tags'));
       btn.addEventListener('click', () => {
-        this.state.addItem(makeItem(kind, name, bonus, ability));
+        this.state.addItem(makeItem(kind, name, bonus, ability, tags));
         this.ctx.applied.add(key);
         this.rerender();
       });
@@ -1346,6 +1347,7 @@ export class Story {
         price, crew, item,
         bonus: node.getAttribute('bonus') ? parseInt(node.getAttribute('bonus'), 10) : 0,
         ability: node.getAttribute('ability'),
+        tags: parseTags(node.getAttribute('buytags') || node.getAttribute('tags')),
       });
       this.rerender();
     });

@@ -12,10 +12,6 @@ the view/app/infra layer, with every finding verified against both the code and
 the book XML corpus.
 
 **HIGH**
-- [ ] 16. Make wildcard/choice losses actually take things
-- [ ] 17. Recognise all spec'd `<if>` attributes; stop defaulting unknown conditions to true
-- [ ] 18. Preserve item `tags` and support tag-filtered item conditions
-- [ ] 19. Implement the curse / disease / poison system end-to-end
 - [ ] 20. Implement caches, banks, `<adjustmoney>` and `<transfer>`
 - [ ] 21. Fix `<flee>`/`<fightdamage>`: no render-time auto-apply, find them anywhere, honour `flee="t"`, `type="replace"`
 - [ ] 22. Render `<success>`/`<failure>`/`<outcome>` children of `<choices>`
@@ -46,6 +42,7 @@ the book XML corpus.
 - [ ] 34. Finish moving rules out of the view layer
 - [ ] 35. iOS home-screen icons: provide PNG apple-touch-icon
 - [ ] 36. Minor rule divergences (grab-bag)
+- [ ] 37. Fix the `safeAddGodd` typo in the source XML
 
 **Done**
 - [x] 1. Gate combat progression / model fight outcomes
@@ -54,6 +51,10 @@ the book XML corpus.
 - [x] 4. Prevent silent save-slot overwrite
 - [x] 14. Fix save-card button overflow on mobile
 - [x] 15. Fix `<gain>`/`<lose>`/`<tick>` ability effects (rank, stamina, "?", "*", fatal)
+- [x] 16. Make wildcard/choice losses actually take things
+- [x] 17. Recognise all spec'd `<if>` attributes; stop defaulting unknown conditions to true
+- [x] 18. Preserve item `tags` and support tag-filtered item conditions
+- [x] 19. Implement the curse / disease / poison system end-to-end
 
 ---
 
@@ -305,92 +306,121 @@ fix (the `-fixed`/`-cursed` clearing itself works).
 
 ---
 
-## 16. Make wildcard/choice losses actually take things  — HIGH
+## 16. Make wildcard/choice losses actually take things  — **done**
 
-Robbery, imprisonment, disarming and death-cleanup sections currently leave the
-player untouched. In `applyLose` (`web/js/engine.js:159`):
-- `item="*"` is deliberately skipped (engine.js:185) and `shards="*"` resolves
-  to 0 (via `resolveValue` → `getVar('*')`), so "lose all your money and
-  possessions" no-ops (book1/218, book1/157, book5/7 death cleanup; ~12
-  `shards="*"`, ~10 player-side `item="*"`).
-- `blessing="*"`/`"?"` never match (`removeBlessing` is exact-match,
-  state.js:284) — book2/157 outcome 5, book2/394 (13 occurrences).
-- There are **no** `weapon=`/`armour=`/`tool=` attributes at all (~15 nodes,
-  incl. `using="t"` = "the one you're wielding"), so confiscation scenes leave
-  the player armed.
-- `cargo="?"` ("lose one cargo unit of your choice", 18×) does
-  `indexOf('?')` → removes nothing (engine.js:221).
-- `resurrection="t"` shifts only the first arrangement; spec says clear all
-  (engine.js:180; book6/230, book2/394). `removeCurse('*')` removes only the
-  first match (state.js:292).
+Robbery, imprisonment, disarming and death-cleanup sections left the player
+untouched. Fixed in `web/js/engine.js` (`applyLose`/`applyShipLose`/new
+`loseEquipment`) and `web/js/state.js` (`removeCurse`):
+- `shards="*"` now empties the purse; `item="*"` removes every possession
+  (honouring `chance="x/y"` probabilistic loss — book §…, and never taking a
+  `keep`-tagged item) — book1/218, book1/157, book5/7.
+- `blessing="*"` removes all blessings; `blessing="?"` removes one (via
+  `opts.chooser`, else the first) — book2/157 outcome 5, book2/394.
+- New `weapon=`/`armour=`/`tool=` loss handling: `"*"` = all of that kind,
+  `"?"`/name = one (chooser/first), `using="t"` = the wielded weapon / worn
+  armour; `bonus=`/`tags=` narrow the candidates (~15 confiscation nodes).
+- `cargo="?"` removes one cargo unit (chooser or first) instead of the old
+  `indexOf('?')` no-op (18×).
+- `resurrection="t"` clears **all** arrangements (book2/394, book6/230);
+  `removeCurse('*')` now lifts **every** matching curse (state.js).
 
-Implement `*` (all matches), `?` (player chooser — `opts.chooser` exists),
-the weapon/armour/tool kinds with `using=`, and multi-match wildcards for
-blessing/curse/resurrection. Unit-test each.
+Verified: 10 new headless assertions (lose-all Shards; lose-all possessions with
+a surviving keep item; blessing "?"/"*"; weapon/armour `using="t"`; weapon "*";
+resurrection clear-all; curse "*"; cargo "?") + full render-every-section scan
+(`RESULT ALL PASS pass=132 fail=0`).
 
----
-
-## 17. Recognise all spec'd `<if>` attributes; stop defaulting unknown conditions to true  — HIGH
-
-`evaluateCondition` (`web/js/engine.js:54`) starts with `result = true` and has
-no handlers for `weapon=`, `armour=`, `tool=`, `disease=`, `poison=`, `cache=`,
-`using=` or `bonus=`-filtered forms, so those conditions silently pass (or, with
-`not="t"`, silently fail): book2/90's `<if not="t" weapon="?">` ("if you have no
-weapon") is always false, book6/614's `<elseif weapon="?">` always true, ~30
-nodes affected. Also wrong in the same function: `docked="Smogmaw"` ignores the
-location — any ship anywhere passes (book3/53/222/345; relatedly `applySet`'s
-dock, engine.js:296, docks *all* ships); `modifier="natural"` is ignored so the
-item-boosted score is compared (book2/554, book5/435); `<if god="">` ("worships
-no god", book2/578) is always false so its `<else>` always runs.
-
-Add the missing attribute handlers per `rules/JaFL-XML-Tags.html`, implement
-docked-at-location, natural-score compare and empty-god, and make genuinely
-unknown condition attributes log a console warning (plus, ideally, a build-time
-scan that lists them) instead of silently passing. Same function as task 3 —
-do them together if convenient. Note `disease=`/`poison=` conditions also need
-task 19's storage to exist.
+Deferred: an interactive weapon/armour/cargo chooser (the engine `opts.chooser`
+hook is in place but unwired in the view, so a "?" confiscation defaults to the
+wielded/first item — consistent with the §521 item-theft model). `curse="?"`
+(3×) needs the named curses from **task 19**; `<lose item="?" cache=…>` is
+**task 20**.
 
 ---
 
-## 18. Preserve item `tags` and support tag-filtered item conditions  — HIGH
+## 17. Recognise all spec'd `<if>` attributes; stop defaulting unknown conditions to true  — **done**
 
-`makeItem` accepts a `tags` parameter (`web/js/state.js:373`) but **no caller
-passes it**: item awards (render.js:651), market purchases (market.js:73 and
-:107) and save-load migration (state.js:107) all drop tags. `findItems` also has
-no `"?"`-wildcard/tags support on the condition path. Consequence: all 51 tagged
-awards (e.g. `<item name="candle" tags="light,useonce"/>`) lose their tags, and
-every `<if item="?" tags="light">` check is permanently false — the Yellowport
-sewers questline is unenterable for non-mages (`books/book1/460.xml` → §164;
-same pattern in book1/164, book2/291/440/720/744, book3/11/25/196, …). Distinct
-from task 3: AND-combining does not fix this. Pass tags through all four call
-sites, add wildcard+tags support to the item condition, update the now-stale
-comment at engine.js:189 (it documents the lose-path as harmless, but the
-condition path is a hard block), and test the lantern/candle sewers path.
+`evaluateCondition` (`web/js/engine.js`) had no handlers for `weapon=`, `armour=`,
+`tool=`, `disease=`, `poison=`, `cache=`, `using=` or `bonus=`-filtered forms, so
+those conditions silently passed/failed; and `docked=`, `modifier="natural"` and
+empty-`god=` were mis-evaluated.
+
+Fix (all OR-combined with the task 3 disjuncts):
+- **weapon/armour/tool** conditions via a new `matchEquipment()`: `"?"`/`"*"`/empty
+  = any of that kind; a name or `*glob*` (pipe-separated) matches by name;
+  `bonus=` ("N"/"N+") and `tags=` narrow; `using="t"` restricts to the wielded
+  weapon / worn armour (book2/90, book6/614, the book-6 weapon-type checks).
+- **docked="<place>"** now needs a ship berthed at that place (`docked="t"` =
+  anywhere), instead of matching any ship (book3/53/222/345).
+- **modifier="natural"** compares the written ability score (`abilityForCheck(ab,
+  true)`), not the item-boosted one (book2/554, book5/435).
+- **god=""** = "worships no god" (`gods.length===0`) — book2/578.
+- **cache=** redirects the shards/item/equipment lookups to a named stash
+  (`state.cacheMoney`/`cacheItems`); **task 20** stocks those caches.
+- **disease=/poison=** read `state.hasDisease`/`hasPoison`; **task 19** populates
+  the affliction store.
+- The source-XML typo `safeAddGodd` is accepted as an alias of `safeAddGod` (see
+  new task 37).
+- Genuinely unrecognized condition attributes now **`console.warn` once** and
+  make the condition default to **false** (negated to true under `not="t"`)
+  rather than silently passing; every attribute currently used on `<if>`/`<elseif>`
+  in the corpus is whitelisted, so no existing section changes behaviour.
+
+Verified: 17 new assertions (weapon "?"/glob/using; docked location; natural vs
+boosted; empty-god; unknown-attr default; disease) + full smoke test
+(`RESULT ALL PASS pass=149 fail=0`).
 
 ---
 
-## 19. Implement the curse / disease / poison system end-to-end  — HIGH
+## 18. Preserve item `tags` and support tag-filtered item conditions  — **done**
 
-The affliction system doesn't work at any stage:
-- `applyCurse` (engine.js:307) ignores the spec'd `name=` and the `<effect>`
-  children, storing only `{type:'curse'}` — so book4/31's Curse of Tambu can
-  never be lifted by book4/12's `<lose curse="Curse of Tambu">` nor detected by
-  book4/111/231's `<if curse=…>`.
-- `<disease>`/`<poison>` elements aren't handled in `applyEffect` at all
-  (engine.js:145) — Ghoulbite / Scorpion Poison are never stored, and their
-  `<effect ability=… bonus=…>` penalties are never applied
-  (`state.effectBonus` reads only `data.effects`).
-- `<if disease=>`/`<if poison=>` are unrecognized ⇒ **always true** (task 17) —
-  §532 auto-consumes the scorpion antidote of a player who was never stung.
-- Cure sections no-op: `<lose disease="*">` (11×), `<lose poison="*">` (4×),
-  `<lose curse="?">` (3×); `removeCurse('*')` removes only the first match
-  (state.js:292).
+`makeItem` accepts a `tags` parameter but no caller passed it, so all tagged
+awards lost their tags and every `<if item="?" tags="light">` check was
+permanently false (the Yellowport sewers questline was unenterable for
+non-mages — book1/460 → §164).
 
-Store afflictions with name + type + effect list, apply their ability effects,
-wire the `<if>`/`<lose>` paths incl. wildcards, and unit-test inflict → detect →
-suffer penalty → cure. The curse-flavoured `special=` effects
-(armourlock/weaponlock, difficultyCurse/difficultyRestore — task 36) pair
-naturally with this work.
+Fix — tags now flow through all four call sites:
+- **Awards** (`render.js` `renderItemAward`) read the node's `tags=`.
+- **Market buys** (`market.js` `goodsFrom`→`buyTrade`) and **inline buys**
+  (`applyInlineBuy`, wired from `renderInlineBuy`) read `buytags=` (falling back
+  to `tags=` — the candle rows use `buytags`).
+- **Starting items** (`data.js` `parseAdventurers` → `GameState.create`) carry
+  their `tags=`.
+- A shared `parseTags()` helper (state.js) does the comma/pipe split; the item
+  **condition** now supports `item="?"` + `tags=` (any possession carrying every
+  listed tag), mirroring the lose-path wildcard.
+
+Verified: 6 new assertions (award preserves `light`; `if item="?" tags="light"`
+true/false; the §460 non-mage-with-light gate; a market buy preserves
+`light,useonce`) + full smoke test (`RESULT ALL PASS pass=155 fail=0`).
+
+---
+
+## 19. Implement the curse / disease / poison system end-to-end  — **done**
+
+The affliction system now works end-to-end. Afflictions are stored uniformly as
+`{name, type, effects:[{ability,bonus}], cumulative, lift}` (state.js
+`addAffliction`/`removeAffliction`, backing `data.curses`/`diseases`/`poisons`):
+- **Inflict** (`engine.js` `applyAffliction` + `readEffects`): the
+  `<curse>`/`<disease>`/`<poison>` element's `name=` and `<effect ability=…
+  bonus=…>` children are stored; `<disease>`/`<poison>` were added to the
+  `applyEffect` switch and to `PASSIVE_TAGS` so they inflict on render (book4/31
+  Curse of Tambu, book1/196 Ghoulbite, book1/532 Scorpion Poison).
+- **Suffer**: `state.afflictionBonus(ability)` sums the effects and is folded into
+  `ability()`, so the penalty hits derived stats (Defence) and checks until cured;
+  clamps keep abilities ≥1.
+- **Detect**: `hasCurse`/`hasDisease`/`hasPoison` match **by name**; the task-17
+  `<if curse|disease|poison=…>` paths use them (book4/111/231, §532).
+- **Cure**: `<lose curse|disease|poison="name"|"*"|"?">` removes the affliction
+  (and its penalty), with `*` = all and `?` = the first (book4/12; the 11
+  `<lose disease="*">`, 4 `<lose poison="*">`, 3 `<lose curse="?">`).
+- **cumulative="t"** stacks; a non-cumulative re-infection has "no further effect".
+
+Verified: 10 new assertions (curse inflict→detect→Defence penalty→cure; disease
+non-cumulative + `<lose disease="*">`; poison by name; cumulative stacking) +
+full smoke test (`RESULT ALL PASS pass=165 fail=0`).
+
+Deferred: the curse-flavoured `special=` effects (armourlock/weaponlock,
+difficultyCurse/difficultyRestore) remain **task 36**.
 
 ---
 
@@ -656,6 +686,16 @@ installed home-screen icons fall back to a page screenshot. Generate PNG sizes
 (at minimum 180×180; ideally also 192/512 for the manifest), reference them in
 `index.html` + `manifest.webmanifest`, and add them to the service-worker
 shell precache.
+
+---
+
+## 37. Fix the `safeAddGodd` typo in the source XML  — LOW
+
+One `<if safeAddGodd="…">` exists in `books/` — a misspelling of `safeAddGod`.
+Task 17 made `evaluateCondition` accept `safeAddGodd` as an alias so the section
+works, but the source XML is the true fix: correct the attribute name in the
+offending `books/book*/*.xml`, rebuild the data, and then the engine alias can be
+removed. (Find it with `grep -rl 'safeAddGodd' books`.)
 
 ---
 

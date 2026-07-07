@@ -48,7 +48,9 @@ function freshData() {
     resurrections: [],    // {book, section, text, god}
     effects: [],          // {ability, bonus, type, uses, text}
     abilityFlags: {},     // ability -> {fixed?:true, cursed?:true} (effect="+fixed|+cursed")
-    caches: {},           // name -> {items:[], money:0}
+    diseases: [],         // {name, type:'disease', effects:[]}  (task 19 populates)
+    poisons: [],          // {name, type:'poison', effects:[]}   (task 19 populates)
+    caches: {},           // name -> {items:[], money:0}         (task 20 populates)
     book: 1,
     section: null,
     startBook: 1,
@@ -115,7 +117,7 @@ export class GameState {
     // starting items
     for (const it of adv.items) {
       if (it.profession && it.profession !== profession) continue;
-      d.items.push(makeItem(it.kind, it.name, it.bonus, it.ability));
+      d.items.push(makeItem(it.kind, it.name, it.bonus, it.ability, it.tags || []));
     }
     const gs = new GameState(d);
     gs.reconcileEquipment();
@@ -145,23 +147,34 @@ export class GameState {
     return sum;
   }
 
-  /** Affected ability score, including item/effect bonuses, clamped 1..12.
-   *  The fixed/cursed flags are deliberately NOT applied here — like JaFL, the
-   *  displayed/derived score is the real one; the flags bite only in checks. */
+  /** Total ability penalty/bonus from active afflictions (curses/diseases/poisons).
+   *  Removed automatically when the affliction is cured, restoring the score. */
+  afflictionBonus(ability) {
+    let sum = 0;
+    for (const list of [this.data.curses, this.data.diseases, this.data.poisons]) {
+      for (const a of (list || [])) for (const e of (a.effects || [])) if (e.ability === ability) sum += (e.bonus || 0);
+    }
+    return sum;
+  }
+
+  /** Affected ability score, including item/effect/affliction bonuses, clamped
+   *  1..12. The fixed/cursed flags are deliberately NOT applied here — like JaFL,
+   *  the displayed/derived score is the real one; the flags bite only in checks. */
   ability(ability) {
     const base = this.data.abilities[ability] || 0;
-    return clampAbility(base + this.itemBonus(ability) + this.effectBonus(ability));
+    return clampAbility(base + this.itemBonus(ability) + this.effectBonus(ability) + this.afflictionBonus(ability));
   }
 
   /** Ability score as seen by a check (difficulty/rank/if): a cursed ability
    *  auto-fails, a fixed one counts as 1. A mask hides a blanked/disfigured face,
    *  restoring CHARISMA while worn (JaFL's mask exception). */
-  abilityForCheck(ability) {
+  abilityForCheck(ability, natural = false) {
     const fx = this.data.abilityFlags && this.data.abilityFlags[ability];
     if (fx && (fx.cursed || fx.fixed) && !(ability === 'charisma' && this.hasMask())) {
       return fx.cursed ? CURSED_ABILITY : 1;
     }
-    return this.ability(ability);
+    // modifier="natural" compares the written score, ignoring item/effect bonuses.
+    return natural ? this.abilityNatural(ability) : this.ability(ability);
   }
 
   abilityNatural(ability) { return this.data.abilities[ability] || 0; }
@@ -239,16 +252,13 @@ export class GameState {
     return true;
   }
 
-  findItems(pattern) {
-    if (!pattern) return [];
-    const pats = pattern.split('|').map((p) => normalize(p));
-    return this.data.items.filter((it) => {
-      const n = normalize(it.name);
-      return pats.some((p) => n === p || (it.tags || []).map(normalize).includes(p));
-    });
-  }
+  findItems(pattern) { return matchItems(this.data.items, pattern); }
 
   hasItem(pattern) { return this.findItems(pattern).length > 0; }
+
+  // ---- caches (read side; task 20 populates the store) ----------------
+  cacheMoney(name) { const c = this.data.caches[name]; return (c && c.money) || 0; }
+  cacheItems(name) { const c = this.data.caches[name]; return (c && c.items) || []; }
 
   // ---- money -----------------------------------------------------------
   adjustMoney(delta) {
@@ -342,13 +352,35 @@ export class GameState {
     if (i >= 0) { this.data.blessings.splice(i, 1); this.changed(); return true; }
     return false;
   }
-  hasCurse(type) { return this.data.curses.some((c) => c.type === type); }
-  addCurse(c) { this.data.curses.push(typeof c === 'string' ? { type: c } : c); this.changed(); }
-  removeCurse(type) {
-    const i = this.data.curses.findIndex((c) => c.type === type || type === '*');
-    if (i >= 0) { this.data.curses.splice(i, 1); this.changed(); return true; }
+  // ---- afflictions: curses / diseases / poisons ------------------------
+  // Each is {name, type, effects:[{ability,bonus}], cumulative, lift}, matched by
+  // name. Their ability effects feed afflictionBonus() until the affliction is
+  // cured; a non-cumulative re-infection has "no further effects".
+  _afflictionList(type) { return type === 'disease' ? this.data.diseases : (type === 'poison' ? this.data.poisons : this.data.curses); }
+  addAffliction(type, obj = {}) {
+    const list = this._afflictionList(type);
+    const rec = { name: obj.name || type, type, effects: obj.effects || [], cumulative: !!obj.cumulative, lift: obj.lift || null };
+    if (!rec.cumulative && list.some((a) => normalize(a.name || a.type || '') === normalize(rec.name))) return; // already afflicted
+    list.push(rec);
+    this.changed();
+  }
+  removeAffliction(type, name) {
+    const list = this._afflictionList(type);
+    if (name === '*') { const had = list.length; if (had) { list.length = 0; this.changed(); } return had > 0; }
+    if (name === '?') { if (list.length) { list.shift(); this.changed(); return true; } return false; }
+    const i = list.findIndex((a) => normalize(a.name || a.type || '') === normalize(name));
+    if (i >= 0) { list.splice(i, 1); this.changed(); return true; }
     return false;
   }
+
+  hasCurse(name) { return matchAffliction(this.data.curses, name); }
+  addCurse(c) { this.addAffliction('curse', typeof c === 'string' ? { name: c } : { name: c.name || c.type, effects: c.effects, cumulative: c.cumulative, lift: c.lift }); }
+  removeCurse(name) { return this.removeAffliction('curse', name); }
+
+  hasDisease(name) { return matchAffliction(this.data.diseases, name); }
+  hasPoison(name) { return matchAffliction(this.data.poisons, name); }
+  removeDisease(name) { return this.removeAffliction('disease', name); }
+  removePoison(name) { return this.removeAffliction('poison', name); }
 
   // ---- gods / titles ---------------------------------------------------
   hasGod(g) { return this.data.gods.includes(g); }
@@ -439,8 +471,32 @@ export function makeItem(kind, name, bonus = 0, ability = null, tags = []) {
   return { id: nid(), kind: kind || 'item', name, bonus: bonus || 0, ability: ability || null, tags: tags || [], wielded: false, worn: false };
 }
 
+/** Parse a comma/pipe-separated tags attribute into a clean string array. */
+export function parseTags(s) {
+  return (s || '').split(/[,|]/).map((t) => t.trim()).filter(Boolean);
+}
+
 export function normalize(s) {
   return (s || '').toLowerCase().replace(/[‘’]/g, "'").replace(/\s+/g, ' ').trim();
+}
+
+/** Match items (in any list) by a pipe-separated name/tag pattern. Shared by the
+ *  adventure sheet and cache lookups so both use the same matching rules. */
+export function matchItems(items, pattern) {
+  if (!pattern) return [];
+  const pats = pattern.split('|').map((p) => normalize(p));
+  return (items || []).filter((it) => {
+    const n = normalize(it.name);
+    return pats.some((p) => n === p || (it.tags || []).map(normalize).includes(p));
+  });
+}
+
+/** True if an affliction list holds `name`; '*'/'?'/'' mean "any affliction". */
+export function matchAffliction(list, name) {
+  if (!list || !list.length) return false;
+  if (name == null || name === '' || name === '*' || name === '?') return true;
+  const want = normalize(name);
+  return list.some((a) => normalize(typeof a === 'string' ? a : a.name) === want);
 }
 
 export function loadSlotMeta() {

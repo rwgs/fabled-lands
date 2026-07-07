@@ -1,5 +1,7 @@
 // data.js — loads the bundled book data and parses section XML into DOM trees.
 
+import { parseTags } from './state.js';
+
 const DATA_BASE = 'data/';
 
 let _meta = null;
@@ -107,6 +109,7 @@ export function parseAdventurers(xml) {
       name: el.getAttribute('name'),
       bonus: el.getAttribute('bonus') ? parseInt(el.getAttribute('bonus'), 10) : 0,
       ability: el.getAttribute('ability') || null,
+      tags: parseTags(el.getAttribute('tags')),
       profession: prof || null,
     });
   });

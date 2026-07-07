@@ -5,6 +5,7 @@ import * as data from './js/data.js';
 import { GameState, readSlotData, importSave, loadSlotMeta, deleteSlot, makeItem, nextFreeSlot } from './js/state.js';
 import * as eng from './js/engine.js';
 import { fightRound } from './js/combat.js';
+import { goodsFrom, buyTrade } from './js/market.js';
 import { Story } from './js/render.js';
 import { Narrator } from './js/tts.js';
 import { renderSheet } from './js/ui.js';
@@ -134,6 +135,146 @@ async function run() {
     eng.applyEffect(parse('<tick ability="charisma" effect="+cursed"/>'), gcz, {});
     let cursedWin = 0; for (let i=0;i<60;i++){ if (eng.rollDifficulty(gcz,'charisma',6,0).success) cursedWin++; }
     ok('effect="+cursed" auto-fails CHARISMA checks', gcz.abilityForCheck('charisma') < 0 && cursedWin === 0, `win=${cursedWin}`);
+
+    // --- wildcard / choice losses actually take things (task 16) ---
+    const gw = GameState.create({ name:'W', gender:'m', profession:'Warrior', book:1, adv });
+    gw.data.shards = 250;
+    eng.applyEffect(parse('<lose shards="*"/>'), gw, {});
+    ok('lose shards="*" empties the purse', gw.data.shards === 0);
+    // lose all possessions, but a "keep"-tagged item survives
+    const gp = GameState.create({ name:'P', gender:'m', profession:'Warrior', book:1, adv });
+    gp.data.items = []; gp.addItem(makeItem('item','rope')); gp.addItem(makeItem('item','heirloom',0,null,['keep']));
+    eng.applyEffect(parse('<lose item="*"/>'), gp, {});
+    ok('lose item="*" removes all non-keep possessions', gp.itemCount() === 1 && gp.findItems('heirloom').length === 1, 'items='+gp.itemCount());
+    // blessings: lose one (chosen), then lose all
+    const gbl = GameState.create({ name:'BL', gender:'m', profession:'Warrior', book:1, adv });
+    gbl.addBlessing('combat'); gbl.addBlessing('luck');
+    eng.applyEffect(parse('<lose blessing="?"/>'), gbl, { chooser: () => ['luck'] });
+    ok('lose blessing="?" removes the chosen blessing', !gbl.hasBlessing('luck') && gbl.hasBlessing('combat'));
+    eng.applyEffect(parse('<lose blessing="*"/>'), gbl, {});
+    ok('lose blessing="*" removes every blessing', gbl.data.blessings.length === 0);
+    // equipment confiscation via using="t"
+    const ge2 = GameState.create({ name:'E', gender:'m', profession:'Warrior', book:1, adv });
+    const hadWeapon = !!ge2.wieldedWeapon();
+    eng.applyEffect(parse('<lose weapon="?" using="t"/>'), ge2, {});
+    ok('lose weapon using="t" takes the wielded weapon', hadWeapon && !ge2.wieldedWeapon());
+    const hadArmour = !!ge2.wornArmour();
+    eng.applyEffect(parse('<lose armour="?" using="t"/>'), ge2, {});
+    ok('lose armour using="t" takes the worn armour', hadArmour && !ge2.wornArmour());
+    // lose every weapon
+    const ge3 = GameState.create({ name:'E3', gender:'m', profession:'Warrior', book:1, adv });
+    ge3.addItem(makeItem('weapon','dagger',1));
+    eng.applyEffect(parse('<lose weapon="*"/>'), ge3, {});
+    ok('lose weapon="*" removes every weapon', ge3.data.items.filter((i)=>i.kind==='weapon').length === 0);
+    // resurrection + curse wildcards
+    const gres = GameState.create({ name:'RS', gender:'m', profession:'Warrior', book:1, adv });
+    gres.addResurrection({book:1,section:'5'}); gres.addResurrection({book:2,section:'9'});
+    eng.applyEffect(parse('<lose resurrection="t"/>'), gres, {});
+    ok('lose resurrection="t" clears all arrangements', gres.data.resurrections.length === 0);
+    const gcu = GameState.create({ name:'CU', gender:'m', profession:'Warrior', book:1, adv });
+    gcu.addCurse({type:'a'}); gcu.addCurse({type:'b'});
+    eng.applyEffect(parse('<lose curse="*"/>'), gcu, {});
+    ok('lose curse="*" lifts all curses', gcu.data.curses.length === 0);
+    // cargo="?" removes one unit (was a no-op via indexOf('?'))
+    const gca = GameState.create({ name:'CA', gender:'m', profession:'Warrior', book:1, adv });
+    gca.addShip({type:'barque', crew:'average', cargo:['spices','silk'], docked:null});
+    eng.applyEffect(parse('<lose cargo="?"/>'), gca, {});
+    ok('lose cargo="?" removes one cargo unit', gca.ships[0].cargo.length === 1, 'cargo='+JSON.stringify(gca.ships[0].cargo));
+
+    // --- task 17: weapon/armour/tool, docked-location, natural, empty-god, unknown ---
+    const g17 = GameState.create({ name:'G17', gender:'m', profession:'Warrior', book:1, adv });
+    ok('if weapon="?" true when armed', eng.evaluateCondition(parse('<if weapon="?"/>'), g17));
+    ok('if not weapon="?" false when armed', eng.evaluateCondition(parse('<if not="t" weapon="?"/>'), g17) === false);
+    g17.data.items = g17.data.items.filter((i) => i.kind !== 'weapon'); g17.reconcileEquipment();
+    ok('if weapon="?" false when unarmed (book2/90 shape)', eng.evaluateCondition(parse('<if weapon="?"/>'), g17) === false);
+    ok('if not="t" weapon="?" true when unarmed', eng.evaluateCondition(parse('<if not="t" weapon="?"/>'), g17));
+    // weapon-type glob against the wielded weapon
+    const g17b = GameState.create({ name:'G17b', gender:'m', profession:'Warrior', book:1, adv });
+    g17b.data.items = g17b.data.items.filter((i) => i.kind !== 'weapon');
+    g17b.addItem(makeItem('weapon','iron sword',2));
+    ok('if weapon="*sword*" using="t" matches a wielded sword', eng.evaluateCondition(parse('<if weapon="*sword*" using="t"/>'), g17b));
+    ok('if weapon="*axe*" using="t" does not match a sword', eng.evaluateCondition(parse('<if weapon="*axe*" using="t"/>'), g17b) === false);
+    // docked-at-location (was "any ship anywhere")
+    const g17c = GameState.create({ name:'G17c', gender:'m', profession:'Warrior', book:1, adv });
+    g17c.addShip({type:'barque', crew:'average', cargo:[], docked:'Smogmaw'});
+    ok('if docked="Smogmaw" true when berthed there', eng.evaluateCondition(parse('<if docked="Smogmaw"/>'), g17c));
+    ok('if docked="Elsewhere" false', eng.evaluateCondition(parse('<if docked="Elsewhere"/>'), g17c) === false);
+    // modifier="natural" ignores item bonuses (book2/554, book5/435)
+    const g17d = GameState.create({ name:'G17d', gender:'m', profession:'Warrior', book:1, adv });
+    g17d.data.abilities.magic = 3; g17d.addItem(makeItem('tool','wand',4,'magic'));
+    ok('ability check uses the boosted score by default', eng.evaluateCondition(parse('<if ability="magic" greaterthan="5"/>'), g17d));
+    ok('modifier="natural" compares the written score', eng.evaluateCondition(parse('<if ability="magic" modifier="natural" greaterthan="5"/>'), g17d) === false);
+    ok('modifier="natural" lessthan uses the written score', eng.evaluateCondition(parse('<if ability="magic" modifier="natural" lessthan="4"/>'), g17d));
+    // god="" ("worships no god")
+    const g17e = GameState.create({ name:'G17e', gender:'m', profession:'Warrior', book:1, adv });
+    ok('if god="" true when worshipping no god', eng.evaluateCondition(parse('<if god=""/>'), g17e));
+    g17e.setGod('Elnir');
+    ok('if god="" false once worshipping a god', eng.evaluateCondition(parse('<if god=""/>'), g17e) === false);
+    // unknown attribute no longer silently passes
+    ok('unknown condition attr defaults to false', eng.evaluateCondition(parse('<if madeupattr="x"/>'), g17e) === false);
+    ok('unknown condition attr with not defaults true', eng.evaluateCondition(parse('<if not="t" madeupattr="x"/>'), g17e));
+    // disease/poison conditions recognised (populated in task 19)
+    const g17f = GameState.create({ name:'G17f', gender:'m', profession:'Warrior', book:1, adv });
+    ok('if disease="Ghoulbite" false when healthy', eng.evaluateCondition(parse('<if disease="Ghoulbite"/>'), g17f) === false);
+    g17f.data.diseases.push({ name:'Ghoulbite', type:'disease' });
+    ok('if disease="Ghoulbite" true once afflicted', eng.evaluateCondition(parse('<if disease="Ghoulbite"/>'), g17f));
+
+    // --- task 18: item tags are preserved through awards/buys + tag conditions ---
+    const g18 = GameState.create({ name:'G18', gender:'m', profession:'Warrior', book:1, adv });
+    const c18 = document.createElement('div');
+    const story18 = new Story(c18, g18, { navigate(){}, onDeath(){}, notify(){} });
+    story18.begin(parse('<section name="t"><item name="lantern" tags="light"/></section>'), 1, 't');
+    const takeBtn = c18.querySelector('.take-item');
+    ok('tagged award shows a Take button', !!takeBtn);
+    takeBtn.click();
+    const lantern = g18.findItems('lantern')[0];
+    ok('awarded item preserves its tags', !!lantern && (lantern.tags || []).includes('light'), JSON.stringify(lantern && lantern.tags));
+    ok('if item="?" tags="light" true with a tagged lantern', eng.evaluateCondition(parse('<if item="?" tags="light"/>'), g18));
+    ok('if item="?" tags="fire" false (no such tag)', eng.evaluateCondition(parse('<if item="?" tags="fire"/>'), g18) === false);
+    // the book1/460 sewers gate: non-mage with a light source may proceed
+    ok('§460 gate: light source lets a non-mage in', eng.evaluateCondition(parse('<if not="t" item="?" tags="light" profession="mage"/>'), g18) === false);
+    // market purchase preserves tags (buytags/tags)
+    const gmk = GameState.create({ name:'MK', gender:'m', profession:'Warrior', book:1, adv });
+    gmk.data.shards = 100;
+    buyTrade(gmk, goodsFrom(parse('<item name="candle" tags="light,useonce"/>'), 'item', 'candle', 0), 5);
+    const candle = gmk.findItems('candle')[0];
+    ok('bought item preserves its tags', !!candle && candle.tags.includes('light') && candle.tags.includes('useonce'), JSON.stringify(candle && candle.tags));
+
+    // --- task 19: curse/disease/poison inflict → detect → penalty → cure ---
+    const gt19 = GameState.create({ name:'T19', gender:'m', profession:'Warrior', book:1, adv });
+    gt19.data.abilities.combat = 6; gt19.data.abilities.charisma = 5; gt19.data.abilities.scouting = 5;
+    const combatBefore = gt19.ability('combat'), defBefore = gt19.defence();
+    eng.applyEffect(parse('<curse name="Curse of Tambu"><effect ability="charisma" bonus="-1"/><effect ability="combat" bonus="-1"/><effect ability="scouting" bonus="-1"/></curse>'), gt19, {});
+    ok('curse inflicted and detected by name', eng.evaluateCondition(parse('<if curse="Curse of Tambu"/>'), gt19));
+    ok('curse applies its ability penalty', gt19.ability('combat') === combatBefore - 1, `combat=${gt19.ability('combat')}`);
+    ok('curse penalty flows into Defence', gt19.defence() === defBefore - 1);
+    eng.applyEffect(parse('<lose curse="Curse of Tambu"/>'), gt19, {});
+    ok('lifting the curse restores the score', gt19.ability('combat') === combatBefore && gt19.defence() === defBefore && !gt19.hasCurse('Curse of Tambu'));
+
+    // disease: inflict, non-cumulative re-infection, cure via <lose disease="*">
+    const gd19 = GameState.create({ name:'D19', gender:'m', profession:'Warrior', book:1, adv });
+    gd19.data.abilities.sanctity = 5; const sanct0 = gd19.ability('sanctity');
+    eng.applyEffect(parse('<disease name="Ghoulbite"><effect ability="sanctity" bonus="-1"/></disease>'), gd19, {});
+    ok('disease detected and penalised', gd19.hasDisease('Ghoulbite') && gd19.ability('sanctity') === sanct0 - 1);
+    eng.applyEffect(parse('<disease name="Ghoulbite"><effect ability="sanctity" bonus="-1"/></disease>'), gd19, {});
+    ok('non-cumulative re-infection does not stack', gd19.data.diseases.length === 1 && gd19.ability('sanctity') === sanct0 - 1);
+    eng.applyEffect(parse('<lose disease="*"/>'), gd19, {});
+    ok('<lose disease="*"> cures and restores', gd19.data.diseases.length === 0 && gd19.ability('sanctity') === sanct0);
+
+    // poison: inflict + cure by name
+    const gp19 = GameState.create({ name:'P19', gender:'m', profession:'Warrior', book:1, adv });
+    gp19.data.abilities.thievery = 5; const thiev0 = gp19.ability('thievery');
+    eng.applyEffect(parse('<poison name="Scorpion Poison"><effect ability="thievery" bonus="-1"/></poison>'), gp19, {});
+    ok('poison detected and penalised', gp19.hasPoison('Scorpion Poison') && gp19.ability('thievery') === thiev0 - 1);
+    eng.applyEffect(parse('<lose poison="Scorpion Poison"/>'), gp19, {});
+    ok('poison cured by name restores', gp19.data.poisons.length === 0 && gp19.ability('thievery') === thiev0);
+
+    // cumulative curse stacks its penalty
+    const gc19 = GameState.create({ name:'C19', gender:'m', profession:'Warrior', book:1, adv });
+    gc19.data.abilities.combat = 8; const cb0 = gc19.ability('combat');
+    eng.applyEffect(parse('<curse name="Avenger\'s Bite" cumulative="t"><effect ability="combat" bonus="-1"/></curse>'), gc19, {});
+    eng.applyEffect(parse('<curse name="Avenger\'s Bite" cumulative="t"><effect ability="combat" bonus="-1"/></curse>'), gc19, {});
+    ok('cumulative curse stacks', gc19.data.curses.length === 2 && gc19.ability('combat') === cb0 - 2, `combat=${gc19.ability('combat')}`);
 
     // ranges
     ok('range 0-4 ~3', eng.matchRange('0-4', 3));

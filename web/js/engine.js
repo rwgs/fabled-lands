@@ -2,7 +2,7 @@
 // Reads attributes off the parsed XML elements and applies them to a GameState.
 
 import { ABILITIES } from './rules.js';
-import { makeItem, normalize } from './state.js';
+import { makeItem, normalize, matchItems } from './state.js';
 import { availableBooks } from './data.js';
 
 // ---- dice ------------------------------------------------------------------
@@ -119,6 +119,7 @@ function applyAbilityChange(el, state, sign, opts) {
 // doesn't yet handle) defaults to true — task 17 tightens that to a warning.
 export function evaluateCondition(el, state) {
   const get = (a) => el.getAttribute(a);
+  const tag = el.tagName.toLowerCase();
   let matched = false; // did we recognize any condition attribute?
   let result = false;  // OR accumulator over the recognized attributes
   const add = (present, cond) => { if (present != null) { matched = true; result = result || cond(); } };
@@ -133,13 +134,35 @@ export function evaluateCondition(el, state) {
     return ok;
   };
 
+  // cache= redirects money/item/equipment lookups to a named stash (task 20 stocks it).
+  const cacheN = get('cache');
+  const money = cacheN != null ? state.cacheMoney(cacheN) : state.data.shards;
+  const itemPool = cacheN != null ? state.cacheItems(cacheN) : state.data.items;
+  // safeAddGodd is a source-XML typo for safeAddGod (one section); accept both.
+  const safeAdd = get('safeAddGod') != null ? get('safeAddGod') : get('safeAddGodd');
+
   add(get('codeword'), () => matchCodewords(state, get('codeword')));
   add(get('ticks'), () => state.tickCount() === resolveValue(state, get('ticks')));
-  add(get('shards'), () => state.data.shards >= resolveValue(state, get('shards')));
-  add(get('item'), () => { const count = state.findItems(get('item')).length; const cmp = compare(count); return cmp == null ? count > 0 : cmp; });
-  add(get('god'), () => state.hasGod(get('god')));
+  add(get('shards'), () => money >= resolveValue(state, get('shards')));
+  add(get('item'), () => {
+    const pattern = get('item');
+    const tags = get('tags');
+    let matches;
+    if (pattern === '?') {
+      // "any possession", optionally filtered to those carrying every listed tag
+      // (e.g. <if item="?" tags="light"> — do you have a light source?).
+      matches = itemPool.slice();
+      if (tags) { const want = tags.split(/[,|]/).map((t) => normalize(t)); matches = matches.filter((it) => want.every((t) => (it.tags || []).map(normalize).includes(t))); }
+    } else {
+      matches = matchItems(itemPool, pattern);
+    }
+    const cmp = compare(matches.length);
+    return cmp == null ? matches.length > 0 : cmp;
+  });
+  // god="" means "worships no god"; otherwise a specific god.
+  add(get('god'), () => get('god') === '' ? state.data.gods.length === 0 : state.hasGod(get('god')));
   // Can become an initiate only if not godless and not already worshipping a god.
-  add(get('safeAddGod'), () => !state.data.godless && !state.hasGod(get('safeAddGod')) && state.data.gods.length === 0);
+  add(safeAdd, () => !state.data.godless && !state.hasGod(safeAdd) && state.data.gods.length === 0);
   add(get('blessing'), () => state.hasBlessing(get('blessing')));
   add(get('curse'), () => state.hasCurse(get('curse')));
   add(get('title'), () => get('title').split(/[|,]/).some((t) => state.hasTitle(t.trim())));
@@ -150,15 +173,82 @@ export function evaluateCondition(el, state) {
   add(get('book'), () => availableBooks().includes(Number(get('book'))));
   add(get('var'), () => { const v = state.getVar(get('var')); const cmp = compare(v); return cmp == null ? v !== 0 : cmp; });
   add(get('name'), () => { const v = state.codewordValue(get('name')); const cmp = compare(v); return cmp == null ? v !== 0 : cmp; });
-  add(get('ability'), () => { const ab = firstAbility(get('ability')); const v = ab ? state.abilityForCheck(ab) : 0; const cmp = compare(v); return cmp == null ? v > 0 : cmp; });
+  add(get('ability'), () => {
+    const ab = firstAbility(get('ability'));
+    const natural = normalize(get('modifier') || '') === 'natural';
+    const v = ab ? state.abilityForCheck(ab, natural) : 0;
+    const cmp = compare(v);
+    return cmp == null ? v > 0 : cmp;
+  });
+  add(get('weapon'), () => matchEquipment(itemPool, state, 'weapon', get('weapon'), el));
+  add(get('armour'), () => matchEquipment(itemPool, state, 'armour', get('armour'), el));
+  add(get('tool'), () => matchEquipment(itemPool, state, 'tool', get('tool'), el));
+  add(get('disease'), () => state.hasDisease(get('disease')));
+  add(get('poison'), () => state.hasPoison(get('poison')));
   add(get('ship'), () => state.ships.some((s) => s.type === get('ship')));
   add(get('crew'), () => state.ships.some((s) => s.crew === get('crew')));
   add(get('cargo'), () => state.ships.some((s) => (s.cargo || []).length > 0));
-  add(get('docked'), () => state.ships.length > 0);
+  // docked="<place>" needs a ship berthed there; docked="t" means berthed anywhere.
+  add(get('docked'), () => { const d = get('docked'); return boolAttr(d) ? state.ships.some((s) => !!s.docked) : state.ships.some((s) => normalize(s.docked) === normalize(d)); });
 
-  let final = matched ? result : true; // default true when nothing recognized
+  // Refuse to silently pass a genuinely unrecognized condition attribute — warn
+  // (once per attr) so a new/mis-spelled attribute surfaces instead of defaulting true.
+  let hasUnknown = false;
+  for (const at of el.getAttributeNames()) {
+    if (!KNOWN_IF_ATTRS.has(at)) {
+      hasUnknown = true;
+      const k = tag + ':' + at;
+      if (!_warnedIfAttrs.has(k)) { _warnedIfAttrs.add(k); console.warn(`evaluateCondition: unrecognized <${tag}> attribute "${at}"`); }
+    }
+  }
+
+  let final = matched ? result : (hasUnknown ? false : true);
   if (boolAttr(get('not'))) final = !final;
   return final;
+}
+
+// Attributes evaluateCondition understands: condition attributes plus the
+// comparators/modifiers/structural attributes that legitimately accompany them.
+const KNOWN_IF_ATTRS = new Set([
+  'codeword', 'ticks', 'item', 'shards', 'god', 'var', 'blessing', 'title', 'ship',
+  'profession', 'safeAddGod', 'safeAddGodd', 'book', 'dead', 'ability', 'weapon',
+  'crew', 'cache', 'resurrection', 'armour', 'name', 'gender', 'docked', 'curse',
+  'poison', 'tool', 'disease',
+  'not', 'greaterthan', 'equals', 'lessthan', 'tags', 'bonus', 'using', 'dice',
+  'modifier', 'hidden', 'group',
+]);
+const _warnedIfAttrs = new Set();
+
+function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+// Match an item name against a pattern that may use '*' as a wildcard (e.g.
+// "*sword*", "*axe"), used by the weapon-type checks in book 6.
+function globMatch(pattern, name) {
+  const p = normalize(pattern), n = normalize(name);
+  if (!p.includes('*')) return n === p;
+  return new RegExp('^' + p.split('*').map(escapeRegex).join('.*') + '$').test(n);
+}
+
+/** True if `pool` holds a weapon/armour/tool matching the condition. spec "?"/"*"
+ *  (or empty) = any of that kind; a name/glob (pipe-separated) matches by name;
+ *  bonus= ("N" or "N+") and tags= narrow; using="t" restricts to the wielded
+ *  weapon / worn armour. */
+function matchEquipment(pool, state, kind, spec, el) {
+  let items = (pool || []).filter((it) => it.kind === kind);
+  const bonus = el.getAttribute('bonus');
+  if (bonus != null) {
+    const m = String(bonus).match(/^(-?\d+)(\+)?$/);
+    if (m) { const b = parseInt(m[1], 10); items = m[2] ? items.filter((it) => (it.bonus || 0) >= b) : items.filter((it) => (it.bonus || 0) === b); }
+  }
+  const tags = el.getAttribute('tags');
+  if (tags) { const want = tags.split(/[,|]/).map((t) => normalize(t)); items = items.filter((it) => want.every((t) => (it.tags || []).map(normalize).includes(t))); }
+  if (boolAttr(el.getAttribute('using'))) {
+    const eq = kind === 'weapon' ? state.wieldedWeapon() : (kind === 'armour' ? state.wornArmour() : null);
+    items = (eq && items.includes(eq)) ? [eq] : [];
+  }
+  const s = String(spec || '').trim();
+  if (s === '' || s === '?' || s === '*') return items.length > 0;
+  const alts = s.split('|');
+  return items.some((it) => alts.some((a) => globMatch(a, it.name)));
 }
 
 function matchCodewords(state, spec) {
@@ -186,7 +276,9 @@ export function applyEffect(el, state, opts = {}) {
     case 'gain': return applyTick(el, state, opts);
     case 'adjust': return applyAdjust(el, state, opts);
     case 'set': return applySet(el, state, opts);
-    case 'curse': return applyCurse(el, state, opts);
+    case 'curse': return applyAffliction(el, state, 'curse');
+    case 'disease': return applyAffliction(el, state, 'disease');
+    case 'poison': return applyAffliction(el, state, 'poison');
     case 'effect': return applyItemEffect(el, state, opts);
     default: return '';
   }
@@ -197,7 +289,10 @@ function applyLose(el, state, opts) {
   const notes = [];
 
   if (get('codeword') != null) { get('codeword').split(/[|,]/).forEach((c) => state.removeCodeword(c.trim())); notes.push('lost codeword'); }
-  if (get('shards') != null) { const n = resolveValue(state, get('shards')); state.adjustMoney(-n); notes.push(`−${n} Shards`); }
+  if (get('shards') != null) {
+    if (get('shards') === '*') { if (state.data.shards) { state.data.shards = 0; state.changed(); notes.push('lost all Shards'); } }
+    else { const n = resolveValue(state, get('shards')); state.adjustMoney(-n); notes.push(`−${n} Shards`); }
+  }
   if (get('stamina') != null) {
     let n;
     const s = get('stamina');
@@ -209,21 +304,47 @@ function applyLose(el, state, opts) {
     const note = applyAbilityChange(el, state, -1, opts);
     if (note) notes.push(note);
   }
-  if (get('blessing') != null) { if (state.removeBlessing(get('blessing'))) notes.push('lost blessing'); }
-  if (get('curse') != null) { state.removeCurse(get('curse')); notes.push('curse lifted'); }
+  if (get('blessing') != null) {
+    const b = get('blessing');
+    if (b === '*') { const had = state.data.blessings.length; if (had) { state.data.blessings = []; state.changed(); notes.push('lost all blessings'); } }
+    else if (b === '?') {
+      if (state.data.blessings.length) {
+        const pick = opts.chooser ? opts.chooser(state.data.blessings.slice(), 1, 'blessing') : null;
+        const chosen = (pick && pick.length) ? pick[0] : state.data.blessings[0];
+        if (state.removeBlessing(chosen)) notes.push('lost blessing');
+      }
+    } else if (state.removeBlessing(b)) notes.push('lost blessing');
+  }
+  if (get('curse') != null) { if (state.removeCurse(get('curse'))) notes.push('curse lifted'); }
+  if (get('disease') != null) { if (state.removeDisease(get('disease'))) notes.push('cured disease'); }
+  if (get('poison') != null) { if (state.removePoison(get('poison'))) notes.push('cured poison'); }
   if (get('title') != null) { state.removeTitle(get('title')); }
   if (get('god') != null) { state.removeGod(get('god')); }
-  if (get('resurrection') != null) { state.data.resurrections.shift(); state.changed(); }
+  // "Lose any resurrection arrangements you had" clears every deal (book2/394,
+  // book6/230); the death handler consumes a single one separately.
+  if (get('resurrection') != null) { if (state.data.resurrections.length) { state.data.resurrections = []; state.changed(); notes.push('lost resurrection'); } }
   if (get('flag') != null) { state.setFlag(get('flag'), false); }
   if (get('price') != null) { state.setFlag(get('price'), true); }
   if (get('item') != null) {
     const pattern = get('item');
-    if (pattern === '*') { /* lose all-ish: skip destructive auto-clear */ }
-    else {
+    if (pattern === '*') {
+      // "Lose all your possessions." chance="x/y" (rare) makes each item's loss
+      // probabilistic; a "keep"-tagged item is never taken.
+      const chance = get('chance');
+      const [num, den] = chance && chance.includes('/') ? chance.split('/').map((x) => parseInt(x, 10)) : [1, 1];
+      let removed = 0;
+      state.data.items = state.data.items.filter((it) => {
+        if ((it.tags || []).map(normalize).includes('keep')) return true;
+        const lose = !chance || (den > 0 && Math.random() < num / den);
+        if (lose) removed++;
+        return !lose;
+      });
+      if (removed) { state.reconcileEquipment(); state.changed(); notes.push('lost all possessions'); }
+    } else {
       // "?" is the books' wildcard for "any possession" (the §521/§248/§373 thefts);
-      // a real name matches by name/tag. A tags= filter narrows the wildcard, but
-      // awarded items carry no tags in this engine, so a tag-filtered "?" harmlessly
-      // matches nothing (e.g. candle-burning), while a bare "?" matches every item.
+      // a real name matches by name/tag. A tags= filter narrows the wildcard to
+      // items carrying every listed tag — awarded/bought items now preserve their
+      // tags (task 18), so e.g. a tag-filtered "?" can target a light source.
       let matches = pattern === '?' ? state.data.items.slice() : state.findItems(pattern);
       const tags = get('tags');
       if (pattern === '?' && tags) {
@@ -239,11 +360,38 @@ function applyLose(el, state, opts) {
       if (toLose.length) notes.push('lost item');
     }
   }
-  if (get('cargo') != null || get('crew') != null || get('ship') != null) applyShipLose(el, state);
+  // Confiscation of equipment: <lose weapon|armour|tool="?"/"*"> — optionally
+  // using="t" ("the one you're wielding/wearing").
+  for (const kind of ['weapon', 'armour', 'tool']) {
+    if (get(kind) != null) { const note = loseEquipment(el, state, kind, opts); if (note) notes.push(note); }
+  }
+  if (get('cargo') != null || get('crew') != null || get('ship') != null) applyShipLose(el, state, opts);
   return notes.join(', ');
 }
 
-function applyShipLose(el, state) {
+/** Lose a weapon/armour/tool. spec "*" = all of that kind; "?"/name = one (via
+ *  opts.chooser or the first in inventory order); using="t" targets the currently
+ *  wielded weapon / worn armour. bonus=/tags= narrow the candidates. */
+function loseEquipment(el, state, kind, opts) {
+  const spec = el.getAttribute(kind);
+  let cands = state.data.items.filter((it) => it.kind === kind);
+  const bonus = el.getAttribute('bonus');
+  if (bonus != null && /^-?\d+$/.test(bonus)) cands = cands.filter((it) => (it.bonus || 0) === parseInt(bonus, 10));
+  const tags = el.getAttribute('tags');
+  if (tags) { const want = tags.split(/[,|]/).map((t) => normalize(t)); cands = cands.filter((it) => want.every((t) => (it.tags || []).map(normalize).includes(t))); }
+  if (boolAttr(el.getAttribute('using'))) {
+    const eq = kind === 'weapon' ? state.wieldedWeapon() : (kind === 'armour' ? state.wornArmour() : null);
+    cands = eq ? [eq] : cands.slice(0, 1);
+  }
+  if (!cands.length) return null;
+  let toLose;
+  if (spec === '*') toLose = cands;
+  else { const pick = opts.chooser ? opts.chooser(cands, 1, kind) : null; toLose = (pick && pick.length) ? pick : [cands[0]]; }
+  toLose.forEach((it) => state.removeItemById(it.id));
+  return toLose.length ? `lost ${kind}` : null;
+}
+
+function applyShipLose(el, state, opts = {}) {
   const ship = state.ships[0];
   if (!ship) return;
   if (el.getAttribute('crew') != null) {
@@ -253,8 +401,15 @@ function applyShipLose(el, state) {
   }
   if (el.getAttribute('cargo') != null) {
     const c = el.getAttribute('cargo');
+    const cargo = (ship.cargo ||= []);
     if (c === '*') ship.cargo = [];
-    else { const i = (ship.cargo || []).indexOf(c); if (i >= 0) ship.cargo.splice(i, 1); }
+    else if (c === '?') {
+      if (cargo.length) {
+        const pick = opts.chooser ? opts.chooser(cargo.slice(), 1, 'cargo') : null;
+        const idx = (pick && pick.length) ? cargo.indexOf(pick[0]) : 0;
+        cargo.splice(idx >= 0 ? idx : 0, 1);
+      }
+    } else { const i = cargo.indexOf(c); if (i >= 0) cargo.splice(i, 1); }
   }
   if (el.getAttribute('ship') != null) { state.data.ships.shift(); }
   state.changed();
@@ -343,10 +498,33 @@ function applySet(el, state) {
   return '';
 }
 
-function applyCurse(el, state) {
-  const type = el.getAttribute('type') || el.getAttribute('ability') || 'curse';
-  state.addCurse({ type, ability: el.getAttribute('ability') || null, bonus: parseInt(el.getAttribute('bonus') || '0', 10) });
-  return 'cursed';
+// Inflict a curse/disease/poison. The <curse>/<disease>/<poison> element carries
+// a name= and <effect ability=… bonus=…> children (an inherent ability penalty
+// held until the affliction is cured). cumulative="t" lets copies stack.
+function applyAffliction(el, state, type) {
+  const name = el.getAttribute('name') || type;
+  state.addAffliction(type, {
+    name,
+    effects: readEffects(el),
+    cumulative: boolAttr(el.getAttribute('cumulative')),
+    lift: el.getAttribute('lift') || null,
+  });
+  return type;
+}
+
+/** Read the <effect ability=… bonus=…> children of an affliction/item element. */
+function readEffects(el) {
+  const out = [];
+  el.querySelectorAll(':scope > effect').forEach((e) => {
+    const ab = firstAbility(e.getAttribute('ability'));
+    if (ab) out.push({ ability: ab, bonus: parseInt(e.getAttribute('bonus') || '0', 10) || 0 });
+  });
+  // A curse may also carry its penalty as attributes on the element itself.
+  if (!out.length && el.getAttribute('ability')) {
+    const ab = firstAbility(el.getAttribute('ability'));
+    if (ab) out.push({ ability: ab, bonus: parseInt(el.getAttribute('bonus') || '0', 10) || 0 });
+  }
+  return out;
 }
 
 function applyItemEffect(el, state) {

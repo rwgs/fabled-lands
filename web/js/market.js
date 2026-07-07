@@ -4,7 +4,7 @@
 // returns { ok, note? } so the renderer can decide whether to redraw and what
 // (if anything) to toast. No DOM — unit-testable headlessly.
 
-import { makeItem } from './state.js';
+import { makeItem, parseTags } from './state.js';
 import { SHIP_TYPES } from './rules.js';
 
 const shipCap = (type) => SHIP_TYPES[type]?.capacity || 1;
@@ -32,6 +32,7 @@ export function goodsFrom(node, kind, name, bonus) {
     bonus: bonus || 0,
     named: node.getAttribute('name') != null, // false => generic goods sold by COMBAT/Defence bonus
     ability: node.getAttribute('ability') || null,
+    tags: parseTags(node.getAttribute('buytags') || node.getAttribute('tags')),
     shipType: node.getAttribute('ship') || null,
     cargoName: node.getAttribute('cargo') || null,
     initialCrew: node.getAttribute('initialCrew') || null,
@@ -57,7 +58,7 @@ export function ownsGoods(state, goods) {
 /** Buy `goods` for `price`. Mutates state. Returns { ok, note? }. */
 export function buyTrade(state, goods, price) {
   if (state.data.shards < price) return { ok: false };
-  const { kind, name, bonus, ability, shipType, cargoName, initialCrew } = goods;
+  const { kind, name, bonus, ability, tags, shipType, cargoName, initialCrew } = goods;
   if (kind === 'ship') {
     state.adjustMoney(-price);
     state.addShip({ type: shipType, name: 'Ship', crew: initialCrew || 'average', cargo: [], docked: null });
@@ -70,7 +71,7 @@ export function buyTrade(state, goods, price) {
   } else {
     if (state.freeSlots() <= 0) return { ok: false, note: 'You can carry only 12 items.' };
     state.adjustMoney(-price);
-    state.addItem(makeItem(kind, name, bonus, ability));
+    state.addItem(makeItem(kind, name, bonus, ability, tags));
   }
   return { ok: true };
 }
@@ -100,10 +101,10 @@ export function sellTrade(state, goods, price) {
 }
 
 /** Apply an inline <buy> (a crew upgrade, or a single item). Mutates state. */
-export function applyInlineBuy(state, { price, crew, item, bonus, ability }) {
+export function applyInlineBuy(state, { price, crew, item, bonus, ability, tags }) {
   if (price) state.adjustMoney(-price);
   const ship = state.ships[0];
   if (crew && ship) ship.crew = crew;
-  else if (item) state.addItem(makeItem('item', item, bonus || 0, ability || null));
+  else if (item) state.addItem(makeItem('item', item, bonus || 0, ability || null, tags || []));
   state.changed();
 }
