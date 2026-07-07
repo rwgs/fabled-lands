@@ -53,6 +53,15 @@ export class Story {
       const lim = parseInt(c.getAttribute('limit') || '0', 10);
       if (g && lim > 0) this.ctx.groupLimits.set(g, lim);
     });
+    // Reset this section's coordination flags (price=/flag= keys). They gate the
+    // "pay to spin" roll idiom (task 30) and the paid-offering outcomes (book4/456)
+    // within a single visit; a flag left set by a previous incomplete visit must
+    // not pre-arm a roll or reveal an outcome for free. Only clear ones actually
+    // set, so a fresh visit (all clear) triggers no needless save.
+    sectionEl.querySelectorAll('[price], [flag]').forEach((n) => {
+      const p = n.getAttribute('price'); if (p && this.state.getFlag(p)) this.state.setFlag(p, false);
+      const f = n.getAttribute('flag'); if (f && this.state.getFlag(f)) this.state.setFlag(f, false);
+    });
     this.render();
   }
 
@@ -451,15 +460,28 @@ export class Story {
     // JaFL "price/flag" optional purchase: a node with price="k" is a click-to-pay
     // cost; nodes with flag="k" are its linked rewards. These must NOT auto-apply —
     // the player opts in by clicking the cost, which also applies the linked rewards.
-    if (price != null) return this.renderOptionalPay(container, node, path, price);
+    if (price != null) {
+      // A payment that arms a die roll (a <random flag="k"> gated on this cost) is
+      // the repeatable "pay to spin" idiom (book2/157, book3/314, book5/674…), not a
+      // one-shot reward purchase: route it to renderRollPayment so paying arms the
+      // roll instead of firing every outcome's effect at once (task 30).
+      if (this.isRollGate(price)) return this.renderRollPayment(container, node, path, price);
+      return this.renderOptionalPay(container, node, path, price);
+    }
     if (flag != null && this.sectionEl && this.sectionEl.querySelector(`[price="${flag}"]`)) {
-      if (!hidden) { // dependent reward: show its words; effect applies with the linked cost
-        const span = document.createElement('span');
-        span.className = 'fx';
-        this.appendChildren(span, node, path);
-        if (span.textContent.trim()) container.appendChild(span);
+      // A roll-gated reward (an <outcome> effect under a <random flag="k">) applies
+      // when its outcome is revealed by the roll — never on payment; fall through so
+      // it applies as a normal effect (it only renders once its outcome shows). Only
+      // a *non*-roll dependent reward is deferred to the linked cost click below.
+      if (!this.isRollGate(flag)) {
+        if (!hidden) { // dependent reward: show its words; effect applies with the linked cost
+          const span = document.createElement('span');
+          span.className = 'fx';
+          this.appendChildren(span, node, path);
+          if (span.textContent.trim()) container.appendChild(span);
+        }
+        return null;
       }
-      return null;
     }
 
     // Economic payment (Shards/item/cargo/ship) in a section with an escape route:
@@ -646,6 +668,49 @@ export class Story {
     return btn;
   }
 
+  // True when a die roll in this section is gated behind the payment keyed `k`:
+  // a <random|rankcheck|difficulty flag="k"> paired with a [price="k"] cost — the
+  // "pay to spin" idiom (book2/157 wheel, book3/314 tavern, book5/674 physician,
+  // book6/171/587 offerings, book6/50/628). (task 30)
+  isRollGate(k) {
+    return !!(k != null && this.sectionEl &&
+      this.sectionEl.querySelector(`random[flag="${k}"], rankcheck[flag="${k}"], difficulty[flag="${k}"]`));
+  }
+
+  // The "pay to spin" cost: paying arms the linked <random flag="k"> (sets flag k)
+  // but does NOT fire the outcome effects — the roll reveals the single outcome that
+  // applies. Repeatable: once the roll consumes the flag the cost re-enables, so a
+  // per-day / per-attempt section can be paid again (book3/314, book5/674, book6/628).
+  // Gated purely on the flag (no permanent memo), so it tracks the pay↔roll cycle.
+  renderRollPayment(container, node, path, key) {
+    const armed = this.state.getFlag(key);
+    const shards = node.getAttribute('shards');
+    const item = node.getAttribute('item');
+    const cost = shards != null ? resolveValue(this.state, shards) : 0;
+    const label = document.createElement('span');
+    this.appendChildren(label, node, path);
+    const text = label.textContent.trim()
+      || (cost ? `Pay ${cost} Shards` : (item && item !== '?' && item !== '*' ? `Hand over the ${titleCase(item)}` : 'Pay'));
+
+    const btn = document.createElement('button');
+    btn.className = 'btn-mini pay-action' + (armed ? ' done' : '');
+    btn.textContent = (armed ? '☑ ' : '') + text;
+    if (armed) {
+      btn.disabled = true; btn.title = 'Paid — now make the roll.';
+    } else if (shards != null && this.state.data.shards < cost) {
+      btn.disabled = true; btn.title = 'Not enough Shards';
+    } else if (item != null && item !== '?' && item !== '*' && !this.state.hasItem(item)) {
+      btn.disabled = true; btn.title = `You need the ${titleCase(item)}`;
+    } else {
+      btn.addEventListener('click', () => {
+        applyEffect(node, this.state, {}); // deduct the cost + set flag key (arms the roll)
+        this.rerender();
+      });
+    }
+    container.appendChild(btn);
+    return btn;
+  }
+
   // The "only one at a time" blessing rule for a price/flag purchase: true when the
   // buy grants exactly one blessing and the player already holds it. Multi-blessing
   // "choose one" temples (e.g. §690: charisma/scouting/combat/magic on one flag) are
@@ -681,6 +746,19 @@ export class Story {
     return true;
   }
 
+  // price/flag gate on navigation (JaFL GotoNode.canUse): a <goto flag="k"> is
+  // usable only once flag k is set; a <goto price="k"> only while it is clear —
+  // the "pay to spin" exit (book2/157 → 19, book6/628 → 8, book3/680 → 407): while
+  // the payment is armed (paid, not yet resolved) the exit is withheld, and once the
+  // roll consumes the flag it reopens. Returns a reason when gated out, else null.
+  flagGate(node) {
+    const flag = node.getAttribute('flag');
+    const price = node.getAttribute('price');
+    if (flag != null && !this.state.getFlag(flag)) return 'not yet available';
+    if (price != null && this.state.getFlag(price)) return 'resolve this first';
+    return null;
+  }
+
   renderGoto(container, node, path) {
     const section = node.getAttribute('section');
     if (section == null) return null;
@@ -702,6 +780,8 @@ export class Story {
 
     if (!canSail) { link.disabled = true; link.title = 'You need a ship here.'; }
     this.deadGate(node, link); // dead="t" only for a dead player, dead="f" only while alive
+    const fg = this.flagGate(node); // price/flag "pay to spin" exit gate (task 30)
+    if (fg) { link.disabled = true; link.classList.add('gated'); link.title = fg; }
 
     link.addEventListener('click', () => {
       if (!bookAvailable) { this.notify(`“${bookTitle(targetBook)}” (Book ${targetBook}) isn’t included in this edition.`, 'warn'); return; }
@@ -865,6 +945,8 @@ export class Story {
     // dead="t" choices are only for a dead player (and dead="f" only while alive) — task 28.
     const deadAttr = node.getAttribute('dead');
     if (deadAttr != null && boolAttr(deadAttr) !== this.state.isDead()) reasons.push(boolAttr(deadAttr) ? 'only if you are dead' : 'only while you live');
+    const fg = this.flagGate(node); // price/flag "pay to spin" gate (task 30)
+    if (fg) reasons.push(fg);
 
     if (cost) {
       const tag = document.createElement('span');
@@ -982,11 +1064,25 @@ export class Story {
     widget.className = 'roll';
     container.appendChild(widget);
 
-    const stored = this.ctx.rolls.get(key);
+    // Pay-gated roll (book2/157 etc.): the roll enables only once its payment sets
+    // the flag; rolling consumes the flag, and a fresh payment re-arms it. (task 30)
+    const flag = node.getAttribute('flag');
+    const gated = flag != null && this.isRollGate(flag);
+    const armed = gated ? this.state.getFlag(flag) : true;
+    let stored = this.ctx.rolls.get(key);
+    // Re-arm: a new payment (flag set again) after a prior spin drops the old result
+    // so the player can roll afresh — the per-visit "spin again" cycle.
+    if (gated && armed && stored) { this.ctx.rolls.delete(key); stored = null; }
+
     if (stored) {
       this.showDiceResult(widget, stored.dice, `Rolled ${stored.total}`, '', true);
+    } else if (gated && !armed) {
+      const btn = this.rollButton(`Roll ${diceWord(dice)}`, widget, () => {});
+      btn.disabled = true; btn.title = 'Pay first to make this roll.';
+      widget.appendChild(btn);
     } else {
       widget.appendChild(this.rollButton(`Roll ${diceWord(dice)}`, widget, () => {
+        if (gated) this.state.setFlag(flag, false); // consume the payment — re-pay to spin again
         const r = rollDice(dice);
         const total = r.total + childAdjustment(node, this.state);
         const res = { kind: 'random', dice: r.dice, total };
@@ -1704,13 +1800,17 @@ export class Story {
 
   // ---- rest ----------------------------------------------------------------
   renderRest(container, node, path) {
-    const perUse = node.getAttribute('stamina') || '1';
+    // A <rest> with no stamina= restores Stamina to full ("heal all lost Stamina" —
+    // safe houses, temples, healers); with stamina= it heals that fixed/dice amount.
+    // Passing null (not a defaulted "1") tells applyRest to restore to full. (task 31)
+    const hasAmt = node.hasAttribute('stamina');
+    const perUse = hasAmt ? node.getAttribute('stamina') : null;
     const cost = node.getAttribute('shards') ? resolveValue(this.state, node.getAttribute('shards')) : 0;
     const box = document.createElement('span');
     const btn = document.createElement('button');
     btn.className = 'btn-secondary';
-    const heal = /d/i.test(perUse) ? perUse : parseInt(perUse, 10);
-    btn.textContent = cost ? `Rest (+${heal} Stamina, ${cost} Shards)` : `Rest (+${heal} Stamina)`;
+    const healLabel = hasAmt ? `+${/d/i.test(perUse) ? perUse : parseInt(perUse, 10)} Stamina` : 'heal all Stamina';
+    btn.textContent = cost ? `Rest (${healLabel}, ${cost} Shards)` : `Rest (${healLabel})`;
     const full = this.state.data.stamina >= this.state.data.staminaMax;
     btn.disabled = full || (cost > 0 && this.state.data.shards < cost);
     if (full) btn.title = 'Already at full Stamina';

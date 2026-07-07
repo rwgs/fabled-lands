@@ -1016,6 +1016,103 @@ async function run() {
     mapSell().click();
     ok('§30 selling the map credits 150 and removes it', g30t.findItems('treasure map').length === 0 && g30t.data.shards === 450, `sh=${g30t.data.shards}`);
 
+    // --- task 30: gate <random flag="k"> rolls behind their payment ---
+    window.__FL_INSTANT_DICE__ = true;                 // resolve dice animation instantly
+    const settle = () => new Promise(r => setTimeout(r, 30));
+    // isRollGate distinguishes a "pay to spin" cost from a plain reward purchase.
+    const stGate = new Story(document.createElement('div'), GameState.create({ name:'GG', gender:'m', profession:'Warrior', book:2, adv }), { navigate(){}, onDeath(){}, notify(){} });
+    stGate.book = 2;
+    stGate.sectionEl = parse('<section><lose shards="5" price="x"/><random flag="x"/></section>');
+    ok('isRollGate true for a random-gated price', stGate.isRollGate('x') === true);
+    stGate.sectionEl = parse('<section><lose shards="5" price="y"/><tick blessing="combat" flag="y"/></section>');
+    ok('isRollGate false for a plain reward flag', stGate.isRollGate('y') === false);
+    // <goto price="k"> is open only while the flag is clear (JaFL GotoNode.canUse).
+    stGate.sectionEl = parse('<section/>');
+    stGate.state.setFlag('x', false);
+    const gotoOpen = stGate.renderGoto(document.createElement('div'), parse('<goto section="19" price="x"/>'), 'g1');
+    ok('goto price= open while flag clear', gotoOpen.disabled === false);
+    stGate.state.setFlag('x', true);
+    const gotoShut = stGate.renderGoto(document.createElement('div'), parse('<goto section="19" price="x"/>'), 'g2');
+    ok('goto price= withheld while flag set', gotoShut.disabled === true);
+
+    // §2.157 golden wheel: pay 20 to arm a 1-die spin (the classic idiom).
+    const g157 = GameState.create({ name:'W157', gender:'m', profession:'Warrior', book:2, adv });
+    g157.data.shards = 100;
+    const c157 = document.createElement('div');
+    const st157 = new Story(c157, g157, { navigate(){}, onDeath(){}, notify(){} });
+    const s157 = await data.getSection(2,'157'); st157.begin(s157,2,'157');
+    const roll157 = () => c157.querySelector('.roll .btn-roll');
+    const pay157 = () => c157.querySelector('.pay-action');
+    const goto19 = () => Array.from(c157.querySelectorAll('.goto')).find(b => b.textContent.trim() === '19');
+    ok('§157 roll is disabled until paid', !!roll157() && roll157().disabled === true, `dis=${roll157() && roll157().disabled}`);
+    ok('§157 pay button enabled; exit (19) open before paying', !!pay157() && !pay157().disabled && !!goto19() && !goto19().disabled);
+    const ab0 = JSON.stringify(g157.data.abilities), stm0 = g157.data.stamina, bl0 = g157.data.blessings.length, ti0 = g157.data.titles.length;
+    pay157().click();
+    ok('§157 paying deducts exactly 20 Shards', g157.data.shards === 80, `sh=${g157.data.shards}`);
+    ok('§157 paying fires NO outcome effect (arms only)', JSON.stringify(g157.data.abilities) === ab0 && g157.data.stamina === stm0 && g157.data.blessings.length === bl0 && g157.data.titles.length === ti0, `ab=${JSON.stringify(g157.data.abilities)} st=${g157.data.stamina} bl=${g157.data.blessings.length} ti=${g157.data.titles.length}`);
+    ok('§157 roll armed + exit (19) withheld while paid, unrolled', !!roll157() && !roll157().disabled && !!goto19() && goto19().disabled === true);
+    roll157().click(); await settle();
+    ok('§157 rolling shows a die and reveals exactly one outcome', !!c157.querySelector('.die') && c157.querySelectorAll('.branch').length === 1, `dice=${!!c157.querySelector('.die')} branches=${c157.querySelectorAll('.branch').length}`);
+    ok('§157 exit (19) reopens once the spin resolves', !!goto19() && goto19().disabled === false);
+    // re-arm: paying again drops the prior result and re-enables the roll.
+    pay157().click();
+    ok('§157 re-paying re-arms the roll (fresh button, no stale die)', g157.data.shards === 60 && !!roll157() && !roll157().disabled && !c157.querySelector('.die'), `sh=${g157.data.shards} die=${!!c157.querySelector('.die')}`);
+
+    // §3.314 tavern: 1 Shard/day, repeatable — the roll re-arms per payment.
+    const g314 = GameState.create({ name:'W314', gender:'m', profession:'Warrior', book:3, adv });
+    g314.data.shards = 10;
+    const c314 = document.createElement('div');
+    const st314 = new Story(c314, g314, { navigate(){}, onDeath(){}, notify(){} });
+    const s314 = await data.getSection(3,'314'); st314.begin(s314,3,'314');
+    const roll314 = () => c314.querySelector('.roll .btn-roll');
+    const pay314 = () => c314.querySelector('.pay-action');
+    ok('§314 roll gated before payment', !!roll314() && roll314().disabled === true);
+    pay314().click();
+    ok('§314 pay deducts 1 Shard and arms the roll', g314.data.shards === 9 && !!roll314() && !roll314().disabled, `sh=${g314.data.shards}`);
+    roll314().click(); await settle();
+    ok('§314 rolled once; pay re-enabled for another day', !!c314.querySelector('.die') && !!pay314() && !pay314().disabled);
+    pay314().click();
+    ok('§314 re-pay deducts another Shard and re-arms', g314.data.shards === 8 && !!roll314() && !roll314().disabled, `sh=${g314.data.shards}`);
+
+    // §5.674 physician: flag "c" gate; paying must not cure/damage until the roll.
+    const g674 = GameState.create({ name:'W674', gender:'m', profession:'Warrior', book:5, adv });
+    g674.data.shards = 100;
+    const c674 = document.createElement('div');
+    const st674 = new Story(c674, g674, { navigate(){}, onDeath(){}, notify(){} });
+    const s674 = await data.getSection(5,'674'); st674.begin(s674,5,'674');
+    const roll674 = () => c674.querySelector('.roll .btn-roll');
+    ok('§674 roll gated before payment', !!roll674() && roll674().disabled === true);
+    const stm674 = g674.data.stamina;
+    c674.querySelector('.pay-action').click();
+    ok('§674 pay charges 25 and fires no outcome (stamina intact)', g674.data.shards === 75 && g674.data.stamina === stm674, `sh=${g674.data.shards} st=${g674.data.stamina}`);
+    ok('§674 roll armed after paying', !!roll674() && !roll674().disabled);
+
+    // --- task 31: <rest> with no stamina= restores Stamina to full ---
+    const gR = GameState.create({ name:'R', gender:'m', profession:'Warrior', book:1, adv });
+    gR.data.staminaMax = 12; gR.data.stamina = 3;
+    ok('applyRest(null) restores Stamina to full', eng.applyRest(gR, null, 0) === 9 && gR.data.stamina === 12, `st=${gR.data.stamina}`);
+    gR.data.stamina = 10;
+    ok('applyRest("3") heals a fixed amount, clamped to max', eng.applyRest(gR, '3', 0) === 2 && gR.data.stamina === 12, `st=${gR.data.stamina}`);
+    gR.data.stamina = 5;
+    ok('applyRest("") (blank) restores to full', eng.applyRest(gR, '', 0) === 7 && gR.data.stamina === 12, `st=${gR.data.stamina}`);
+    gR.data.stamina = 8; gR.data.shards = 50;
+    ok('applyRest full-restore still charges the cost', eng.applyRest(gR, null, 20) === 4 && gR.data.shards === 30 && gR.data.stamina === 12, `st=${gR.data.stamina} sh=${gR.data.shards}`);
+    // render: a <rest stamina="2"> still labels a fixed +2; a bare <rest> labels "heal all".
+    const stRl = new Story(document.createElement('div'), gR, { navigate(){}, onDeath(){}, notify(){} });
+    stRl.sectionEl = parse('<section/>'); stRl.book = 1; gR.data.stamina = 1;
+    const restFixed = stRl.renderRest(document.createElement('div'), parse('<rest stamina="2">rest a bit</rest>'), 'rr');
+    ok('<rest stamina="2"> labels a fixed +2 Stamina', /\+2 Stamina/.test(restFixed.textContent), restFixed.textContent);
+    // §1.114 safe house: a bare <rest> heals all lost Stamina on click.
+    const g114 = GameState.create({ name:'R114', gender:'m', profession:'Warrior', book:1, adv });
+    g114.data.staminaMax = 12; g114.data.stamina = 4;
+    const c114 = document.createElement('div');
+    const st114 = new Story(c114, g114, { navigate(){}, onDeath(){}, notify(){} });
+    const s114 = await data.getSection(1,'114'); st114.begin(s114,1,'114');
+    const restBtn = () => Array.from(c114.querySelectorAll('.btn-secondary')).find(b => /Rest/.test(b.textContent));
+    ok('§114 shows a "heal all Stamina" rest button', !!restBtn() && /heal all Stamina/.test(restBtn().textContent), restBtn() ? restBtn().textContent : 'none');
+    restBtn().click();
+    ok('§114 resting heals all lost Stamina', g114.data.stamina === 12, `st=${g114.data.stamina}`);
+
     // --- narration (TTS): sentence wrapping preserves interactivity ---
     const narrator = new Narrator();
     ok('TTS supported in test browser', narrator.supported === true);

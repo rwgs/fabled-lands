@@ -25,7 +25,7 @@ the book XML corpus.
 - [x] 27. Cap visit-box ticks and make `ticks=` guards robust
 - [x] 28. Honour `dead="t"` on `<goto>`/`<choice>`
 - [x] 29. Market & item polish: currency items, pipe names, headers *(parts 2 & 5 split → 40, 41)*
-- [ ] 30. Gate `<random flag=…>` rolls behind their payment
+- [x] 30. Gate `<random flag=…>` rolls behind their payment
 - [ ] 31. `<rest>` with no `stamina=` should restore to full
 - [ ] 40. `<market currency="…">` alternate-currency markets
 - [ ] 41. Item `<effect>` system (use/aura/wielded/ability) and `<sold>` sell-hooks
@@ -44,6 +44,8 @@ the book XML corpus.
 - [ ] 37. Fix the `safeAddGodd` typo in the source XML
 - [ ] 38. Gate cache widgets on `lock`/`unlock` under the single-pass render (book1/91 gamble)
 - [ ] 39. Defer confiscate-and-return `<transfer … from=>` until a fight resolves (book2/462)
+- [ ] 42. `<rest>` (and other roll/action children) inside a `<group>` are ignored
+- [ ] 43. price/flag "choose one" purchases over-apply every linked reward
 
 **Done**
 - [x] 1. Gate combat progression / model fight outcomes
@@ -855,13 +857,53 @@ which is a sheet-UI + effect subsystem.
 
 ---
 
-## 30. Gate `<random flag=…>` rolls behind their payment  — MEDIUM
+## 30. Gate `<random flag=…>` rolls behind their payment  — **done**
 
-`renderRandom` (render.js:793) ignores `flag=`, so pay-gated rolls are free and
-the paired "Pay N Shards" button burns money for nothing — book2/157's golden
-wheel (20 Shards per spin), book3/314, book5/674, book6/171. Honour the
-`flag=`/`price=` idiom the way `renderPassive`/`renderOptionalPay` already do:
-the roll enables only after payment, and re-arms per payment.
+`renderRandom` ignored `flag=`, so a pay-gated roll was free, and the paired
+`<lose … price="k">` (routed through `renderOptionalPay`) applied **every**
+`[flag="k"]` node on payment — in book2/157 that fired *all six* wheel outcomes
+at once (lose an ability *and* gain one *and* lose Stamina *and* lose all
+blessings…). The whole "pay to spin" idiom now works, faithful to the Java
+engine (`RandomNode`/`LoseNode`/`GotoNode` flag listeners + `canUse`):
+
+- **Roll gate** (`renderRandom`): a `<random flag="k">` paired with a
+  `[price="k"]` cost (`isRollGate`) is disabled until the payment sets flag `k`;
+  rolling **consumes** the flag (`setFlag(k,false)`), and a fresh payment
+  re-arms it (armed-with-a-stale-result ⇒ drop the result, show the button
+  again) — the per-visit "spin again" cycle.
+- **Payment** (`renderRollPayment`, split from `renderOptionalPay`): paying a
+  roll-gate cost deducts Shards/an item and sets flag `k` **only** — it no longer
+  fires the outcome effects. Gated purely on the flag (no one-shot memo), so it
+  re-enables once the roll clears the flag; repeatable per-day/-attempt
+  (book3/314, book5/674, book6/628). Handles item costs (book6/50 dragon mask).
+- **Outcome effects** (`renderPassive`): a roll-gated `flag="k"` reward (a
+  `<lose>/<gain>` inside a `<random>`-fed `<outcome>` — book2/157, book5/674)
+  is no longer suppressed as a "dependent reward"; it applies when its outcome is
+  revealed by the roll (an `ability="?"` outcome offers its chooser).
+- **`<goto>/<choice>` gate** (`flagGate`, JaFL `canUse`): a `<goto price="k">`
+  exit is withheld while the payment is armed (paid, unrolled) and reopens once
+  the roll clears the flag (book2/157 → 19, book6/628 → 8, book3/680 → 407); a
+  `<goto flag="k">` is the mirror. Never strands — the roll button always keeps a
+  way forward, and the dead-end guard counts disabled controls.
+- **Stale-flag reset** (`begin`): a section's `price=`/`flag=` coordination flags
+  are cleared on entry (only if set), so leaving mid-transaction can't pre-arm a
+  roll or reveal a paid outcome for free on the next visit (also hardens the
+  book4/456 paid-offering idiom). Flags are always section-local in the corpus.
+
+Covers book2/157, book3/314, book5/674, book6/171/50/587/628 (every
+`<random flag=>` in the corpus; all pair with a `[price=]`).
+
+Known limitation (per-visit memo, task 11): a *repeated identical* outcome
+within one visit (e.g. rolling dysentery twice in book3/314) doesn't re-apply its
+memoized narrative effect — the roll re-arms and re-reveals, but `fx@<path>` is
+still deduped. The primary bug (free rolls / pay firing every outcome) is fixed.
+
+Verified: 19 new headless assertions (`isRollGate` true/false; `<goto price>`
+open-while-clear / shut-while-set; §157 roll-disabled-until-paid, pay deducts 20
+and fires **no** outcome, roll armed + exit withheld, spin reveals exactly one
+outcome + reopens the exit, re-pay re-arms; §314 pay→roll→re-pay repeat cycle;
+§674 flag-"c" gate + pay charges 25 with Stamina intact) + full
+render-every-section scan (4369). `RESULT ALL PASS pass=338 fail=0`.
 
 ---
 
@@ -1020,3 +1062,39 @@ are unhandled. Concretely:
   them from the sell path (`market.sellTrade` / the inline sell), matching
   `item=`/`tags=` for a market-level `<sold>`.
 Cover each effect type + the sell-hook with headless unit tests.
+
+---
+
+## 42. `<rest>` (and other roll/action children) inside a `<group>` are ignored  — LOW
+
+Found while doing task 30. `renderGroup` (render.js) collects only
+`lose, tick, gain, set, curse` as the group's on-click effects, so a `<rest>`
+child is silently dropped. In book6/628 the "regain 1 Stamina point"
+`<group force="t">` wraps `<text>` + `<rest stamina="1"/>` + `<lose flag="x"/>`:
+clicking it clears the flag but **never heals** the Stamina point. Any
+`<difficulty>`/`<random>`/`<rankcheck>` inside a group is likewise unrun (e.g.
+book3/680's "make a MAGIC roll" group holds the `<difficulty>` inline). Fix:
+either apply an inner `<rest>` on the group click (headlessly via
+`engine.applyRest`) and run any inner roll, or lift such children out of the
+group so they render as their own widgets. Add a §628 heal test.
+
+---
+
+## 43. price/flag "choose one" purchases over-apply every linked reward  — MEDIUM
+
+Found while doing task 30. For a *non*-roll price/flag purchase,
+`renderOptionalPay` applies **every** `[flag="k"]` node on a single payment. When
+the linked rewards are a "choose one" menu this grants them all:
+- **book6/171** (`price="y"`, 60 Shards) — "choose the blessing you want … [one
+  of charisma, combat, magic, sanctity, scouting, thievery]" currently grants
+  *all six* blessings for 60 Shards.
+- **book5/152** (`price="curse1"`) — "for each curse you want lifted, pay …"
+  currently lifts *every* listed curse from one payment (and `price="curse2"`).
+
+The Java engine renders each linked reward as its own enabled action that the
+player activates individually once the flag is set (`LoseNode`/`TickNode` flag
+listeners), consuming the flag as it fires. Port that: after a `price=` payment
+sets flag `k`, reveal the `[flag="k"]` rewards as click-to-apply options (or a
+chooser) rather than auto-applying the lot; a single-reward flag (book2/202
+storm) still auto-applies as today. Add tests (§171 grants exactly one chosen
+blessing for 60; §152 lifts exactly one curse per payment).

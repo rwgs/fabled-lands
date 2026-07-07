@@ -771,13 +771,20 @@ export function evalExpression(expr, state) {
 }
 
 // ---- rest ------------------------------------------------------------------
-/** Rest action: pay an optional shard cost, then heal `perUse` Stamina (a plain
- *  number or a dice expression like "1d6"). Returns the amount healed. */
+/** Rest action: pay an optional shard cost, then heal Stamina. `perUse` is a plain
+ *  number or a dice expression like "1d6"; a null/blank `perUse` (a <rest> with no
+ *  stamina= attribute) restores Stamina to full — JaFL RestNode treats a missing
+ *  stamina attribute as "heal all your Stamina" (safe houses/temples/healers, 62×
+ *  in the corpus). Returns the amount actually healed. (task 31) */
 export function applyRest(state, perUse, cost) {
   if (cost) state.adjustMoney(-cost);
-  const amt = resolveValue(state, String(perUse));
-  state.healStamina(amt);
-  return amt;
+  const before = state.data.stamina;
+  if (perUse == null || String(perUse).trim() === '') {
+    state.healStamina(state.data.staminaMax); // clamps to max ⇒ restore to full
+  } else {
+    state.healStamina(resolveValue(state, String(perUse)));
+  }
+  return state.data.stamina - before;
 }
 
 // ---- resurrection ----------------------------------------------------------
