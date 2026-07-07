@@ -4,7 +4,7 @@
 import * as data from './js/data.js';
 import { GameState, readSlotData, importSave, loadSlotMeta, deleteSlot, makeItem, nextFreeSlot, sanitizeData } from './js/state.js';
 import * as eng from './js/engine.js';
-import { fightRound } from './js/combat.js';
+import { fightRound, makeFight, groupFightRound, isDefeated } from './js/combat.js';
 import { goodsFrom, buyTrade, applyInlineBuy, sellInlineItem, sellCargo } from './js/market.js';
 import { Story } from './js/render.js';
 import { Narrator } from './js/tts.js';
@@ -808,6 +808,91 @@ async function run() {
     g579.data.staminaMax = 20; g579.data.stamina = 20; g579.setVar('s', 7);
     eng.applyEffect(parse('<lose ability="stamina" amount="-s"><adjust ability="stamina" modifier="natural"/></lose>'), g579, {});
     ok('§2.579 unwounded Stamina reset to the 2d roll (7)', g579.data.staminaMax === 7, `max=${g579.data.staminaMax}`);
+
+    // --- task 26: the remaining <fight> attributes ---
+    // makeFight parses the new attributes.
+    const fparse = makeFight(parse('<fight name="X" combat="8" defence="20" stamina="21" attackDice="1" attacks="3" modifiers="noarmour" playerDefence="d" abilityDamaged="stamina" staminaLost="MD" group="g"/>'));
+    ok('makeFight reads attackDice/attacks/noArmour/playerDefence/abilityDamaged/staminaLost/group',
+      fparse.attackDice === 1 && fparse.attacks === 3 && fparse.noArmour === true && fparse.playerDefence === 'd' && fparse.abilityDamaged === 'stamina' && fparse.staminaLost === 'MD' && fparse.group === 'g',
+      JSON.stringify(fparse));
+    // preDamage: reduce the enemy's Stamina up front from a carried codeword (§Dawatsu).
+    const gpd = GameState.create({ name:'PD', gender:'m', profession:'Warrior', book:6, adv });
+    gpd.data.stamina = 200; gpd.data.staminaMax = 200; gpd.setCodewordValue('MorDamage', 30);
+    const fpd = makeFight(parse('<fight name="Dawatsu Morituri" combat="10" defence="20" stamina="38" preDamage="MorDamage"/>'), gpd);
+    ok('§6 preDamage reduces enemy Stamina up front (38−30=8)', fpd.stamina === 8, `stam=${fpd.stamina}`);
+    // preDamage large enough fells the enemy before the first blow.
+    const gpkd = GameState.create({ name:'PKD', gender:'m', profession:'Warrior', book:6, adv });
+    gpkd.setCodewordValue('MorDamage', 100);
+    const fpk = makeFight(parse('<fight name="Dawatsu Morituri" combat="10" defence="20" stamina="38" preDamage="MorDamage" flee="0"/>'), gpkd);
+    ok('preDamage can fell the enemy before the fight', fpk.outcome === 'win' && fpk.stamina === 0, `out=${fpk.outcome} stam=${fpk.stamina}`);
+    // staminaLost: the codeword accumulates the damage the player deals to the enemy.
+    const gsl = GameState.create({ name:'SL', gender:'m', profession:'Warrior', book:6, adv });
+    gsl.data.stamina = 200; gsl.data.staminaMax = 200;
+    const fsl = makeFight(parse('<fight name="Dawatsu Morituri" combat="0" defence="0" stamina="10" staminaLost="MorDamage"/>'), gsl);
+    ok('staminaLost resets to 0 at fight start', gsl.codewordValue('MorDamage') === 0);
+    let gsGuard = 0; while (!fsl.outcome && !gsl.isDead() && gsGuard++ < 200) fightRound(gsl, fsl, null);
+    ok('staminaLost accumulates the damage dealt (= maxStamina)', fsl.outcome === 'win' && gsl.codewordValue('MorDamage') === fsl.maxStamina, `dmg=${gsl.codewordValue('MorDamage')} max=${fsl.maxStamina}`);
+    // attackDice=1: the player rolls one die, so a max total of combat+6 can never
+    // beat a Defence of combat+7 — the enemy's Stamina never drops.
+    const gad = GameState.create({ name:'AD', gender:'m', profession:'Warrior', book:6, adv });
+    gad.data.stamina = 200; gad.data.staminaMax = 200;
+    const adCombat = gad.ability('combat');
+    const fad = makeFight(parse(`<fight name="Wall" combat="0" defence="${adCombat + 7}" stamina="20" attackDice="1"/>`), gad);
+    for (let i = 0; i < 30; i++) fightRound(gad, fad, null);
+    ok('attackDice="1" caps the player roll (1 die, never beats Def=combat+7)', fad.stamina === 20, `stam=${fad.stamina}`);
+    // attacks=3: the enemy strikes three times per round (Tripling). Enemy Defence
+    // 50 keeps it alive so it always gets to retaliate.
+    const gat = GameState.create({ name:'AT', gender:'m', profession:'Warrior', book:5, adv });
+    gat.data.stamina = 400; gat.data.staminaMax = 400;
+    const fat = makeFight(parse('<fight name="Tripling" combat="4" defence="50" stamina="12" attacks="3"/>'));
+    fightRound(gat, fat, null);
+    ok('attacks="3" → enemy strikes three times per round', fat.log.filter((l) => /Tripling rolls/.test(l)).length === 3, JSON.stringify(fat.log));
+    // playerDefence override: a var replaces the sheet Defence (§Chimerical Beast/§Talanexor).
+    const gpv = GameState.create({ name:'PV', gender:'m', profession:'Warrior', book:6, adv });
+    gpv.setVar('pd', 100); gpv.data.stamina = 200; gpv.data.staminaMax = 200;
+    const fpv = makeFight(parse('<fight name="Beast" combat="50" defence="99" stamina="99" playerDefence="pd"/>'), gpv);
+    for (let i = 0; i < 40; i++) fightRound(gpv, fpv, null);
+    ok('playerDefence override protects (Def 100 > max enemy total 62)', gpv.data.stamina === 200, `stam=${gpv.data.stamina}`);
+    // modifiers="noarmour": the armour bonus is removed from the player's Defence.
+    // With an armour bonus of 11, an enemy of combat=(Defence−12) can never beat the
+    // full Defence but ALWAYS beats Defence−11, so a hit only lands with noarmour.
+    const gna = GameState.create({ name:'NA', gender:'m', profession:'Warrior', book:6, adv });
+    gna.data.items = gna.data.items.filter((it) => it.kind !== 'armour');
+    gna.addItem(makeItem('armour', 'test plate', 11));
+    gna.data.stamina = 200; gna.data.staminaMax = 200;
+    const defN = gna.defence(); const armN = gna.armourBonus();
+    const fna = makeFight(parse(`<fight name="Water Drake" combat="${defN - 12}" defence="99" stamina="99" modifiers="noarmour"/>`), gna);
+    const naBefore = gna.data.stamina;
+    fightRound(gna, fna, null); // one enemy strike lands for certain under noarmour
+    ok('modifiers="noarmour" drops the armour bonus (a hit lands)', armN === 11 && gna.data.stamina < naBefore, `arm=${armN} stam ${naBefore}->${gna.data.stamina}`);
+    // abilityDamaged="stamina": the wound permanently reduces max Stamina (§Big Boy/§Giant).
+    const gabd = GameState.create({ name:'ABD', gender:'m', profession:'Warrior', book:6, adv });
+    gabd.data.stamina = 200; gabd.data.staminaMax = 200;
+    const fabd = makeFight(parse(`<fight name="Big Boy" combat="${gabd.defence() + 20}" defence="99" stamina="99" abilityDamaged="stamina"/>`), gabd);
+    const maxBefore = gabd.data.staminaMax;
+    fightRound(gabd, fabd, null); // enemy always hits (combat = Def+20)
+    ok('abilityDamaged="stamina" cuts the unwounded max, not just current', gabd.data.staminaMax < maxBefore, `max ${maxBefore}->${gabd.data.staminaMax}`);
+    // useCache: the enemy wields the weapon/armour stashed in the cache (§6.635).
+    const guc = GameState.create({ name:'UC', gender:'m', profession:'Warrior', book:6, adv });
+    guc.cacheAddItem('6.635', makeItem('weapon', 'your sword', 3));
+    guc.cacheAddItem('6.635', makeItem('armour', 'your mail', 2));
+    const fuc = makeFight(parse('<fight name="Warrior Maid" combat="8" defence="16" stamina="18" useCache="6.635"/>'), guc);
+    ok('useCache adds the cached weapon+armour to the enemy (combat 8+3, defence 16+2)', fuc.combat === 11 && fuc.defence === 18, `c=${fuc.combat} d=${fuc.defence}`);
+    // group=: a simultaneous fight — the player strikes one foe, all living foes retaliate.
+    const ggr = GameState.create({ name:'GR', gender:'m', profession:'Warrior', book:6, adv });
+    ggr.data.stamina = 500; ggr.data.staminaMax = 500;
+    const gfights = [
+      makeFight(parse('<fight name="First Spider" combat="8" defence="0" stamina="6" group="s"/>'), ggr),
+      makeFight(parse('<fight name="Second Spider" combat="8" defence="0" stamina="6" group="s"/>'), ggr),
+    ];
+    ok('group not yet defeated', !gfights.every(isDefeated));
+    let grGuard = 0; while (!gfights.every(isDefeated) && !ggr.isDead() && grGuard++ < 300) groupFightRound(ggr, gfights, null);
+    ok('group fight resolves with all foes defeated', gfights.every(isDefeated) && !ggr.isDead(), `def=${gfights.map(isDefeated)} dead=${ggr.isDead()}`);
+    // §6.192 renders the combined group widget with a single Attack button.
+    const cgr = document.createElement('div');
+    const storyGr = new Story(cgr, GameState.create({ name:'GRV', gender:'m', profession:'Warrior', book:6, adv }), { navigate(){}, onDeath(){}, notify(){} });
+    const s192 = await data.getSection(6,'192'); storyGr.begin(s192,6,'192');
+    ok('§6.192 draws one combined group widget (not three)', cgr.querySelectorAll('.fight').length === 1 && /3 foes/.test(cgr.textContent), `boxes=${cgr.querySelectorAll('.fight').length}`);
 
     // buy a tool: grants a bonus tool tied to an ability and charges the price
     const gbtool = GameState.create({ name:'BT', gender:'m', profession:'Warrior', book:5, adv });

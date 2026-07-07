@@ -11,7 +11,7 @@ import {
   rollDifficulty, rollRankCheck, rollTraining, rollDice, matchRange, childAdjustment,
   applyRest, buyResurrectionDeal, abilityChoiceOptions,
 } from './engine.js';
-import { makeFight, fightRound } from './combat.js';
+import { makeFight, fightRound, groupFightRound, isDefeated } from './combat.js';
 import { shopKind, goodsFrom, ownsGoods, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo } from './market.js';
 import { normalize, makeItem, parseTags } from './state.js';
 import { ABILITY_LABEL, CREW_LEVELS } from './rules.js';
@@ -107,6 +107,7 @@ export class Story {
     // computeFightGate / applyFightGate.
     this.fightGate = this.computeFightGate(el);
     this.sectionFight = null; // the fight rendered this pass (set in renderFight)
+    this.renderedGroups = new Set(); // group= ids already drawn this pass (task 26)
     this.appendChildren(flow, el, 'r');
     this.applyFightGate(flow);
     this.root.appendChild(flow);
@@ -1211,10 +1212,16 @@ export class Story {
 
   // ---- fight ---------------------------------------------------------------
   renderFight(container, node, path) {
+    // group="G": all <fight> in the section sharing the id are one simultaneous
+    // battle (task 26). Draw the whole group once, at its first member, and skip
+    // the rest of the members this pass.
+    const group = node.getAttribute('group');
+    if (group) return this.renderGroupFight(container, node, group);
+
     const key = 'fight@' + path;
     let fight = this.ctx.fights.get(key);
     if (!fight) {
-      fight = makeFight(node);
+      fight = makeFight(node, this.state);
       this.ctx.fights.set(key, fight);
     }
     this.sectionFight = fight; // the section's fight, for the gate + death guard
@@ -1229,6 +1236,88 @@ export class Story {
     container.appendChild(box);
     this.drawFight(box, fight, node, dmgNode, fleeNode, key);
     return box;
+  }
+
+  // A simultaneous group fight: the player strikes one enemy, then every living
+  // enemy strikes back (§6.192/273/291/618). Rendered as a single combined widget.
+  renderGroupFight(container, node, group) {
+    if (this.renderedGroups.has(group)) return null; // already drawn at the first member
+    this.renderedGroups.add(group);
+    const members = Array.from(this.sectionEl.querySelectorAll('fight')).filter((f) => f.getAttribute('group') === group);
+    const fights = members.map((m, i) => {
+      const key = 'fightgrp@' + group + '.' + i;
+      let f = this.ctx.fights.get(key);
+      if (!f) { f = makeFight(m, this.state); this.ctx.fights.set(key, f); }
+      return f;
+    });
+    const dmgNode = this.findInSection('fightdamage');
+    // A shared proxy drives the fight gate + death guard for the whole group: a
+    // win once every foe is down; a (non-death) "lose" when the player is slain
+    // and the section has an "if you lose…" branch; otherwise unresolved/death.
+    const self = this;
+    this.sectionFight = {
+      name: fights.map((f) => f.name).join(', '),
+      get outcome() {
+        if (fights.every((f) => isDefeated(f))) return 'win';
+        if (self.state.isDead()) return (self.fightGate && self.fightGate.hasLosePath) ? 'lose' : null;
+        return null;
+      },
+    };
+    const box = document.createElement('div');
+    box.className = 'fight';
+    container.appendChild(box);
+    this.drawGroupFight(box, fights, dmgNode, group);
+    return box;
+  }
+
+  drawGroupFight(box, fights, dmgNode, group) {
+    box.innerHTML = '';
+    const title = document.createElement('div');
+    title.className = 'fight-title';
+    title.textContent = `⚔ ${fights.length} foes`;
+    box.appendChild(title);
+
+    fights.forEach((fight) => {
+      const stats = document.createElement('div');
+      stats.className = 'fight-stats' + (isDefeated(fight) ? ' defeated' : '');
+      stats.innerHTML =
+        `<span>${fight.name}</span><span>Combat ${fight.combat}</span><span>Defence ${fight.defence}</span>` +
+        `<span class="en-stam">${isDefeated(fight) ? 'defeated' : `Stamina ${fight.stamina}/${fight.maxStamina}`}</span>`;
+      box.appendChild(stats);
+    });
+
+    const you = document.createElement('div');
+    you.className = 'fight-stats you';
+    you.innerHTML = `<span>Your Combat ${this.state.ability('combat')}</span><span>Your Defence ${this.state.defence()}</span><span>Your Stamina ${this.state.data.stamina}/${this.state.data.staminaMax}</span>`;
+    box.appendChild(you);
+
+    const logEl = document.createElement('div');
+    logEl.className = 'fight-log';
+    const merged = fights.flatMap((f) => f.log).slice(-6);
+    merged.forEach((l) => { const p = document.createElement('div'); p.textContent = l; logEl.appendChild(p); });
+    box.appendChild(logEl);
+
+    if (fights.every((f) => isDefeated(f))) {
+      const b = document.createElement('div'); b.className = 'roll-outcome ok'; b.textContent = 'All foes are defeated!'; box.appendChild(b);
+      return;
+    }
+
+    const controls = document.createElement('div');
+    controls.className = 'fight-controls';
+    const attack = document.createElement('button');
+    attack.className = 'btn-roll';
+    attack.textContent = 'Attack';
+    attack.addEventListener('click', async () => {
+      controls.querySelectorAll('button').forEach((b) => (b.disabled = true));
+      await animateDice(box, true);
+      groupFightRound(this.state, fights, dmgNode);
+      // On any resolution (all foes down) or death, rerender so the gate (and the
+      // death/lose guard, via the sectionFight proxy above) re-evaluates.
+      if (fights.every((f) => isDefeated(f)) || this.state.isDead()) { this.rerender(); return; }
+      this.drawGroupFight(box, fights, dmgNode, group); // fight continues
+    });
+    controls.appendChild(attack);
+    box.appendChild(controls);
   }
 
   // The first element with `tag` anywhere in the current section (sections carry

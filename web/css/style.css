@@ -299,6 +299,7 @@ img { max-width: 100%; }
 .fight-stats { display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; font-size: 0.9rem; color: var(--ink-soft); margin-bottom: 0.2rem; }
 .fight-stats.you { color: #4a5a3a; border-top: 1px dashed var(--parchment-edge); padding-top: 0.3rem; margin-top: 0.3rem; }
 .fight-stats .en-stam { font-weight: 700; color: var(--crimson-bright); }
+.fight-stats.defeated { opacity: 0.5; text-decoration: line-through; }
 .fight-log { font-size: 0.86rem; color: var(--ink-soft); margin: 0.5rem 0; max-height: 8rem; overflow-y: auto; }
 .fight-log div { padding: 0.1rem 0; border-bottom: 1px dotted rgba(90,74,52,0.2); }
 .fight-controls { display: flex; gap: 0.6rem; margin-top: 0.5rem; align-items: center; }

@@ -21,7 +21,7 @@ the book XML corpus.
 - [x] 8. Make service-worker upgrades atomic
 - [x] 24. Canonicalise ship types (`brig`, `gall`) and fix crew-upgrade steps
 - [x] 25. Fix value/expression parsing: vars containing "d", unary minus, division
-- [ ] 26. Implement the remaining `<fight>` attributes
+- [x] 26. Implement the remaining `<fight>` attributes
 - [ ] 27. Cap visit-box ticks and make `ticks=` guards robust
 - [ ] 28. Honour `dead="t"` on `<goto>`/`<choice>`
 - [ ] 29. Market & item polish: currency items, `currency=`, pipe names, headers, item `<effect>`s
@@ -711,18 +711,50 @@ render-every-section scan (4369 sections). `RESULT ALL PASS pass=289 fail=0`.
 
 ---
 
-## 26. Implement the remaining `<fight>` attributes  — MEDIUM
+## 26. Implement the remaining `<fight>` attributes  — **done**
 
-`makeFight` (combat.js:11) reads only name/combat/defence/stamina/flee/
-playerFirst. Documented attributes that occur in the data and are ignored:
-`attackDice="1"` (player attacks with one die — Haniwa Warrior),
-`playerDefence="s"/"d"` (a variable replaces your Defence — Chimerical Beast,
-Talanexor), `preDamage`/`staminaLost` (damage carries between the paired
-Dawatsu Morituri fights), `attacks="3"` (book5/345 Tripling),
-`modifiers="noarmour"` (Water Drake), `group=` (simultaneous multi-enemy
-fights — book6/192/273/291/618) and `useCache` (book6/635). Occur in
-book5/689, book6/460/473/481/563/718 among others. Implement per
-`rules/JaFL-XML-Tags.html` with combat.js unit tests per attribute.
+`makeFight` read only name/combat/defence/stamina/flee/playerFirst; every other
+documented `<fight>` attribute in the corpus was silently ignored. All are now
+implemented (`web/js/combat.js`, wired in `web/js/render.js`):
+
+- **`attackDice="N"`** — the player rolls N dice to attack instead of 2 (Haniwa
+  Warrior, book6/473).
+- **`attacks="N"`** — the enemy strikes N times per round (Tripling, book5/345).
+- **`modifiers="noarmour"`** — the player's armour bonus is dropped from their
+  Defence for this fight (Water Drake, book6/718).
+- **`playerDefence="V"`** — a value/variable replaces the player's Defence
+  (Chimerical Beast `"s"`, Talanexor `"d"`), resolved each round via
+  `resolveValue` (variable-first).
+- **`abilityDamaged="S"`** — the enemy's hit reduces that ability instead of
+  Stamina; `"stamina"` is a *permanent* max+current cut (`adjustAbilityStamina`,
+  fatal) — the Big Boy / Giant fights (book6/460/563).
+- **`preDamage="V"`** — damage inflicted on the enemy up front (from a codeword,
+  else a like-named var), which may fell it before the first blow.
+- **`staminaLost="S"`** — reset the codeword to 0 at fight start and accumulate
+  the (overkill-capped) damage the player deals into it. The pair drives the
+  Dawatsu Morituri fights (book6): the first stores `MorDamage`, the second reads
+  it via `preDamage`.
+- **`useCache="S"`** — the enemy fights with the best weapon/armour stashed in
+  the named cache (their bonuses add to the enemy's Combat/Defence) — the Warrior
+  Maid, book6/635.
+- **`group="S"`** — a *simultaneous* multi-enemy fight: a combined widget
+  (`renderGroupFight`/`drawGroupFight` + `combat.groupFightRound`) where the
+  player strikes one foe and every still-standing foe strikes back
+  (book6/192/273/291/618). A shared `sectionFight` proxy drives the existing
+  fight-gate / death-defer machinery (win when all are down; lose→branch when the
+  player is slain and the section has an "if you lose…" path).
+
+`makeFight(node, state)` now runs the pre-fight setup (staminaLost reset,
+useCache loadout, preDamage) once when state is supplied; `fightRound`/
+`groupFightRound` default `attackDice`/`attacks` so a bare fight literal still
+resolves.
+
+Verified: 15 new headless assertions (attribute parsing; preDamage carry-over &
+pre-kill; staminaLost reset + accumulation; attackDice=1 miss-cap; attacks=3
+strike count; playerDefence override; noarmour armour-drop; abilityDamaged max
+cut; useCache loadout; a group fight resolving; §6.192 drawing one combined
+widget) + the three pre-existing fight tests still green + full
+render-every-section scan (4369). `RESULT ALL PASS pass=303 fail=0`.
 
 ---
 
