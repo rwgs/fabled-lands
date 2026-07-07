@@ -1,4 +1,6 @@
-# Fabled Lands — Web Edition · Agent guide
+# AGENTS.md
+
+## Project Overview
 
 A faithful, offline web port of the *Fabled Lands* gamebooks: it renders the
 original section text and automates all the game rules (dice, ability checks,
