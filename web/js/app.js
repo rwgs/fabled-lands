@@ -98,8 +98,8 @@ function showTitle() {
   app.innerHTML = '';
 
   const hero = el('div', 'title-hero');
-  hero.appendChild(el('h1', 'game-title', 'Fabled Lands'));
-  hero.appendChild(el('p', 'game-tagline', 'The greatest interactive gamebook series — reborn for the web.'));
+  hero.appendChild(el('h1', 'game-title', 'Web Fabled Lands'));
+  hero.appendChild(el('p', 'game-tagline', 'The greatest interactive gamebook series — reborn for the modern web.'));
   app.appendChild(hero);
 
   const menu = el('div', 'title-menu');
