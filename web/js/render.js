@@ -1093,9 +1093,16 @@ export class Story {
     const foreignCoin = !isShardsCurrency(currency);
     const coinLabel = foreignCoin ? currency : 'Shards';
     const wallet = foreignCoin ? this.state.currencyBalance(currency) : this.state.data.shards;
-    const pay = node.getAttribute('shards') != null && !(node.getAttribute('pay') != null && !boolAttr(node.getAttribute('pay')));
     const itemReq = node.getAttribute('item');
     const itemTags = node.getAttribute('tags'); // e.g. <choice item="?" tags="light"> (task 47)
+    // pay= governs whether the choice *consumes* its requirement on click. An
+    // explicit pay="t" consumes both a shards= cost and an item= requirement
+    // (book2/400 green gem, book6/740 rope — previously ignored for item-only
+    // choices); pay="f" never consumes; and with no pay= a shards= cost still
+    // deducts by default while a bare item= gate is kept (a mere requirement). (task 55)
+    const payAttr = node.getAttribute('pay');
+    const payExplicit = payAttr != null ? boolAttr(payAttr) : null;
+    const pay = payExplicit === true || (payExplicit == null && node.getAttribute('shards') != null);
     const boxWord = node.getAttribute('box');
     const profession = node.getAttribute('profession');
     const god = node.getAttribute('god');

@@ -618,6 +618,51 @@ async function run() {
     fleeChoice442().click();
     ok('§442 taking the escape navigates to 118', nav442 && String(nav442.s) === '118', JSON.stringify(nav442));
 
+    // --- task 55: <choice item=… pay="t"> consumes the item -----------------------
+    // §2.400: giving the sprites a green gem must remove it (was kept, and still
+    // satisfied later <if item> checks).
+    const g400 = GameState.create({ name:'G400', gender:'m', profession:'Warrior', book:2, adv });
+    g400.addItem(makeItem('item', 'green gem'));
+    let nav400 = null;
+    const c400 = document.createElement('div');
+    const story400 = new Story(c400, g400, { navigate:(b,s)=>{nav400={b,s};}, onDeath(){}, notify(){} });
+    const s400 = await data.getSection(2,'400'); story400.begin(s400,2,'400');
+    const give400 = Array.from(c400.querySelectorAll('.choice')).find((b) => /Give them a green gem/i.test(b.textContent));
+    ok('§400 gem choice enabled while the gem is held', !!give400 && give400.disabled === false);
+    give400.click();
+    ok('§400 giving the gem consumes it (pay="t")', !g400.hasItem('green gem'), `has=${g400.hasItem('green gem')}`);
+    ok('§400 giving the gem navigates to 288', nav400 && String(nav400.s) === '288', JSON.stringify(nav400));
+    // without the gem the same choice is a disabled gate (must have the item).
+    const g400b = GameState.create({ name:'G400b', gender:'m', profession:'Warrior', book:2, adv });
+    const c400b = document.createElement('div');
+    const story400b = new Story(c400b, g400b, { navigate(){}, onDeath(){}, notify(){} });
+    const s400b = await data.getSection(2,'400'); story400b.begin(s400b,2,'400');
+    const give400b = Array.from(c400b.querySelectorAll('.choice')).find((b) => /Give them a green gem/i.test(b.textContent));
+    ok('§400 gem choice gated without the gem', !!give400b && give400b.disabled === true);
+
+    // §6.740: giving the raven a rope must remove the rope.
+    const g740 = GameState.create({ name:'G740', gender:'m', profession:'Warrior', book:6, adv });
+    g740.addItem(makeItem('item', 'rope'));
+    let nav740 = null;
+    const c740 = document.createElement('div');
+    const story740 = new Story(c740, g740, { navigate:(b,s)=>{nav740={b,s};}, onDeath(){}, notify(){} });
+    const s740 = await data.getSection(6,'740'); story740.begin(s740,6,'740');
+    const give740 = Array.from(c740.querySelectorAll('.choice')).find((b) => /Give the raven some/i.test(b.textContent));
+    ok('§740 rope choice enabled while the rope is held', !!give740 && give740.disabled === false);
+    give740.click();
+    ok('§740 giving the rope consumes it (pay="t")', !g740.hasItem('rope'), `has=${g740.hasItem('rope')}`);
+    ok('§740 giving the rope navigates to 513', nav740 && String(nav740.s) === '513', JSON.stringify(nav740));
+
+    // regression: pay="f" gates on affordability but never deducts (the cost is
+    // paid at the destination — book1/142 travel choices).
+    const gpf = GameState.create({ name:'PF', gender:'m', profession:'Warrior', book:1, adv });
+    gpf.data.shards = 50;
+    const cpf = document.createElement('div');
+    const storypf = new Story(cpf, gpf, { navigate(){}, onDeath(){}, notify(){} });
+    storypf.begin(parse('<section name="x"><choices><choice section="9" shards="10" pay="f">Go</choice></choices></section>'), 1, 'x');
+    cpf.querySelector('.choice').click();
+    ok('§ pay="f" shards choice does NOT deduct', gpf.data.shards === 50, String(gpf.data.shards));
+
     // scan: render EVERY section of EVERY book without throwing
     let renderErrors = 0, firstErr='', total=0;
     const gs2 = GameState.create({ name:'Scan', gender:'m', profession:'Rogue', book:1, adv });

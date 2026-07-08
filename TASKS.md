@@ -66,7 +66,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 43. price/flag "choose one" purchases over-apply every linked reward *(moved from LOW 2026-07-07; scope grew — see detail)*
 - [x] 53. `<difficulty modifier="noweapon">` still counts the weapon bonus
 - [x] 54. Mid-fight escape brackets (tick…lose codeword) collapse — surrender/flee routes unreachable
-- [ ] 55. `<choice item=… pay="t">` doesn't consume the item
+- [x] 55. `<choice item=… pay="t">` doesn't consume the item
 - [ ] 56. `hidden="t"` payments render a phantom "Pay" button instead of arming silently
 - [ ] 57. Adventure Sheet: curses all display as "curse"; diseases/poisons invisible
 - [ ] 58. Market `<sold>` hooks match the shop row's tags, not the sold item's
@@ -1620,17 +1620,27 @@ ticks the codeword + forfeits the Paladin title, the escape then navigates to 11
 
 ---
 
-## 55. `<choice item=… pay="t">` doesn't consume the item  — MEDIUM
+## 55. `<choice item=… pay="t">` doesn't consume the item  — **done**
 
-`renderChoice` computes `pay` only when `shards=` is present (render.js:935), so
-`pay="t"` on an item-only choice is ignored and the removal branch
-(render.js:988) never runs. Java `ChoiceNode` honours the attribute and removes
-the item. Two sections duplicate items: book2/400 (`<choice item="green gem"
-pay="t" section="288">Give them a green gem`) and book6/740 (`<choice
-item="rope" pay="t" section="513">Give the raven some rope`) — the player keeps
-the given-away item and it still satisfies later `<if item=…>` checks. Fix:
-honour `pay="t"` whenever an `item=` requirement exists. Tests: both sections
-consume the item on click.
+`renderChoice` computed `pay` only when `shards=` was present, so `pay="t"` on an
+item-only choice was ignored and the removal branch never ran — the player kept
+the given-away item (and it still satisfied later `<if item=…>` checks).
+
+Fix (`web/js/render.js`): `pay` is now `payExplicit === true || (payExplicit ==
+null && shards != null)` — an explicit `pay="t"` consumes the choice's
+requirement (both a `shards=` cost and an `item=` requirement) regardless of
+whether Shards are involved, while the historical defaults are unchanged: a
+`shards=` cost with no `pay=` still deducts, `pay="f"` never deducts, and a bare
+`item=` gate is still just a requirement (kept, not consumed). The existing
+`if (pay && itemReq)` removal branch now fires for book2/400 (green gem) and
+book6/740 (rope). Corpus audit: the only `pay="t"` choices are those two
+item-only cases; every other `pay=` is `shards= pay="f"` (a "can you afford it"
+travel gate whose cost is paid at the destination), all preserved.
+
+Verified: 8 new headless assertions (§400 gem choice enabled while held, giving
+consumes it + navigates to 288, gated without the gem; §740 rope choice consumes
++ navigates to 513; a `pay="f"` shards choice still doesn't deduct) + full
+render-every-section scan (4369). `RESULT ALL PASS pass=490 fail=0`.
 
 ---
 
