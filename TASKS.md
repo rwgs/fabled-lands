@@ -65,7 +65,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 41. Item `<effect>` system (use/aura/wielded/ability) and `<sold>` sell-hooks
 - [x] 43. price/flag "choose one" purchases over-apply every linked reward *(moved from LOW 2026-07-07; scope grew — see detail)*
 - [x] 53. `<difficulty modifier="noweapon">` still counts the weapon bonus
-- [ ] 54. Mid-fight escape brackets (tick…lose codeword) collapse — surrender/flee routes unreachable
+- [x] 54. Mid-fight escape brackets (tick…lose codeword) collapse — surrender/flee routes unreachable
 - [ ] 55. `<choice item=… pay="t">` doesn't consume the item
 - [ ] 56. `hidden="t"` payments render a phantom "Pay" button instead of arming silently
 - [ ] 57. Adventure Sheet: curses all display as "curse"; diseases/poisons invisible
@@ -1578,27 +1578,45 @@ full render-every-section scan (4369). `RESULT ALL PASS pass=466 fail=0`.
 
 ---
 
-## 54. Mid-fight escape brackets (tick…lose codeword) collapse — surrender/flee routes unreachable  — MEDIUM
+## 54. Mid-fight escape brackets (tick…lose codeword) collapse — surrender/flee routes unreachable  — **done**
 
-The JaFL idiom brackets a fight between `<tick codeword="X"/>` (top of section)
-and `<lose codeword="X"/>` (after the fight); a `box="X"`-gated choice is the
+The JaFL idiom brackets a fight between `<tick codeword="X"/>` (top) and
+`<lose codeword="X"/>` (after the fight); a `box="X"`-gated choice is the
 mid-fight escape, valid only *while the fight is unresolved*. The single-pass
-render applies both passives in the same pass, so the box is already un-ticked
-by the time choices render — and `applyFightGate` disables post-fight nav
-anyway. Verified triggers:
-- **book2/582**: "Surrender" (`box="2.582.1"`) permanently disabled; worse, the
-  Flee button ("beg for mercy", no goto) sets `outcome='fled'`, and on `fled`
-  `applyFightGate` (render.js:1335) disables only lose-role buttons — so fleeing
-  **enables the "Defeat them all" §654 win exit**.
-- **book3/211**: "Run back to the ship" (`box="3.211.flee"`) can never be taken.
-- **book2/442**: the escape `<group>` works mid-fight (pays the Paladin title),
-  but the `box="2.442.1"` choice to §118 stays fight-gated — the player pays and
-  still can't leave.
-Fix: defer a post-fight `<lose codeword>` until the fight resolves (same
-machinery as task 39's deferred transfers), let `box=` choices whose codeword is
-currently ticked bypass the fight gate while the fight is live, and on `fled`
-don't enable win-only exits. Tests: §2.582 Surrender live mid-fight + §654
-gated after fleeing; §2.442 paid escape navigates.
+render applied both passives in the same pass, so the box was already un-ticked
+by the time choices rendered — and `applyFightGate` disabled post-fight nav
+anyway. All three fixes landed in `web/js/render.js`:
+
+- **Escape-codeword detection** — a new `computeEscapeCodewords(sectionEl)` (run
+  before the fight gate, stored on `this.escapeCodewords`) finds codewords that are
+  BOTH `<tick codeword="X">`'d in the section AND used as a `box="X"` on a choice —
+  the surrender/flee signature (book2/582, book3/211 tick at the top; book2/442,
+  book2/207 tick inside a flee `<group>`/`<flee>`). Empty unless the section has a
+  fight.
+- **Defer the closing `<lose codeword>`** — `isDeferredEscapeClear(node)` +
+  `renderPassive` skip a `<lose codeword="X">` that sits **after** a fight (so
+  `sectionFights` is non-empty) and clears an escape codeword, until the fight is
+  **won**. So the box stays ticked while the fight is unresolved or the player is
+  fleeing; on a win the clear applies and the escape closes. An entry-clear
+  `<lose codeword>` before the fight (book2/207/442) is untouched.
+- **Escape choices bypass the fight gate** — `computeFightGate` no longer adds a
+  `<choice box="X">` (X an escape codeword) to `navNodes` (like a `flee="t"`
+  choice), so `applyFightGate` never disables it; its own `box=` check governs it,
+  making it live exactly while the codeword is ticked (book2/442 becomes reachable
+  once the `<group>` ticks 2.442.1).
+- **`fled` disables the win exit** — `applyFightGate` now disables **all** nav on
+  `outcome==='fled'` (not just lose-role), and the never-strand-a-win safety is
+  scoped to `outcome==='win'`. So begging for mercy in book2/582 (a bare `<flee>`
+  Flee button with no goto → `fled` + re-render) no longer enables "Defeat them
+  all" (§654); only the ungated Surrender remains.
+
+Verified: 16 new headless assertions (§2.582 Surrender live mid-fight while §654 is
+gated, fleeing keeps §654 gated and Surrender live, winning clears the codeword →
+Surrender off / §654 on; §3.211 "Run back" live vs "Kill the creature" gated, win
+closes the escape; §2.442 "If you flee" gated until the group is taken, the group
+ticks the codeword + forfeits the Paladin title, the escape then navigates to 118)
++ the §207/§662 flee tests still green + full render-every-section scan (4369).
+`RESULT ALL PASS pass=482 fail=0`.
 
 ---
 

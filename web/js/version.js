@@ -1,2 +1,2 @@
 // Auto-generated build stamp -- run build/stamp-version.ps1 to refresh.
-export const VERSION = '26.07.08.6d44557';
+export const VERSION = '26.07.08.58e534e';

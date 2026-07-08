@@ -118,6 +118,10 @@ export class Story {
       const f = g.getAttribute('force');
       return f != null && !boolAttr(f, true);
     });
+    // Mid-fight escape brackets (task 54): codewords ticked in-section that also gate
+    // a box= choice mark a "flee/surrender while the fight is live" option — computed
+    // before the fight gate so it can leave those choices ungated.
+    this.escapeCodewords = this.computeEscapeCodewords(el);
     // Fight gating: while an unresolved <fight> exists, the navigation that
     // follows it must not be clickable (else the player skips the fight). See
     // computeFightGate / applyFightGate.
@@ -459,6 +463,19 @@ export class Story {
     // "<random var="x">"). Applying now would use x=0 and then memoise that no-op;
     // instead show the words and let the post-roll rerender apply the real count.
     if (this.pendingRollVar(node)) {
+      if (!hidden) {
+        const span = document.createElement('span');
+        span.className = 'fx';
+        this.appendChildren(span, node, path);
+        if (span.textContent.trim()) container.appendChild(span);
+      }
+      return null;
+    }
+
+    // A fight-escape bracket's closing <lose codeword> (after the fight) is deferred
+    // until the fight is won, so the mid-fight surrender/flee box= choice stays live
+    // while the fight is unresolved or the player is fleeing (task 54).
+    if (this.isDeferredEscapeClear(node)) {
       if (!hidden) {
         const span = document.createElement('span');
         span.className = 'fx';
@@ -1493,9 +1510,12 @@ export class Story {
         if (tag === 'fight') { seenFight = true; recent = ''; walk(ch, true); continue; }
         const childSkip = skip || tag === 'flee' || tag === 'fightdamage'; // Flee/fightdamage own gotos aren't gated
         // A <choice flee="t"> is "flee at any time" — never gate it (book3/662),
-        // so the player can bail mid-fight.
+        // so the player can bail mid-fight. A box= choice keyed to a mid-fight escape
+        // codeword (task 54) is likewise ungated: its own box check governs it, so it
+        // is live only while the escape codeword is ticked (surrender/flee routes).
         const isFleeChoice = tag === 'choice' && boolAttr(ch.getAttribute('flee'));
-        if (seenFight && !skip && !isFleeChoice && (tag === 'goto' || tag === 'choice' || tag === 'return')) {
+        const isEscapeChoice = ch.getAttribute('box') != null && this.escapeCodewords.has(ch.getAttribute('box'));
+        if (seenFight && !skip && !isFleeChoice && !isEscapeChoice && (tag === 'goto' || tag === 'choice' || tag === 'return')) {
           navNodes.add(ch);
           // An explicit dead="t" goto/choice IS the "you are killed" branch — prefer
           // that precise marker over the prose heuristic for the lose-branch (task 28).
@@ -1508,6 +1528,38 @@ export class Story {
     walk(sectionEl, false);
     if (!navNodes.size) return null;
     return { navNodes, loseNodes, hasLosePath: loseNodes.size > 0 };
+  }
+
+  // Mid-fight escape codewords (task 54): a codeword that is BOTH ticked somewhere in
+  // this fight section (at the top as a "fight in progress" marker — book2/582,
+  // book3/211 — or inside a flee <group>/<flee> — book2/442, book2/207) AND used as a
+  // box= gate on a choice. That box= choice is the surrender/flee route, valid only
+  // while the fight is live. Empty unless the section has a fight.
+  computeEscapeCodewords(sectionEl) {
+    if (!sectionEl || !sectionEl.querySelector('fight')) return new Set();
+    const boxes = new Set();
+    sectionEl.querySelectorAll('[box]').forEach((c) => { const b = c.getAttribute('box'); if (b) boxes.add(b); });
+    if (!boxes.size) return new Set();
+    const ticked = new Set();
+    sectionEl.querySelectorAll('tick[codeword]').forEach((t) => {
+      t.getAttribute('codeword').split(/[|,]/).forEach((c) => ticked.add(c.trim()));
+    });
+    return new Set([...boxes].filter((b) => ticked.has(b)));
+  }
+
+  // A fight-escape bracket's closing <lose codeword="X"> — one that sits AFTER the
+  // fight and clears an escape codeword — must not fire while the fight is still
+  // unresolved (or the player is fleeing): un-ticking the box now would revoke the
+  // surrender/flee choice before it can be taken. Defer it until the fight is WON,
+  // at which point the escape correctly closes. An entry-clear <lose codeword> before
+  // the fight (book2/207/442) is left alone. (task 54)
+  isDeferredEscapeClear(node) {
+    if (node.tagName.toLowerCase() !== 'lose') return false;
+    const cw = node.getAttribute('codeword');
+    if (!cw || !this.escapeCodewords.size) return false;
+    if (!cw.split(/[|,]/).some((c) => this.escapeCodewords.has(c.trim()))) return false;
+    if (!this.sectionFights.length) return false; // before the fight → an entry clear, apply now
+    return this.aggregateFightOutcome(this.sectionFights) !== 'win';
   }
 
   // Tag a rendered nav button with its fight role, for applyFightGate to act on.
@@ -1528,10 +1580,11 @@ export class Story {
       let disable;
       if (!fight.outcome) disable = true;                         // unresolved: nothing yet
       else if (fight.outcome === 'lose') disable = btn.dataset.loserole !== '1'; // only the lose-branch
-      else disable = btn.dataset.loserole === '1';                // won/fled: hide the lose-branch
+      else if (fight.outcome === 'fled') disable = true;          // fled: only the (ungated) escape choice remains — never a win/lose exit (task 54)
+      else disable = btn.dataset.loserole === '1';                // won: hide the lose-branch
       // Safety: never strand a win — if disabling lose-branches would leave no
       // enabled way forward, leave them all as-is.
-      if (disable && fight.outcome && fight.outcome !== 'lose' && btn.dataset.loserole === '1' && !nonLoseEnabled.length) return;
+      if (disable && fight.outcome === 'win' && btn.dataset.loserole === '1' && !nonLoseEnabled.length) return;
       if (disable) {
         btn.disabled = true;
         btn.classList.add('gated');

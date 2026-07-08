@@ -559,6 +559,65 @@ async function run() {
     fleeChoice.click();
     ok('§662 flee="t" applies the wound and navigates to 407', gf5.data.stamina < stF5 && navF5 && String(navF5.s)==='407', `st=${gf5.data.stamina}/${stF5} nav=${JSON.stringify(navF5)}`);
 
+    // --- task 54: mid-fight escape brackets (surrender / flee while fighting) -----
+    // §2.582: codeword 2.582.1 is ticked at the top and cleared after the fight; the
+    // box="2.582.1" Surrender is a live mid-fight escape while "Defeat them all"
+    // (§654, the win exit) is gated until every brigand is beaten.
+    const g582 = GameState.create({ name:'B582', gender:'m', profession:'Warrior', book:2, adv });
+    g582.data.stamina = 40; g582.data.staminaMax = 40;
+    let nav582 = null;
+    const c582 = document.createElement('div');
+    const story582 = new Story(c582, g582, { navigate:(b,s)=>{nav582={b,s};}, onDeath(){}, notify(){} });
+    const s582 = await data.getSection(2,'582'); story582.begin(s582,2,'582');
+    const surr = () => Array.from(c582.querySelectorAll('.choice')).find((b) => /Surrender/i.test(b.textContent));
+    const defeat = () => Array.from(c582.querySelectorAll('.choice')).find((b) => /Defeat them all/i.test(b.textContent));
+    ok('§582 Surrender is live mid-fight', !!surr() && surr().disabled === false, surr() ? `disabled=${surr().disabled} title="${surr().title}"` : 'no button');
+    ok('§582 "Defeat them all" (654) gated while fighting', !!defeat() && defeat().disabled === true);
+    const flee582 = Array.from(c582.querySelectorAll('.fight-controls button')).find((b) => /Flee/.test(b.textContent));
+    ok('§582 shows a Flee ("beg for mercy") button', !!flee582);
+    flee582.click();
+    ok('§582 fleeing does NOT enable the §654 win exit', !!defeat() && defeat().disabled === true);
+    ok('§582 Surrender stays live after fleeing', !!surr() && surr().disabled === false);
+    // winning every fight closes the escape and opens the win exit.
+    story582.ctx.fights.forEach((f) => { f.outcome = 'win'; });
+    story582.rerender();
+    ok('§582 winning clears the escape codeword (Surrender disabled)', !g582.hasCodeword('2.582.1') && surr().disabled === true, `cw=${g582.hasCodeword('2.582.1')} surr=${surr()?surr().disabled:'?'}`);
+    ok('§582 winning opens "Defeat them all" (654)', defeat().disabled === false);
+
+    // §3.211: "Run back to the ship" (box=3.211.flee) is a live escape; "Kill the
+    // creature" is the win exit gated until the serpent is beaten.
+    const g211 = GameState.create({ name:'S211', gender:'m', profession:'Warrior', book:3, adv });
+    g211.data.stamina = 40; g211.data.staminaMax = 40;
+    const c211 = document.createElement('div');
+    const story211 = new Story(c211, g211, { navigate(){}, onDeath(){}, notify(){} });
+    const s211 = await data.getSection(3,'211'); story211.begin(s211,3,'211');
+    const runBack = () => Array.from(c211.querySelectorAll('.choice')).find((b) => /Run back/i.test(b.textContent));
+    const kill211 = () => Array.from(c211.querySelectorAll('.choice')).find((b) => /Kill the creature/i.test(b.textContent));
+    ok('§211 "Run back to the ship" is live mid-fight', !!runBack() && runBack().disabled === false);
+    ok('§211 "Kill the creature" gated while fighting', !!kill211() && kill211().disabled === true);
+    story211.ctx.fights.forEach((f) => { f.outcome = 'win'; });
+    story211.rerender();
+    ok('§211 winning closes the escape ("Run back" disabled)', runBack().disabled === true && !g211.hasCodeword('3.211.flee'));
+    ok('§211 winning enables "Kill the creature"', kill211().disabled === false);
+
+    // §2.442: the flee <group> (ticks 2.442.1, forfeits the Paladin title) makes the
+    // box="2.442.1" escape live, and taking it navigates to 118.
+    const g442 = GameState.create({ name:'A442', gender:'m', profession:'Warrior', book:2, adv });
+    g442.addTitle('Paladin of Ravayne'); g442.data.stamina = 30; g442.data.staminaMax = 30;
+    let nav442 = null;
+    const c442 = document.createElement('div');
+    const story442 = new Story(c442, g442, { navigate:(b,s)=>{nav442={b,s};}, onDeath(){}, notify(){} });
+    const s442 = await data.getSection(2,'442'); story442.begin(s442,2,'442');
+    const fleeChoice442 = () => Array.from(c442.querySelectorAll('.choice')).find((b) => /If you flee/i.test(b.textContent));
+    ok('§442 "If you flee" gated before the escape group is taken', !!fleeChoice442() && fleeChoice442().disabled === true);
+    const grp442 = c442.querySelector('.group-action');
+    ok('§442 shows the flee group action', !!grp442);
+    grp442.click();
+    ok('§442 the flee group ticks the codeword and forfeits the title', g442.hasCodeword('2.442.1') && !g442.hasTitle('Paladin of Ravayne'), `cw=${g442.hasCodeword('2.442.1')} title=${g442.hasTitle('Paladin of Ravayne')}`);
+    ok('§442 "If you flee" is now live (escape bypasses the fight gate)', !!fleeChoice442() && fleeChoice442().disabled === false, fleeChoice442() ? `disabled=${fleeChoice442().disabled} title="${fleeChoice442().title}"` : 'no button');
+    fleeChoice442().click();
+    ok('§442 taking the escape navigates to 118', nav442 && String(nav442.s) === '118', JSON.stringify(nav442));
+
     // scan: render EVERY section of EVERY book without throwing
     let renderErrors = 0, firstErr='', total=0;
     const gs2 = GameState.create({ name:'Scan', gender:'m', profession:'Rogue', book:1, adv });
