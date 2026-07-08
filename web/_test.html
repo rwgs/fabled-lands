@@ -1873,6 +1873,31 @@ async function run() {
       sell318 && sell318.click();
       ok('§3.318 selling a 318.free item fires market <sold> → codeword 3.318.sold', gs318.hasCodeword('3.318.sold'));
 
+      // task 58: the <sold> hook must match the SOLD possession's tags, not the shop
+      // row's buytags. Selling a starting leather jerkin (no 318.free tag) through the
+      // generic "leather" row must NOT fire the hook (was: cobblestone punishment §372).
+      const gs318a = GameState.create({ name: 'S3a', gender: 'm', profession: 'Warrior', book: 3, adv });
+      const cs318a = document.createElement('div');
+      const st318a = new Story(cs318a, gs318a, { navigate(){}, onDeath(){}, notify(){} });
+      st318a.begin(await data.getSection(3, '318'), 3, '318');
+      const leatherRowA = Array.from(cs318a.querySelectorAll('.trade')).find((r) => /Leather/i.test(r.textContent));
+      const sellLeatherA = leatherRowA && Array.from(leatherRowA.querySelectorAll('.btn-mini')).find((b) => /Sell/.test(b.textContent));
+      ok('§3.318 leather armour row has a Sell button (starting jerkin)', !!sellLeatherA && !sellLeatherA.disabled);
+      sellLeatherA && sellLeatherA.click();
+      ok('§3.318 selling a NON-free leather does NOT fire the hook', !gs318a.hasCodeword('3.318.sold'));
+
+      // but selling an armour that WAS obtained free there (carries 318.free) fires it.
+      const gs318b = GameState.create({ name: 'S3b', gender: 'm', profession: 'Warrior', book: 3, adv });
+      gs318b.data.items = gs318b.data.items.filter((i) => i.kind !== 'armour');
+      gs318b.addItem(makeItem('armour', 'leather', 1, null, ['318.free']));
+      const cs318b = document.createElement('div');
+      const st318b = new Story(cs318b, gs318b, { navigate(){}, onDeath(){}, notify(){} });
+      st318b.begin(await data.getSection(3, '318'), 3, '318');
+      const leatherRowB = Array.from(cs318b.querySelectorAll('.trade')).find((r) => /Leather/i.test(r.textContent));
+      const sellLeatherB = leatherRowB && Array.from(leatherRowB.querySelectorAll('.btn-mini')).find((b) => /Sell/.test(b.textContent));
+      sellLeatherB && sellLeatherB.click();
+      ok('§3.318 selling a 318.free leather DOES fire the hook', gs318b.hasCodeword('3.318.sold'));
+
       // Adventure Sheet Use affordance (ui.js): a usable item shows a verb button that
       // fires the onUse callback; a non-usable item (aura sword) shows none.
       const gsheet = GameState.create({ name: 'Sh', gender: 'm', profession: 'Warrior', book: 4, adv });

@@ -95,7 +95,9 @@ export function buyTrade(state, goods, price, currency = null) {
 }
 
 /** Sell `goods` for `price` in `currency` (Shards by default). Mutates state.
- *  Returns { ok }. */
+ *  Returns { ok, item? } — `item` is the possession actually removed (for a
+ *  carried good), so the caller can fire <sold> hooks against its real tags/name
+ *  rather than the shop row's descriptor (task 58). Ship/cargo sells carry no item. */
 export function sellTrade(state, goods, price, currency = null) {
   const { kind, name, bonus, named, shipType, cargoName } = goods;
   if (kind === 'ship') {
@@ -111,10 +113,12 @@ export function sellTrade(state, goods, price, currency = null) {
     const it = state.data.items.find((x) => x.kind === kind && (x.bonus || 0) === bonus);
     if (!it) return { ok: false };
     state.removeItemById(it.id); walletEarn(state, currency, price);
+    return { ok: true, item: it };
   } else {
     const it = state.findItems(name)[0];
     if (!it) return { ok: false };
     state.removeItemById(it.id); walletEarn(state, currency, price);
+    return { ok: true, item: it };
   }
   return { ok: true };
 }

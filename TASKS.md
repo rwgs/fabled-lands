@@ -69,7 +69,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 55. `<choice item=… pay="t">` doesn't consume the item
 - [x] 56. `hidden="t"` payments render a phantom "Pay" button instead of arming silently
 - [x] 57. Adventure Sheet: curses all display as "curse"; diseases/poisons invisible
-- [ ] 58. Market `<sold>` hooks match the shop row's tags, not the sold item's
+- [x] 58. Market `<sold>` hooks match the shop row's tags, not the sold item's
 - [ ] 59. `<tick god=…>` drops `<effect>` children — Sig initiates never get +1 THIEVERY
 - [ ] 60. Affliction `<effect>` forms `divide`/`target`/`stamina` inert; item `<curse>` children never attach
 - [ ] 61. book6/628: the rerunnable `<set>` clobbers the roll's var — inn rest/dysentery never fires
@@ -1695,20 +1695,28 @@ render-every-section scan (4369). `RESULT ALL PASS pass=500 fail=0`.
 
 ---
 
-## 58. Market `<sold>` hooks match the shop row's tags, not the sold item's  — MEDIUM
+## 58. Market `<sold>` hooks match the shop row's tags, not the sold item's  — **done**
 
-`soldMatches` (render.js:1659–1664) tests the *row descriptor's* tags (built
-from `buytags=`), not the tags on the possession actually sold. In book3/318 the
-free-goods rows carry `buytags="318.free"` and the hook is `<sold item="?"
-tags="318.free"><tick codeword="3.318.sold"/></sold>` — JaFL matches the sold
-**item instance's** tags, so only goods actually obtained free there are marked.
-Actual: selling *any* bonus-1 armour or bonus-0 weapon through those rows (e.g.
-the leather jerkin many characters start with) fires the hook, and book3/20
-routes to book3/372 — pelted with cobblestones, `<lose stamina="1d">`, and loss
-of the "Saviour of Vervayens Isle" title, as punishment for a legitimate sale.
-(The book3/86 row-level `<sold>` is fine.) Fix: pass the sold possession into
-`runSoldHooks` and match its own tags/name. Tests: §3.318 selling starting
-leather doesn't tick `3.318.sold`; selling the free leather does.
+`soldMatches` tested the *row descriptor's* tags (built from `buytags=`), not the
+tags on the possession actually sold. In book3/318 the free-goods rows carry
+`buytags="318.free"` and the hook is `<sold item="?" tags="318.free">
+<tick codeword="3.318.sold"/></sold>`, so selling *any* bonus-1 armour or bonus-0
+weapon through those generic rows (e.g. a starting leather jerkin) fired the hook
+— and book3/20 → book3/372 punished the "sale" (cobblestones, `<lose stamina="1d">`,
+loss of the Saviour title).
+
+Fix — match the sold **possession's** own tags/name:
+- **`market.js`** — `sellTrade` now returns `{ ok, item }`, where `item` is the
+  possession actually removed (for a carried good; ship/cargo sales carry none).
+- **`render.js`** — the sell handler passes `res.item` to `runSoldHooks`, and
+  `soldMatches(soldNode, soldItem)` tests `soldItem.tags`/`soldItem.name` (a null
+  item — a ship/cargo sale — never matches). The row's own `<sold>` child still
+  fires unconditionally (book3/86 pirate captain's head — that *is* the row's sale).
+
+Verified: 3 new headless assertions (§3.318 selling a starting leather jerkin does
+NOT tick 3.318.sold; selling an armour carrying the 318.free tag does; the
+existing §3.86 row-hook and §3.318 candle-hook tests still pass) + full
+render-every-section scan (4369). `RESULT ALL PASS pass=503 fail=0`.
 
 ---
 

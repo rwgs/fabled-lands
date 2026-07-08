@@ -1989,8 +1989,9 @@ export class Story {
       s.disabled = !owned;
       s.title = owned ? '' : 'You have none to sell';
       s.addEventListener('click', () => {
-        if (!sellTrade(this.state, goods, price, currency).ok) return;
-        this.runSoldHooks(node, goods, marketSolds); // <sold> side-effects (task 41)
+        const res = sellTrade(this.state, goods, price, currency);
+        if (!res.ok) return;
+        this.runSoldHooks(node, res.item, marketSolds); // <sold> side-effects, matched on the sold item (tasks 41, 58)
         this.rerender();
       });
       actions.appendChild(s);
@@ -2005,21 +2006,27 @@ export class Story {
     return row;
   }
 
-  // Fire the <sold> side-effects when a good is sold (task 41): the row's own
-  // <sold> child (book3/86 pirate captain's head), plus any market-level
-  // <sold item="?" tags="…"> whose filter matches this good (book3/318 free items).
-  runSoldHooks(rowNode, goods, marketSolds) {
+  // Fire the <sold> side-effects when a good is sold: the row's own <sold> child
+  // always fires (book3/86 pirate captain's head — it is the sale of that row), plus
+  // any market-level <sold item="?" tags="…"> whose filter matches the possession
+  // ACTUALLY SOLD — its own tags/name, not the shop row's descriptor. So selling a
+  // starting leather jerkin at book3/318's generic "leather" row (buytags="318.free")
+  // no longer fires 3.318.sold; only an item that carries the 318.free tag does. (tasks 41, 58)
+  runSoldHooks(rowNode, soldItem, marketSolds) {
     const own = rowNode.querySelector(':scope > sold');
     if (own) applyEffectBody(own, this.state);
-    (marketSolds || []).forEach((s) => { if (this.soldMatches(s, goods)) applyEffectBody(s, this.state); });
+    (marketSolds || []).forEach((s) => { if (this.soldMatches(s, soldItem)) applyEffectBody(s, this.state); });
   }
 
-  // Does a market-level <sold> filter (item="?"/name + tags=) match a sold good?
-  soldMatches(soldNode, goods) {
+  // Does a market-level <sold> filter (item="?"/name + tags=) match the sold
+  // possession? A ship/cargo sale carries no possession, so it never matches.
+  soldMatches(soldNode, soldItem) {
+    if (!soldItem) return false;
     const item = soldNode.getAttribute('item');
-    if (item && item !== '?' && item !== '*' && normalize(item) !== normalize(goods.name)) return false;
+    if (item && item !== '?' && item !== '*' && normalize(item) !== normalize(soldItem.name)) return false;
     const tags = parseTags(soldNode.getAttribute('tags'));
-    return tags.every((t) => (goods.tags || []).some((g) => normalize(g) === normalize(t)));
+    const itemTags = soldItem.tags || [];
+    return tags.every((t) => itemTags.some((g) => normalize(g) === normalize(t)));
   }
 
   // Inline <buy> in prose: a crew upgrade, a ship, a tool, a carried item, or a
