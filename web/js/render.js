@@ -1360,8 +1360,10 @@ export class Story {
       this.showDiceResult(widget, stored.dice, `${abLabel} ${stored.abilityScore >= 0 ? '+' : ''}${stored.abilityScore} = ${stored.total} vs ${level}`, stored.success ? 'Success' : 'Failure', stored.success);
       return widget;
     }
+    // Under the Three Fortunes' difficultyCurse an ability roll uses one die (task 36).
+    const diceLabel = diceWord(this.state.data.oneDieRolls ? 1 : 2);
     if (gated && !armed) {
-      const btn = this.rollButton(`Roll 2 dice + ${spec.split('|')[0].toUpperCase()}`, widget, () => {});
+      const btn = this.rollButton(`Roll ${diceLabel} + ${spec.split('|')[0].toUpperCase()}`, widget, () => {});
       btn.disabled = true; btn.title = 'Pay first to make this roll.';
       widget.appendChild(btn);
       return widget;
@@ -1374,7 +1376,7 @@ export class Story {
       return widget;
     }
     const abLabel = (ability || '').split('|')[0].toUpperCase();
-    const btn = this.rollButton(`Roll 2 dice + ${abLabel}`, widget, () => {
+    const btn = this.rollButton(`Roll ${diceLabel} + ${abLabel}`, widget, () => {
       if (gated) this.state.setFlag(flag, false); // consume the payment — re-pay to re-attempt
       const res = rollDifficulty(this.state, ability, level, modifier + childAdjustment(node, this.state), mode);
       if (node.getAttribute('var')) { this.state.setVar(node.getAttribute('var'), res.margin); this.ctx.wroteVars.add(node.getAttribute('var')); this.ctx.rolledVars.add(node.getAttribute('var')); }

@@ -54,8 +54,13 @@ function startFight(fight, node, state) {
   if (cache && state.cacheItems) {
     const items = state.cacheItems(cache) || [];
     const best = (kind) => items.filter((it) => it.kind === kind).reduce((m, it) => Math.max(m, it.bonus || 0), 0);
-    fight.combat += best('weapon');
-    fight.defence += best('armour');
+    // A weapon's bonus raises the enemy's COMBAT *and* Defence (like a player's
+    // weapon does — JaFL FightNode adds combatRaise to both); armour adds to
+    // Defence only. §6.635 Warrior Maid with a +2 sword ⇒ Combat 10 / Defence 18
+    // (previously 10 / 16 because the weapon bonus never reached Defence). (task 36)
+    const weaponBonus = best('weapon');
+    fight.combat += weaponBonus;
+    fight.defence += weaponBonus + best('armour');
   }
 
   // preDamage: damage inflicted on the enemy up front, carried from an earlier

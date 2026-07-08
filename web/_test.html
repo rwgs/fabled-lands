@@ -1070,6 +1070,25 @@ async function run() {
     ok('§564 dropping the ring restores Rank and the Stamina total', g564.rankValue() === baseRank44 && g564.effectiveStaminaMax() === baseMax44, `rank=${g564.rankValue()} max=${g564.effectiveStaminaMax()}`);
     ok('§564 dropping the ring re-clamps current Stamina to the restored max', g564.data.stamina === baseMax44, `stam=${g564.data.stamina} max=${baseMax44}`);
 
+    // --- task 36: grab-bag (godless clears god; difficultyCurse one-die; useCache Defence) ---
+    const gGL = GameState.create({ name:'GL', gender:'m', profession:'Warrior', book:6, adv });
+    gGL.setGod('Nagil');
+    eng.applyEffect(parse('<tick special="godless"/>'), gGL, {});
+    ok('§118 godless renounces the current god and sets the godless flag', !gGL.hasGod('Nagil') && gGL.data.gods.length === 0 && gGL.data.godless === true, `gods=${JSON.stringify(gGL.data.gods)} godless=${gGL.data.godless}`);
+
+    const gDC = GameState.create({ name:'DC', gender:'m', profession:'Warrior', book:3, adv });
+    eng.applyEffect(parse('<tick special="difficultyCurse"/>'), gDC, {});
+    ok('§91 difficultyCurse restricts ability rolls to one die', gDC.data.oneDieRolls === true && eng.rollDifficulty(gDC, 'combat', 10).dice.length === 1, `oneDie=${gDC.data.oneDieRolls}`);
+    const gDC2 = new GameState(sanitizeData(JSON.parse(JSON.stringify(gDC.data))));
+    ok('§91 the one-die curse survives a save round-trip', gDC2.data.oneDieRolls === true && eng.rollDifficulty(gDC2, 'combat', 10).dice.length === 1);
+    eng.applyEffect(parse('<tick special="difficultyRestore"/>'), gDC, {});
+    ok('§102 difficultyRestore lifts the curse (two dice again)', gDC.data.oneDieRolls === false && eng.rollDifficulty(gDC, 'combat', 10).dice.length === 2);
+
+    const gUC = GameState.create({ name:'UC', gender:'m', profession:'Warrior', book:6, adv });
+    gUC.cacheAddItem('maid', makeItem('weapon', 'sword', 2));
+    const fUC = makeFight(parse('<fight name="Warrior Maid" combat="8" defence="16" stamina="12" useCache="maid"/>'), gUC);
+    ok('§635 useCache adds the cached weapon bonus to enemy Combat AND Defence', fUC.combat === 10 && fUC.defence === 18, `combat=${fUC.combat} defence=${fUC.defence}`);
+
     // --- selling the starting "leather jerkin" at an armourer that lists "leather" --
     // Armour is valued by Defence tier, so the tier-1 jerkin sells at the "leather" row.
     const gsell = GameState.create({ name:'S', gender:'m', profession:'Warrior', book:1, adv });
@@ -1354,7 +1373,9 @@ async function run() {
     guc.cacheAddItem('6.635', makeItem('weapon', 'your sword', 3));
     guc.cacheAddItem('6.635', makeItem('armour', 'your mail', 2));
     const fuc = makeFight(parse('<fight name="Warrior Maid" combat="8" defence="16" stamina="18" useCache="6.635"/>'), guc);
-    ok('useCache adds the cached weapon+armour to the enemy (combat 8+3, defence 16+2)', fuc.combat === 11 && fuc.defence === 18, `c=${fuc.combat} d=${fuc.defence}`);
+    // The weapon's +3 raises the enemy's COMBAT to 11 and (via COMBAT) Defence too,
+    // plus the armour's +2 → Defence 16+3+2 = 21 (task 36 corrected the Defence path).
+    ok('useCache adds the cached weapon to Combat AND Defence, armour to Defence (combat 11, defence 21)', fuc.combat === 11 && fuc.defence === 21, `c=${fuc.combat} d=${fuc.defence}`);
     // group=: a simultaneous fight — the player strikes one foe, all living foes retaliate.
     const ggr = GameState.create({ name:'GR', gender:'m', profession:'Warrior', book:6, adv });
     ggr.data.stamina = 500; ggr.data.staminaMax = 500;

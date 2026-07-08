@@ -84,7 +84,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [ ] 33. Narrate sections without `<p>` wrappers (TTS)
 - [ ] 34. Finish moving rules out of the view layer
 - [ ] 35. iOS home-screen icons: provide PNG apple-touch-icon
-- [ ] 36. Minor rule divergences (grab-bag)
+- [x] 36. Minor rule divergences (grab-bag)
 - [x] 37. Fix the `safeAddGodd` typo in the source XML
 - [ ] 38. Gate cache widgets on `lock`/`unlock` under the single-pass render (book1/91 gamble)
 - [ ] 39. Defer confiscate-and-return `<transfer … from=>` until a fight resolves (book2/462)
@@ -1044,22 +1044,32 @@ still offers the Elnir initiation group) + full render-every-section scan.
 
 ---
 
-## 36. Minor rule divergences (grab-bag)  — LOW
+## 36. Minor rule divergences (grab-bag)  — **done**
 
-Small confirmed divergences to sweep in one pass, each with a test:
-- `applySpecial` (engine.js) gaps: `bonus="s"` parses NaN→0 (book6/183);
-  `godless` doesn't clear the current god (book6/118); `armourlock`/
-  `weaponlock` and `difficultyCurse`/`difficultyRestore` (one-die difficulty
-  rolls, book3/91 — pairs with task 19) are unimplemented. (`lock`/`unlock`
-  cache locks are now implemented — task 20.)
-- `useCache` fights (combat.js:56–58) add the cached weapon's bonus to the
-  enemy's **Combat only** — `best('armour')` is 0 for a weapon-only cache — but
-  book6/656 says to add the given weapon's COMBAT bonus to the Warrior Maid's
-  COMBAT **and Defence**, and JaFL's `FightNode` adds `combatRaise` to both.
-  With a +2 sword given she should be Combat 10 / Defence 18, not 10/16.
-  *(Found 2026-07-07.)*
-- Anything newly discovered of similar size should be appended here rather
-  than left in conversation (per the workflow in `AGENTS.md`).
+Swept the confirmed `applySpecial`/`useCache` divergences in one pass:
+- **`special="godless"`** (book6/118) now renounces every current god (via
+  `removeGod`, so god-granted effects are stripped) before setting the godless
+  flag — "cross the Gods Box off … you can never be an initiate of any deity".
+- **`special="difficultyCurse"`** (book3/91) / **`difficultyRestore"`** (book2/102)
+  are implemented via a persisted `data.oneDieRolls` flag: `rollDifficulty` rolls
+  **one** die instead of two while cursed (and the roll-button label reflects it),
+  lifted at the Three Fortunes' temple. Survives a save round-trip.
+- **`useCache`** (combat.js) now adds a cached **weapon's** bonus to the enemy's
+  Combat **and** Defence (JaFL `FightNode` adds `combatRaise` to both), plus a
+  cached armour's bonus to Defence — §6.635 Warrior Maid with a +3 sword / +2 mail
+  is Combat 11 / Defence 21, not 11/18. (The prior task-26 test asserting 11/18
+  encoded the bug; updated.)
+- **`special="weaponlock"`/`"armourlock"`** (book6/135, book2/290): JaFL locks the
+  broken weapon / melted armour so it can't be swapped to dodge the loss; here the
+  sibling `<lose weapon|armour using="t">` takes it and equipment auto-reconciles,
+  so there is nothing extra to enforce — recognised as an explicit no-op.
+- **`bonus="s"`** (book6/183) was already resolved: `applySpecial` reads the bonus
+  through `resolveValue` (variable-aware), so this grab-bag point was stale.
+
+Verified: 5 new headless assertions (godless renounces the god + sets the flag;
+difficultyCurse → one-die roll + save round-trip; difficultyRestore → two dice;
+useCache weapon→Combat+Defence) + the updated task-26 useCache assertion + full
+render-every-section scan. `RESULT ALL PASS pass=555 fail=0`.
 
 ---
 

@@ -578,7 +578,18 @@ function applySpecial(el, state) {
   // survives a save — book1/42 rat poison, book4/434 ring, book6/183/490/624 (task 49).
   if (kind === 'defence') state.addFightBonus('defence', bonus);
   else if (kind === 'attack') state.addFightBonus('attack', bonus);
-  else if (kind === 'godless') state.data.godless = true;
+  else if (kind === 'godless') {
+    // "Cross the Gods Box off … you can never be an initiate of any deity from
+    // now on" (book6/118): renounce every current god (stripping its effects) and
+    // set the godless flag so <if god=""> reads true and future initiation is barred.
+    state.data.gods.slice().forEach((g) => state.removeGod(g));
+    state.data.godless = true;
+  } else if (kind === 'difficultyCurse') state.data.oneDieRolls = true; // book3/91: one die on ability rolls
+  else if (kind === 'difficultyRestore') state.data.oneDieRolls = false; // book2/102: lifted at the temple
+  // weaponlock/armourlock (book6/135, book2/290): JaFL locks the broken weapon /
+  // melted armour so it can't be swapped to dodge the loss; here the sibling
+  // <lose weapon|armour using="t"> takes it and equipment auto-reconciles, so there
+  // is nothing extra to enforce — recognised as a no-op rather than an unknown tag.
   state.changed();
 }
 
@@ -947,7 +958,9 @@ function adjustApplies(el, state) {
 // ability score resolves — noweapon drops the wielded weapon's bonus. (task 53)
 export function rollDifficulty(state, ability, level, modifier = 0, mode = null) {
   const ab = firstAbility(ability);
-  const r = rollDice(2);
+  // The Three Fortunes' difficultyCurse (book3/91) restricts ability rolls to a
+  // single die until lifted at their temple (book2/102 difficultyRestore). (task 36)
+  const r = rollDice(state.data.oneDieRolls ? 1 : 2);
   const abilityScore = ab ? state.abilityForMode(ab, mode) : 0;
   const total = r.total + abilityScore + modifier;
   return { dice: r.dice, rollTotal: r.total, abilityScore, ability: ab, total, level, margin: total - level, success: total > level };

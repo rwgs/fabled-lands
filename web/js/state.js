@@ -36,6 +36,7 @@ function freshData() {
     items: [],            // {id, kind, name, bonus, ability, wielded, worn, tags:[]}
     gods: [],
     godless: false,
+    oneDieRolls: false,   // the Three Fortunes' difficultyCurse: 1 die on ability rolls (task 36)
     titles: [],           // {name, value}
     blessings: [],        // string ability names or labels
     curses: [],           // {type, ...}
@@ -810,6 +811,7 @@ export function sanitizeData(raw) {
   out.items = asArr(d.items).map(sanitizeItem).filter(Boolean);
   out.gods = asArr(d.gods).filter((g) => typeof g === 'string');
   out.godless = asBool(d.godless);
+  out.oneDieRolls = asBool(d.oneDieRolls);
   out.titles = asArr(d.titles).map((t) => {
     const o = asObj(t); const name = asStr(o.name).trim();
     return name ? { name, value: asNum(o.value, 0, { int: true }) } : null;
