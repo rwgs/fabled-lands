@@ -1048,6 +1048,28 @@ async function run() {
     st634.begin(await data.getSection(4, '634'), 4, '634');
     ok('§634 barter is untouched: item awards render as Take buttons, not reward picks', c634.querySelectorAll('.reward-pick').length === 0 && c634.querySelectorAll('.take-item').length >= 3, `picks=${c634.querySelectorAll('.reward-pick').length} takes=${c634.querySelectorAll('.take-item').length}`);
 
+    // --- task 44: ring of ultimate power folds its Rank/Stamina auras (book5/564) ---
+    const g564 = GameState.create({ name:'Ring', gender:'m', profession:'Warrior', book:5, adv });
+    const baseRank44 = g564.rankValue(), baseMax44 = g564.effectiveStaminaMax(), baseCombat44 = g564.ability('combat'), baseDef44 = g564.defence();
+    const c564 = document.createElement('div');
+    const st564 = new Story(c564, g564, { navigate(){}, onDeath(){}, notify(){} });
+    st564.begin(await data.getSection(5, '564'), 5, '564');
+    const ringBtn = Array.from(c564.querySelectorAll('.take-item')).find((b) => /ring of ultimate power/i.test(b.textContent));
+    ok('§564 offers the ring of ultimate power', !!ringBtn && !ringBtn.disabled);
+    ringBtn.click();
+    ok('§564 the ring raises Rank by 2', g564.rankValue() === baseRank44 + 2, `rank=${g564.rankValue()} base=${baseRank44}`);
+    ok('§564 the ring raises the Stamina total by 10', g564.effectiveStaminaMax() === baseMax44 + 10, `max=${g564.effectiveStaminaMax()} base=${baseMax44}`);
+    ok('§564 the ring raises all abilities by 1', g564.ability('combat') === baseCombat44 + 1, `combat=${g564.ability('combat')} base=${baseCombat44}`);
+    ok('§564 the ring raises Defence by 3 (Rank +2, Combat +1)', g564.defence() === baseDef44 + 3, `def=${g564.defence()} base=${baseDef44}`);
+    const rnd44 = Math.random; Math.random = () => 0; // roll a 1
+    ok('§564 a rank check uses the boosted Rank', eng.rollRankCheck(g564, 1, 0, 0).margin === baseRank44 + 2, `margin=${eng.rollRankCheck(g564, 1, 0, 0).margin}`);
+    Math.random = rnd44;
+    g564.healStamina(999);
+    ok('§564 healing fills the boosted Stamina total', g564.data.stamina === baseMax44 + 10, `stam=${g564.data.stamina}`);
+    g564.removeItemById(g564.findItems('ring of ultimate power')[0].id);
+    ok('§564 dropping the ring restores Rank and the Stamina total', g564.rankValue() === baseRank44 && g564.effectiveStaminaMax() === baseMax44, `rank=${g564.rankValue()} max=${g564.effectiveStaminaMax()}`);
+    ok('§564 dropping the ring re-clamps current Stamina to the restored max', g564.data.stamina === baseMax44, `stam=${g564.data.stamina} max=${baseMax44}`);
+
     // --- selling the starting "leather jerkin" at an armourer that lists "leather" --
     // Armour is valued by Defence tier, so the tier-1 jerkin sells at the "leather" row.
     const gsell = GameState.create({ name:'S', gender:'m', profession:'Warrior', book:1, adv });

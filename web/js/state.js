@@ -197,9 +197,15 @@ export class GameState {
     return sum;
   }
 
-  /** The Stamina maximum the player currently has, after any affliction cut
-   *  (never below 1). Cured afflictions restore it automatically. (task 60) */
-  effectiveStaminaMax() { return Math.max(1, this.data.staminaMax + this.afflictionStaminaMod()); }
+  /** The Stamina maximum the player currently has, after any affliction cut and any
+   *  item aura raise (never below 1). A Stamina-cutting affliction (task 60) or a
+   *  Stamina-raising aura like the ring of ultimate power's +10 (task 44) folds in
+   *  here, so the sheet/fight display, healing and rest all track it automatically. */
+  effectiveStaminaMax() { return Math.max(1, this.data.staminaMax + this.afflictionStaminaMod() + this.auraBonus('stamina')); }
+
+  /** The player's effective Rank, including any item-aura raise (the ring of
+   *  ultimate power's +2 Rank — book5/564). Feeds Defence and rank checks. (task 44) */
+  rankValue() { return this.data.rank + this.auraBonus('rank'); }
 
   /** Passive item-effect bonus for an ability key (task 41): a `type="aura"` effect
    *  counts while the item is carried; `type="wielded"` only while it is the
@@ -308,7 +314,8 @@ export class GameState {
   defence() {
     // COMBAT (incl. weapon bonus) + Rank + best armour bonus, plus any item aura
     // that boosts Defence directly (sword of stone, ring of guarding, Jade Defender).
-    return this.ability('combat') + this.data.rank + this.armourBonus() + this.auraBonus('defence');
+    // rankValue() adds the ring of ultimate power's +2 Rank so Defence rises by 2.
+    return this.ability('combat') + this.rankValue() + this.armourBonus() + this.auraBonus('defence');
   }
 
   wieldedWeapon() {
@@ -330,6 +337,10 @@ export class GameState {
       it.wielded = (it.kind === 'weapon' && it === w);
       it.worn = (it.kind === 'armour' && it === a);
     }
+    // Dropping a Stamina-raising aura item (the ring of ultimate power's +10)
+    // lowers the effective maximum — never leave current Stamina above it. (task 44)
+    const cap = this.effectiveStaminaMax();
+    if (this.data.stamina > cap) this.data.stamina = cap;
   }
 
   // ---- items -----------------------------------------------------------

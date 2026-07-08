@@ -83,7 +83,8 @@ export function renderSheet(state, container, opts = {}) {
 
   const head = el('div', 'sheet-head');
   head.appendChild(el('div', 'sheet-name', d.name));
-  head.appendChild(el('div', 'sheet-sub', `${d.profession} · ${ordinal(d.rank)} Rank ${rankTitle(d.rank, d.gender === 'm')}`));
+  const rankVal = state.rankValue(); // effective Rank, incl. the ring of ultimate power's +2 (task 44)
+  head.appendChild(el('div', 'sheet-sub', `${d.profession} · ${ordinal(rankVal)} Rank ${rankTitle(rankVal, d.gender === 'm')}`));
   container.appendChild(head);
 
   // Stamina bar

@@ -89,7 +89,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [ ] 38. Gate cache widgets on `lock`/`unlock` under the single-pass render (book1/91 gamble)
 - [ ] 39. Defer confiscate-and-return `<transfer … from=>` until a fight resolves (book2/462)
 - [ ] 42. Inner `<difficulty>`/`<random>`/`<rankcheck>` rolls inside a `<group>` are unrun *(the `<rest>` half is done — task 61)*
-- [ ] 44. Fold the ring of ultimate power's `Rank`/`Stamina` auras (book5/564)
+- [x] 44. Fold the ring of ultimate power's `Rank`/`Stamina` auras (book5/564)
 - [x] 62. Render `<image file=…>` and use-effect images (map of Bazalek, book3/75)
 - [x] 63. Heterogeneous "choose one" rewards (item / Shards / resurrection) over-apply (book1/597)
 
@@ -1251,23 +1251,34 @@ lack stays disabled; §690 one payment → one blessing; §4.93 two payments →
 
 ---
 
-## 44. Fold the ring of ultimate power's `Rank`/`Stamina` auras (book5/564)  — LOW
+## 44. Fold the ring of ultimate power's `Rank`/`Stamina` auras (book5/564)  — **done**
 
-Found while doing task 41. The item aura system (`state.auraBonus`) folds aura
-effects into `ability()`/`defence()`, which covers every aura/wielded effect in
-the corpus **except** the ring of ultimate power (book5/564), whose three auras are
-`ability="*" bonus="1"` (all abilities — handled), `ability="Rank" bonus="2"` and
-`ability="Stamina" bonus="10"`. The Rank and Stamina auras are **not** applied,
-because Rank and Stamina aren't derived through `ability()` — they are read as
-`state.data.rank` / `state.data.staminaMax` in many places (Defence, rank checks,
-the sheet). Wiring them would mean routing every rank/stamina read through an
-accessor that adds `auraBonus('rank')`/`auraBonus('stamina')` (and clamping current
-Stamina when the ring is dropped). It affects exactly one legendary late-game item,
-so it was deferred. Fix: add `state.rankValue()`/`state.staminaMaxValue()` (base +
-aura) and route Defence, `rollRankCheck`, `<adjust ability="rank|stamina">`, the
-`abilityForCheck` natural path and `ui.renderSheet` through them; on removing an
-aura item, re-clamp current Stamina to the new max. Add a §5.564 test (carrying the
-ring raises Rank by 2 and Stamina max by 10; dropping it restores both).
+The item aura system (`state.auraBonus`) folded aura effects into
+`ability()`/`defence()`, covering every aura in the corpus **except** the ring of
+ultimate power (book5/564), whose three auras are `ability="*" bonus="1"` (all
+abilities — already handled), `ability="Rank" bonus="2"` and `ability="Stamina"
+bonus="10"`. Rank and Stamina aren't derived through `ability()`, so those two
+auras did nothing.
+
+Fix:
+- **`state.js`** — new `rankValue()` = `data.rank + auraBonus('rank')`;
+  `effectiveStaminaMax()` (task 60) now also folds in `auraBonus('stamina')`, so
+  the ring's +10 rides the same accessor the sheet/fight display, healing and rest
+  already use. `defence()` reads `rankValue()` (so the +2 Rank adds +2 Defence).
+  `reconcileEquipment()` — run on every item add/remove — re-clamps current
+  Stamina to the (possibly lower) effective max, so dropping the ring can't leave
+  Stamina above the restored total.
+- **`engine.js`** — `rollRankCheck` compares against `rankValue()`; `adjustAmount`
+  and `evalExpression` resolve the `rank`/`stamina` keywords through
+  `rankValue()`/`effectiveStaminaMax()`.
+- **`ui.js` / `render.js`** — the Adventure-Sheet rank line and the rank-check
+  result readout show `rankValue()`.
+
+Verified: 9 new headless assertions (§564 grants the ring; Rank +2; Stamina total
++10; all abilities +1; Defence +3; a rank check uses the boosted Rank; healing
+fills the boosted total; dropping the ring restores Rank and the Stamina total and
+re-clamps current Stamina) + full render-every-section scan. `RESULT ALL PASS
+pass=550 fail=0`.
 
 ---
 

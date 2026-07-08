@@ -831,10 +831,10 @@ export function useItemEffect(state, item, effect, bodyNode = null) {
 export function evalExpression(expr, state, mode = null) {
   const resolve = (word) => {
     const w = word.toLowerCase();
-    // stamina: natural/affected → the unwounded max; no modifier → current.
-    if (w === 'stamina') return mode ? state.data.staminaMax : state.data.stamina;
+    // stamina: natural/affected → the unwounded max (incl. aura/affliction); no modifier → current.
+    if (w === 'stamina') return mode ? state.effectiveStaminaMax() : state.data.stamina;
     if (w === 'shards') return state.data.shards;
-    if (w === 'rank') return state.data.rank;
+    if (w === 'rank') return state.rankValue(); // ring of ultimate power +2 (task 44)
     if (w === 'defence') return state.defence();
     if (w === 'armour') return state.armourBonus();
     if (w === 'weapon') return state.wieldedWeapon()?.bonus || 0;
@@ -918,8 +918,8 @@ function adjustAmount(el, state) {
   const ab = el.getAttribute('ability');
   if (ab != null) {
     const key = ab.split('|')[0].trim().toLowerCase();
-    if (key === 'rank') return state.data.rank;
-    if (key === 'stamina') return state.data.staminaMax; // the natural/unwounded score
+    if (key === 'rank') return state.rankValue(); // ring of ultimate power +2 (task 44)
+    if (key === 'stamina') return state.effectiveStaminaMax(); // unwounded score, incl. aura/affliction
     if (ABILITIES.includes(key)) return state.ability(key);
   }
   const nm = el.getAttribute('name');
@@ -958,8 +958,9 @@ export function rollDifficulty(state, ability, level, modifier = 0, mode = null)
 export function rollRankCheck(state, dice = 1, add = 0, adjust = 0) {
   const r = rollDice(dice);
   const total = r.total + add + adjust;
-  const success = total <= state.data.rank;
-  return { kind: 'rankcheck', dice: r.dice, total, success, margin: 1 + state.data.rank - total };
+  const rank = state.rankValue(); // includes the ring of ultimate power's +2 Rank (task 44)
+  const success = total <= rank;
+  return { kind: 'rankcheck', dice: r.dice, total, success, margin: 1 + rank - total };
 }
 
 // training: roll to raise an ability. Success iff the roll beats your *natural*

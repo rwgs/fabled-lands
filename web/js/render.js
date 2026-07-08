@@ -1467,7 +1467,7 @@ export class Story {
     let stored = this.ctx.rolls.get(key);
     if (gated && armed && stored) { this.ctx.rolls.delete(key); stored = null; }
     if (stored) {
-      this.showDiceResult(widget, stored.dice, `Rolled ${stored.total} vs Rank ${this.state.data.rank}`, stored.success ? 'Success' : 'Failure', stored.success);
+      this.showDiceResult(widget, stored.dice, `Rolled ${stored.total} vs Rank ${this.state.rankValue()}`, stored.success ? 'Success' : 'Failure', stored.success);
     } else if (gated && !armed) {
       const btn = this.rollButton(`Rank check (roll ${diceWord(dice)})`, widget, () => {});
       btn.disabled = true; btn.title = 'Pay first to make this roll.';
