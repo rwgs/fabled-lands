@@ -953,6 +953,34 @@ async function run() {
     braceletBtn.click();
     ok('§238 taking the bracelet attaches the curse and halves MAGIC', g238.hasCurse('Curse of Blighted Magic') && g238.ability('magic') === Math.ceil(mg238 / 2), `curse=${g238.hasCurse('Curse of Blighted Magic')} magic=${g238.ability('magic')}/${mg238}`);
 
+    // --- task 61: §6.628 — the sentinel <set var="y" value="7"> must not clobber the
+    // pay-gated <random var="y"> roll (else the inn's rest/dysentery never fires) ---
+    window.__FL_INSTANT_DICE__ = true; // resolve the dice animation instantly
+    const settle61 = () => new Promise((r) => setTimeout(r, 30));
+    const g628 = GameState.create({ name:'Inn', gender:'m', profession:'Warrior', book:6, adv });
+    g628.data.shards = 10;
+    g628.data.stamina = g628.data.staminaMax - 3; // injured, with room to heal
+    const c628 = document.createElement('div');
+    const st628 = new Story(c628, g628, { navigate(){}, onDeath(){}, notify(){} });
+    st628.begin(await data.getSection(6, '628'), 6, '628');
+    ok('§628 sets the "not yet rolled" sentinel y=7 on entry', g628.getVar('y') === 7, `y=${g628.getVar('y')}`);
+    const activeGroups628 = () => Array.from(c628.querySelectorAll('.group-action')).filter((b) => !b.disabled);
+    ok('§628 no rest/dysentery action is active before the roll', activeGroups628().length === 0, String(activeGroups628().length));
+    const pay628 = c628.querySelector('.pay-action');
+    ok('§628 shows the "1 Shard a day" pay button', !!pay628 && !pay628.disabled, pay628 ? `disabled=${pay628.disabled}` : 'no pay btn');
+    pay628.click(); // arm flag x (pay 1 Shard)
+    const roll628 = c628.querySelector('.btn-roll');
+    ok('§628 arming the payment enables the die roll', !!roll628 && !roll628.disabled, roll628 ? `disabled=${roll628.disabled}` : 'no roll btn');
+    const rnd628 = Math.random; Math.random = () => 0.4; // force a die of 3 → the 1-5 rest branch
+    roll628.click(); await settle61();
+    Math.random = rnd628;
+    ok('§628 the roll writes y and the sentinel does NOT re-clobber it', g628.getVar('y') === 3, `y=${g628.getVar('y')}`);
+    const restGroup628 = activeGroups628();
+    ok('§628 a 3 activates exactly the rest action (not dysentery)', restGroup628.length === 1 && /regain 1 Stamina/i.test(restGroup628[0].textContent), restGroup628.map((b) => b.textContent).join(' | '));
+    const stam628 = g628.data.stamina;
+    restGroup628[0].click();
+    ok('§628 taking the rest action heals 1 Stamina', g628.data.stamina === stam628 + 1, `stam=${g628.data.stamina} before=${stam628}`);
+
     // --- selling the starting "leather jerkin" at an armourer that lists "leather" --
     // Armour is valued by Defence tier, so the tier-1 jerkin sells at the "leather" row.
     const gsell = GameState.create({ name:'S', gender:'m', profession:'Warrior', book:1, adv });

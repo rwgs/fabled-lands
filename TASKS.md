@@ -72,7 +72,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 58. Market `<sold>` hooks match the shop row's tags, not the sold item's
 - [x] 59. `<tick god=…>` drops `<effect>` children — Sig initiates never get +1 THIEVERY
 - [x] 60. Affliction `<effect>` forms `divide`/`target`/`stamina` inert; item `<curse>` children never attach
-- [ ] 61. book6/628: the rerunnable `<set>` clobbers the roll's var — inn rest/dysentery never fires
+- [x] 61. book6/628: the rerunnable `<set>` clobbers the roll's var — inn rest/dysentery never fires
 
 **LOW**
 - [ ] 9. Centralise tag dispatch into a registry
@@ -88,7 +88,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [ ] 37. Fix the `safeAddGodd` typo in the source XML
 - [ ] 38. Gate cache widgets on `lock`/`unlock` under the single-pass render (book1/91 gamble)
 - [ ] 39. Defer confiscate-and-return `<transfer … from=>` until a fight resolves (book2/462)
-- [ ] 42. `<rest>` (and other roll/action children) inside a `<group>` are ignored
+- [ ] 42. Inner `<difficulty>`/`<random>`/`<rankcheck>` rolls inside a `<group>` are unrun *(the `<rest>` half is done — task 61)*
 - [ ] 44. Fold the ring of ultimate power's `Rank`/`Stamina` auras (book5/564)
 - [ ] 62. Render `<image file=…>` and use-effect images (map of Bazalek, book3/75)
 - [ ] 63. Heterogeneous "choose one" rewards (item / Shards / resurrection) over-apply (book1/597)
@@ -1187,18 +1187,20 @@ scan. `RESULT ALL PASS pass=381 fail=0`.
 
 ---
 
-## 42. `<rest>` (and other roll/action children) inside a `<group>` are ignored  — LOW
+## 42. Inner `<difficulty>`/`<random>`/`<rankcheck>` rolls inside a `<group>` are unrun  — LOW  *(the `<rest>` half is done — task 61)*
 
 Found while doing task 30. `renderGroup` (render.js) collects only
-`lose, tick, gain, set, curse` as the group's on-click effects, so a `<rest>`
-child is silently dropped. In book6/628 the "regain 1 Stamina point"
-`<group force="t">` wraps `<text>` + `<rest stamina="1"/>` + `<lose flag="x"/>`:
-clicking it clears the flag but **never heals** the Stamina point. Any
-`<difficulty>`/`<random>`/`<rankcheck>` inside a group is likewise unrun (e.g.
-book3/680's "make a MAGIC roll" group holds the `<difficulty>` inline). Fix:
-either apply an inner `<rest>` on the group click (headlessly via
-`engine.applyRest`) and run any inner roll, or lift such children out of the
-group so they render as their own widgets. Add a §628 heal test.
+`lose, tick, gain, set, curse` (now also `rest`) as the group's on-click
+effects, so any **roll** child is silently dropped. The `<rest>` half is fixed:
+task 61 made `renderGroup` apply an inner `<rest>` via `engine.applyRest`, so
+book6/628's "regain 1 Stamina point" `<group force="t">` now heals (with a §628
+test). Still open: a `<difficulty>`/`<random>`/`<rankcheck>` inside a group is
+never run — e.g. book3/680's "make a MAGIC roll at Difficulty 16" `<group>` holds
+the `<difficulty>` inline, so clicking it arms the hidden price flag but never
+rolls, and the `<success>`/`<failure>` branches below (goto 644 / 626) never
+resolve — the wand puzzle is unwinnable. Fix: run an inner roll on the group
+click (or lift it out to render as its own roll widget). Test: §3.680 the group
+produces a MAGIC roll whose success ticks the box and routes to 644.
 
 ---
 
@@ -1787,21 +1789,42 @@ pass=519 fail=0`.
 
 ---
 
-## 61. book6/628: the rerunnable `<set>` clobbers the roll's var — inn rest/dysentery never fires  — MEDIUM
+## 61. book6/628: the rerunnable `<set>` clobbers the roll's var — inn rest/dysentery never fires  — **done**
 
-Task 25 made an absolute `<set value=…>` re-evaluate on every render
-(render.js:510) so roll-derived vars stay correct — but book6/628 uses
-`<set var="y" value="7"/>` as a *sentinel* ("not yet rolled"; JaFL sets it once
-on entry) before a pay-gated `<random dice="1" flag="x" var="y">`, then branches
-`<if var="y" lessthan="6">` (rest +1 Stamina) / `equals="6"` (dysentery).
-After paying and rolling, the rerender re-applies `y=7` **before** the if-chain
-evaluates, so neither branch ever activates: the player pays 1 Shard a day and
-rolls, but never heals (nor risks dysentery). This is the only corpus collision —
-every other `<set>` sharing a var with a roll sits in a mutually exclusive
-branch (book2/138, book3/43/102/149/304/642/653, book6/480). Fix: don't re-run a
-`<set>` whose var a roll has written this visit (track roll-written vars in
-`ctx`, which task 50 needs anyway). Test: §6.628 pay → roll 3 → the rest branch
-heals 1.
+Task 25 made an absolute `<set value=…>` re-evaluate on every render so
+roll-derived vars stay correct — but book6/628 uses `<set var="y" value="7"/>` as
+a *sentinel* ("not yet rolled"; JaFL sets it once on entry) before a pay-gated
+`<random dice="1" flag="x" var="y">`, then branches `<if var="y" lessthan="6">`
+(rest +1 Stamina) / `equals="6"` (dysentery). After paying and rolling, the
+rerender re-applied `y=7` **before** the if-chain evaluated, so neither branch
+ever activated: the player paid 1 Shard a day and rolled, but never healed (nor
+risked dysentery). This is the only corpus collision — every other `<set>`
+sharing a var with a roll sits in a mutually exclusive branch (book2/138,
+book3/43/102/149/304/642/653, book6/480).
+
+Fix (`web/js/render.js`):
+- A new per-visit **`ctx.rolledVars`** set records which vars a *roll* has written
+  this visit (populated at all three roll sites — difficulty/random/rankcheck —
+  alongside the existing `ctx.wroteVars`). The rerunnable-`<set>` branch in
+  `renderPassive` now treats a var a roll owns as **frozen**: `rollOwned` short-
+  circuits the re-apply entirely (not merely flipping `rerunnable`, which the
+  first-render "not memoised" path would otherwise still re-run), so the die
+  result stands. A `<set>` whose var *no* roll has touched still re-evaluates
+  every render (task 25), and a `<set>` sentinel that feeds a `<success>`/branch
+  still records into `wroteVars` (task 50). `rolledVars` is kept distinct from
+  `wroteVars` precisely because the `<set>` itself writes `wroteVars`.
+- Making §628 actually heal also required `renderGroup` to apply a `<rest>` child
+  on the group click (via `engine.applyRest`) — it previously collected only
+  `lose/tick/gain/set/curse`, so the "regain 1 Stamina" `<group force="t">`
+  cleared its flag but never healed. This is the `<rest>`-in-`<group>` half of
+  task 42 (the inner-*roll*-in-group half — book3/680's MAGIC-roll group — is
+  still open there).
+
+Verified: 7 new headless assertions on §6.628 (sentinel y=7 on entry; no active
+rest/dysentery action before the roll; the "1 Shard a day" pay button arms the
+gated roll; a forced die of 3 writes y=3 and the sentinel does **not** re-clobber
+it; a 3 activates exactly the rest action, not dysentery; taking it heals 1) +
+full render-every-section scan. `RESULT ALL PASS pass=526 fail=0`.
 
 ---
 

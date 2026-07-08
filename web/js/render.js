@@ -50,7 +50,7 @@ export class Story {
     // Likewise a per-fight attack/Defence bonus from <tick special="attack|defence">
     // (task 49) applies only to the current section's fight — clear it on entry.
     this.state.clearFightBonuses();
-    this.ctx = { applied: new Set(), rolls: new Map(), fights: new Map(), buys: new Map(), groupLimits: new Map(), groupPicks: new Map(), wroteVars: new Set() };
+    this.ctx = { applied: new Set(), rolls: new Map(), fights: new Map(), buys: new Map(), groupLimits: new Map(), groupPicks: new Map(), wroteVars: new Set(), rolledVars: new Set() };
     // Pre-scan grouped-award controllers (<items group="X" limit="N"/>) so the
     // individual award rows know their "choose up to N" cap no matter whether the
     // controller sits before or after them in the section (both orders occur).
@@ -405,11 +405,15 @@ export class Story {
     // <adjust> is excluded: inside a group it is a modifier for a nested roll
     // (e.g. "Difficulty 15 if you have climbing gear"), not a group effect.
     const effects = Array.from(node.querySelectorAll('lose, tick, gain, set, curse'));
+    // A <rest> child heals on the group click (book6/628 "regain 1 Stamina point"):
+    // applyRest headlessly, since the group renders as one button, not a rest widget.
+    // Without this the daily inn group cleared its flag but never healed. (task 61)
+    const restNodes = Array.from(node.querySelectorAll('rest'));
     // A group may also carry navigation (e.g. "cross off 30 Shards and turn to 99
     // in that book"): apply the effects and then follow the goto/return on click.
     const gotoNode = node.querySelector('goto');
     const returnNode = node.querySelector('return');
-    if (!label || (!effects.length && !gotoNode && !returnNode)) {
+    if (!label || (!effects.length && !restNodes.length && !gotoNode && !returnNode)) {
       // no visible action (or nothing to apply) — plain inline wrapper
       const span = document.createElement('span');
       this.appendChildren(span, node, path);
@@ -425,6 +429,11 @@ export class Story {
     if (!done) {
       btn.addEventListener('click', () => {
         effects.forEach((fx) => applyEffect(fx, this.state, {}));
+        restNodes.forEach((r) => {
+          const perUse = r.hasAttribute('stamina') ? r.getAttribute('stamina') : null;
+          const cost = r.getAttribute('shards') ? resolveValue(this.state, r.getAttribute('shards')) : 0;
+          applyRest(this.state, perUse, cost);
+        });
         this.ctx.applied.add(key);
         if (gotoNode) {
           const b = gotoNode.getAttribute('book') ? Number(gotoNode.getAttribute('book')) : this.book;
@@ -556,18 +565,25 @@ export class Story {
     }
 
     const key = 'fx@' + path;
+    const setVarName = tag === 'set' ? node.getAttribute('var') : null;
+    // A roll this visit has taken ownership of this var: freeze the <set> so it can
+    // never clobber the die result. book6/628 uses <set var="y" value="7"/> as a
+    // "not yet rolled" sentinel above a pay-gated <random var="y">; without this the
+    // rerunnable set re-applies y=7 on the post-roll rerender, so the <if var="y">
+    // rest/dysentery branches never fire (the player pays daily but never heals). (task 61)
+    const rollOwned = setVarName != null && this.ctx.rolledVars.has(setVarName);
     // An absolute <set value="…"> is a pure function of current state, so it is
     // re-evaluated on every render — this keeps variables derived from a roll
     // result correct after that roll resolves (rather than frozen at first render).
-    const rerunnable = tag === 'set' && node.hasAttribute('value') && !node.hasAttribute('modifier');
-    if (rerunnable || !this.ctx.applied.has(key)) {
+    const rerunnable = tag === 'set' && node.hasAttribute('value') && !node.hasAttribute('modifier') && !rollOwned;
+    if (!rollOwned && (rerunnable || !this.ctx.applied.has(key))) {
       if (!rerunnable) this.ctx.applied.add(key);
       const note = applyEffect(node, this.state, { chooser: null });
       // Record a <set var>'s write so a var-keyed <success>/<failure>/<outcome>
       // knows the var holds a real value this visit — the set-sentinel idiom
       // (book2/138 key holder, book3/43 Chill) resolves the branch with no roll,
       // while an unwritten/stale var keeps the branch pending (task 50).
-      if (tag === 'set' && node.getAttribute('var')) this.ctx.wroteVars.add(node.getAttribute('var'));
+      if (setVarName) this.ctx.wroteVars.add(setVarName);
       if (note && !hidden) this.notify(note);
     }
     // Render its descriptive text (the words the author wrote around the effect).
@@ -1251,7 +1267,7 @@ export class Story {
     const btn = this.rollButton(`Roll 2 dice + ${abLabel}`, widget, () => {
       if (gated) this.state.setFlag(flag, false); // consume the payment — re-pay to re-attempt
       const res = rollDifficulty(this.state, ability, level, modifier + childAdjustment(node, this.state), mode);
-      if (node.getAttribute('var')) { this.state.setVar(node.getAttribute('var'), res.margin); this.ctx.wroteVars.add(node.getAttribute('var')); }
+      if (node.getAttribute('var')) { this.state.setVar(node.getAttribute('var'), res.margin); this.ctx.wroteVars.add(node.getAttribute('var')); this.ctx.rolledVars.add(node.getAttribute('var')); }
       this.ctx.rolls.set(key, res);
       this.rerender();
     });
@@ -1321,7 +1337,7 @@ export class Story {
         const r = rollDice(dice);
         const total = r.total + childAdjustment(node, this.state);
         const res = { kind: 'random', dice: r.dice, total };
-        if (varName) { this.state.setVar(varName, total); this.ctx.wroteVars.add(varName); }
+        if (varName) { this.state.setVar(varName, total); this.ctx.wroteVars.add(varName); this.ctx.rolledVars.add(varName); }
         this.ctx.rolls.set(key, res);
         this.rerender();
       }));
@@ -1350,7 +1366,7 @@ export class Story {
       widget.appendChild(this.rollButton(`Rank check (roll ${diceWord(dice)})`, widget, () => {
         if (gated) this.state.setFlag(flag, false); // consume the payment
         const res = rollRankCheck(this.state, dice, add, childAdjustment(node, this.state));
-        if (node.getAttribute('var')) { this.state.setVar(node.getAttribute('var'), res.margin); this.ctx.wroteVars.add(node.getAttribute('var')); }
+        if (node.getAttribute('var')) { this.state.setVar(node.getAttribute('var'), res.margin); this.ctx.wroteVars.add(node.getAttribute('var')); this.ctx.rolledVars.add(node.getAttribute('var')); }
         this.ctx.rolls.set(key, res);
         this.rerender();
       }));
