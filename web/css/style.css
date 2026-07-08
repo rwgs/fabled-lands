@@ -225,7 +225,15 @@ img { max-width: 100%; }
 /* A navigation link gated behind an unresolved/lost fight (see applyFightGate). */
 .flow .goto.gated, .flow .choice.gated { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
 .illus { margin: 0 0 1.2rem; text-align: center; }
-.illus img { border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,0.25); }
+.illus img { max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,0.25); }
+.illus figcaption { margin-top: 0.4rem; font-size: 0.85em; font-style: italic; opacity: 0.75; }
+
+/* inline <image>text</image> — a link that opens the illustration in a modal */
+.image-link {
+  display: inline; border: none; background: none; color: var(--crimson-bright); font: inherit;
+  font-weight: 600; text-decoration: underline dotted; text-decoration-color: rgba(154,59,42,0.5);
+  text-underline-offset: 2px; padding: 0; cursor: pointer;
+}
 
 /* goto links */
 .goto {

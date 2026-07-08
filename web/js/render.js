@@ -154,16 +154,44 @@ export class Story {
     if (this.state.isDead() && !deathDeferred) this.onDeath();
   }
 
-  makeIllustration(name) {
+  makeIllustration(name, title = '') {
     const fig = document.createElement('figure');
     fig.className = 'illus';
     const img = document.createElement('img');
-    img.alt = '';
+    img.alt = title || '';
     img.loading = 'lazy';
-    img.src = 'assets/illus/' + name;
+    // Filenames carry spaces ("Map of Bazalek Isle.JPG"), so encode the segment.
+    img.src = 'assets/illus/' + encodeURIComponent(name);
     img.onerror = () => fig.remove();
     fig.appendChild(img);
+    if (title) { const cap = document.createElement('figcaption'); cap.textContent = title; fig.appendChild(cap); }
     return fig;
+  }
+
+  // An <image file="…" title="…">: with inner text it's an inline link that opens
+  // the illustration in a modal (keeping the prose — book1/200, book5/410,
+  // book3/75); a self-closing one drops in the figure. The corpus uses file= (not
+  // src=/name=); build-data.ps1 copies each into web/assets/illus/. (task 62)
+  renderImage(container, node, path) {
+    const file = node.getAttribute('file') || node.getAttribute('src') || node.getAttribute('name') || '';
+    const title = node.getAttribute('title') || '';
+    const inner = document.createElement('span');
+    this.appendChildren(inner, node, path);
+    if (inner.textContent.trim()) {
+      const link = document.createElement('button');
+      link.className = 'image-link';
+      link.innerHTML = inner.innerHTML;
+      link.title = title ? `View ${title}` : 'View illustration';
+      link.addEventListener('click', () => this.showImageModal(file, title));
+      container.appendChild(link);
+      return link;
+    }
+    container.appendChild(this.makeIllustration(file, title));
+    return null;
+  }
+
+  showImageModal(file, title) {
+    modal({ title: title || 'Illustration', body: this.makeIllustration(file, title), buttons: [{ label: 'Close', value: null }] });
   }
 
   // ---- core walk -----------------------------------------------------------
@@ -365,8 +393,7 @@ export class Story {
         return btn;
       }
       case 'image':
-        container.appendChild(this.makeIllustration(node.getAttribute('src') || node.getAttribute('name') || ''));
-        return null;
+        return this.renderImage(container, node, path);
       case 'table':
       case 'choices-table':
         return this.renderTable(container, node, path);

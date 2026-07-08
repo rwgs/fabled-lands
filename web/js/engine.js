@@ -793,11 +793,15 @@ export function readItemEffects(node) {
  *  so the caller can navigate (the Vade Mecum consult). `bodyNode` is the parsed
  *  <effect> body (pass null when there is none). Returns { removeItem, goto }. */
 export function useItemEffect(state, item, effect, bodyNode = null) {
-  let goto = null;
+  let goto = null, image = null;
   if (bodyNode) {
     applyEffectBody(bodyNode, state); // rest/lose/tick/… (a <goto> inside is inert here)
     const g = bodyNode.querySelector(':scope > goto') || bodyNode.querySelector('goto');
     if (g) goto = { book: g.getAttribute('book') ? Number(g.getAttribute('book')) : null, section: g.getAttribute('section') };
+    // A "use" effect may surface an illustration (the map of Bazalek's Read
+    // action — book3/75): return it so the view can open the image. (task 62)
+    const im = bodyNode.querySelector('image');
+    if (im) image = { file: im.getAttribute('file') || im.getAttribute('src') || im.getAttribute('name') || '', title: im.getAttribute('title') || '' };
   } else if (effect.ability) {
     // A bare potion: +bonus (default +1) to the ability for this section (JaFL potion bonus).
     state.addPotionBonus(effect.ability, effect.bonus || 1);
@@ -808,7 +812,7 @@ export function useItemEffect(state, item, effect, bodyNode = null) {
     if (effect.uses === 0) removeItem = true; // consumed (disposable)
     state.changed();
   }
-  return { removeItem, goto };
+  return { removeItem, goto, image };
 }
 
 /** Evaluate a <set value="..."> expression. A recursive-descent parser over the

@@ -167,6 +167,25 @@ for ($b = 1; $b -le 6; $b++) {
 $mapsSrc = Join-Path $images 'maps'
 if (Test-Path $mapsSrc) { Copy-Item (Join-Path $mapsSrc '*') $mapsOut -Force -ErrorAction SilentlyContinue }
 
+# ---- Copy per-book section illustrations ------------------------------------
+# A handful of sections show an in-text illustration via <image file="…"> (or a
+# section image="…" attribute): the Forest of the Forsaken map, the map of
+# Bazalek Isle, the Black Diptych. Each image file lives beside its book's XML.
+# Copy every book-folder image that is NOT the "<Region>-Map" regional map into
+# web/assets/illus/ under its own name, so render.js can resolve it there. (task 62)
+$illusOut = Join-Path $assets 'illus'
+New-Item -ItemType Directory -Force -Path $illusOut | Out-Null
+for ($b = 1; $b -le 6; $b++) {
+    $dir = Join-Path $books ("book{0}" -f $b)
+    if (-not (Test-Path $dir)) { continue }
+    Get-ChildItem -Path $dir -File |
+        Where-Object { $_.Extension -match '^\.(jpg|jpeg|png|gif)$' -and $_.BaseName -notmatch '-Map$' -and $_.BaseName -notmatch 'cover' } |
+        ForEach-Object {
+            Copy-Item $_.FullName (Join-Path $illusOut $_.Name) -Force
+            Write-Host ("book{0} illustration: {1}" -f $b, $_.Name)
+        }
+}
+
 # ---- Refresh the build stamp shown in-game ----------------------------------
 & (Join-Path $PSScriptRoot 'stamp-version.ps1')
 

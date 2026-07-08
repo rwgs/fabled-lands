@@ -533,8 +533,20 @@ function onUseItem(item, effect) {
   }
   const res = useItemEffect(state, item, effect, bodyNode);
   if (res.removeItem) state.removeItemById(item.id);
+  if (res.image && res.image.file) showIllustration(res.image.file, res.image.title); // map of Bazalek (task 62)
   if (res.goto && res.goto.section != null) { navigate(res.goto.book || (story && story.book) || state.data.book, res.goto.section); return; }
   if (story) story.rerender();
+}
+
+// Open a section illustration in a modal (the map an item's Use effect reveals).
+function showIllustration(file, title) {
+  const fig = el('figure', 'illus');
+  const img = el('img');
+  img.alt = title || '';
+  img.src = 'assets/illus/' + encodeURIComponent(file);
+  fig.appendChild(img);
+  if (title) fig.appendChild(el('figcaption', null, title));
+  modal({ title: title || 'Illustration', body: fig, buttons: [{ label: 'Close', value: null }] });
 }
 
 function toggleSheet(force) {

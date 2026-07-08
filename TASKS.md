@@ -90,7 +90,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [ ] 39. Defer confiscate-and-return `<transfer … from=>` until a fight resolves (book2/462)
 - [ ] 42. Inner `<difficulty>`/`<random>`/`<rankcheck>` rolls inside a `<group>` are unrun *(the `<rest>` half is done — task 61)*
 - [ ] 44. Fold the ring of ultimate power's `Rank`/`Stamina` auras (book5/564)
-- [ ] 62. Render `<image file=…>` and use-effect images (map of Bazalek, book3/75)
+- [x] 62. Render `<image file=…>` and use-effect images (map of Bazalek, book3/75)
 - [ ] 63. Heterogeneous "choose one" rewards (item / Shards / resurrection) over-apply (book1/597)
 
 **Done**
@@ -1832,16 +1832,39 @@ full render-every-section scan. `RESULT ALL PASS pass=526 fail=0`.
 
 ---
 
-## 62. Render `<image file=…>` and use-effect images (map of Bazalek, book3/75)  — LOW
+## 62. Render `<image file=…>` and use-effect images (map of Bazalek, book3/75)  — **done**
 
-`render.js:352–354` reads `src|name` off an `<image>`, but the corpus uses
-`file=` (plus `title=`/`book=`), so the inline image in book3/75 never renders;
-and `applyEffectBody`/`useItemEffect` have no `<image>` handling, so the map of
-Bazalek's `<effect type="use" verb="Read">…<image …/></effect>` Use button is a
-no-op — the item's sole purpose (viewing the island map) is inaccessible. Fix:
-read `file=` (resolve against the owning book's asset folder) and let a use
-effect surface an image (e.g. the existing image modal). Test: §3.75 award
-carries the use effect and Read produces an image element.
+The `<image>` handler read `src|name`, but the corpus uses `file=` (+ `title=`/
+`book=`), so inline images never rendered; and `useItemEffect` had no `<image>`
+handling, so the map of Bazalek's `<effect type="use" verb="Read">…<image/></effect>`
+Read button was a no-op. All four image sites now work (book1/200, book3/75,
+book5/410, and the section `image=` attribute).
+
+Fix:
+- **`build/build-data.ps1`** — now copies each book folder's section
+  illustrations (any image file that is neither the `<Region>-Map` regional map
+  nor a `-cover` cover) into `web/assets/illus/`, so `render.js` can resolve them
+  there. The three referenced illustrations (Forest of the Forsaken, Map of
+  Bazalek Isle, TheBlackDiptych) land there.
+- **`render.js`** — a new `renderImage` reads `file=` (falling back to `src`/
+  `name`): an inline `<image>text</image>` keeps its prose as a clickable
+  `.image-link` that opens the illustration in a modal (`showImageModal`), while a
+  self-closing `<image/>` drops in the figure. `makeIllustration` now
+  URL-encodes the (space-bearing) filename, sizes the image and adds an optional
+  `<figcaption>`.
+- **`engine.js` / `app.js`** — `useItemEffect` returns an `image` descriptor when
+  the use-body carries an `<image>`; `onUseItem` opens it in a modal
+  (`showIllustration`), leaving a reusable map unconsumed.
+- **book5/410** — the source referenced `The Black Diptych.jpg` but the asset is
+  `TheBlackDiptych.jpg`; corrected the `file=`/`image=` to match so the Diptych
+  actually loads.
+
+Verified: 6 new headless assertions (§75 inline image link keeps its prose; the
+taken map carries a Read use-effect whose body holds the `<image>`; Reading
+surfaces the Bazalek illustration and does not consume the reusable map; §200
+inline treasure-map link) + an HTTP probe confirming all three
+`assets/illus/*.jpg` serve 200 + full render-every-section scan. `RESULT ALL PASS
+pass=535 fail=0`.
 
 ---
 
