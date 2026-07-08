@@ -26,6 +26,10 @@ const ROLL_TAGS = new Set(['difficulty', 'random', 'rankcheck', 'training']);
 // childAdjustment) — never a passive effect. Auto-applying it on view would
 // silently upgrade the crew ("<adjust crew='good'>") or bump codeword counters.
 const PASSIVE_TAGS = new Set(['lose', 'tick', 'gain', 'set', 'curse', 'disease', 'poison', 'adjustmoney']);
+// Reward nodes a "choose one" purchase can offer (task 43 effect rewards + task 63
+// item/resurrection rewards); the item-family subset is what makes a pure barter.
+const ITEM_FAMILY_TAGS = new Set(['item', 'weapon', 'armour', 'tool']);
+const CHOOSE_ONE_TAGS = new Set(['lose', 'tick', 'gain', 'item', 'weapon', 'armour', 'tool', 'resurrection']);
 
 export class Story {
   constructor(rootEl, state, opts) {
@@ -796,14 +800,19 @@ export class Story {
       && (node.getAttribute('count') != null || node.getAttribute('amount') != null);
   }
 
-  // A "choose one" purchase: a price="key" cost with two or more linked *effect*
-  // rewards (tick/lose/gain), so one payment must grant only the picked one — never
-  // the whole list (book6/171, book5/152, book6/690). Barter awards (<item>/<weapon>
-  // flag=…, e.g. book4/634) are deliberately excluded so their handling is untouched.
+  // A "choose one" purchase: a price="key" cost with two or more linked rewards, so
+  // one payment must grant only the picked one — never the whole list (book6/171,
+  // book5/152, book6/690). The rewards may be effect nodes (tick/lose/gain) and/or a
+  // heterogeneous mix that also includes an item/weapon/armour/tool award or a
+  // resurrection deal (book1/597: amber wand | 500 Shards | resurrection). A *pure*
+  // item-family set is left as a barter (book4/634 "give one, take one" — task 43
+  // deliberately excludes it), so a heterogeneous reward (at least one non-item-family
+  // node) is required before an item/resurrection award joins the choose-one path.
   isChooseOne(key) {
     const rewards = this.linkedRewards(key);
     if (rewards.length < 2) return false;
-    return rewards.every((n) => ['lose', 'tick', 'gain'].includes(n.tagName.toLowerCase()));
+    if (!rewards.every((n) => CHOOSE_ONE_TAGS.has(n.tagName.toLowerCase()))) return false;
+    return rewards.some((n) => !ITEM_FAMILY_TAGS.has(n.tagName.toLowerCase()));
   }
 
   // The "choose one" cost button: paying only *arms* the choice (deducts the cost
@@ -852,12 +861,15 @@ export class Story {
     btn.textContent = this.rewardLabel(node);
     const held = this.rewardWasteReason(node);
     if (!armed) {
-      btn.disabled = true; btn.title = 'Pay first to choose this.';
+      btn.disabled = true;
+      // With a visible cost the player must pay first; a hidden/earned arming
+      // (book1/597's <tick price hidden>) means the single pick has been spent.
+      btn.title = this.hasVisiblePay(key) ? 'Pay first to choose this.' : 'You may choose only one of these rewards.';
     } else if (held) {
       btn.disabled = true; btn.title = held;
     } else {
       btn.addEventListener('click', () => {
-        const note = applyEffect(node, this.state, {}); // grant reward + clear flag key
+        const note = this.grantChoosableReward(node, key); // grant reward + clear flag key
         if (note) this.notify(note);
         this.rerender();
       });
@@ -866,11 +878,68 @@ export class Story {
     return btn;
   }
 
+  // Is there a player-facing (non-hidden) cost for this choose-one key? A hidden
+  // price arms the choice for free (an earned "choose your reward" — book1/597).
+  hasVisiblePay(key) {
+    if (!this.sectionEl || key == null || key === '') return false;
+    return Array.from(this.sectionEl.querySelectorAll(`[price="${key}"]`)).some((n) => !boolAttr(n.getAttribute('hidden')));
+  }
+
+  // Grant one chosen reward and consume the payment (clear its flag). Effect rewards
+  // (tick/lose/gain) clear their own flag via applyEffect; an item/weapon/armour/tool
+  // award or a resurrection deal is granted here and the flag cleared explicitly. (task 63)
+  grantChoosableReward(node, key) {
+    const tag = node.tagName.toLowerCase();
+    if (ITEM_FAMILY_TAGS.has(tag)) {
+      const rawName = node.getAttribute('name') || tag;
+      const currency = tag === 'item' ? currencyAward(rawName) : null;
+      if (currency != null) {
+        this.state.adjustMoney(currency);
+      } else {
+        const { name, alts } = splitItemName(rawName);
+        const bonus = node.getAttribute('bonus') ? parseInt(node.getAttribute('bonus'), 10) : 0;
+        const ability = node.getAttribute('ability') || null;
+        const tags = [...parseTags(node.getAttribute('tags')), ...alts];
+        this.state.addItem(makeItem(tag, name, bonus, ability, tags, readItemEffects(node)));
+      }
+      this.state.setFlag(key, false);
+      return '';
+    }
+    if (tag === 'resurrection') {
+      buyResurrectionDeal(this.state, {
+        book: node.getAttribute('book') ? Number(node.getAttribute('book')) : this.book,
+        section: node.getAttribute('section'), text: node.getAttribute('text') || (node.textContent || '').trim(),
+        god: node.getAttribute('god'), cost: 0,
+      });
+      this.state.setFlag(key, false);
+      return 'Resurrection deal arranged.';
+    }
+    return applyEffect(node, this.state, {});
+  }
+
   // A short label for a "choose one" reward button: its own words, else the
   // blessing/curse/disease/poison it grants or lifts.
   rewardLabel(node) {
+    const tag = node.tagName.toLowerCase();
+    // Item/weapon/armour/tool award: "Take amber wand (Magic +1)".
+    if (ITEM_FAMILY_TAGS.has(tag)) {
+      const rawName = node.getAttribute('name') || tag;
+      const currency = tag === 'item' ? currencyAward(rawName) : null;
+      if (currency != null) return `Take ${currency} Shards`;
+      const { name } = splitItemName(rawName);
+      const bonus = node.getAttribute('bonus') ? parseInt(node.getAttribute('bonus'), 10) : 0;
+      const ability = node.getAttribute('ability');
+      let tail = '';
+      if (tag === 'weapon' && bonus) tail = ` (Combat +${bonus})`;
+      else if (tag === 'armour' && bonus) tail = ` (Defence +${bonus})`;
+      else if (tag === 'tool' && ability) tail = ` (${titleCase(ability)} +${bonus})`;
+      else if (bonus) tail = ` (+${bonus})`;
+      return `Take ${titleCase(name)}${tail}`;
+    }
     const txt = (node.textContent || '').trim();
     if (txt) return txt;
+    // A bare shards tick ("<tick shards='500' flag='x'/>") — book1/597's 500 Shards.
+    if (tag === 'tick' && node.getAttribute('shards') != null) return `${node.getAttribute('shards')} Shards`;
     const bl = node.getAttribute('blessing');
     if (bl) return titleCase(bl);
     const af = node.getAttribute('curse') || node.getAttribute('disease') || node.getAttribute('poison');
@@ -881,9 +950,18 @@ export class Story {
   // Why picking this reward would waste the payment (so the option is disabled): a
   // blessing you already hold, or a curse/disease/poison "lift" you aren't suffering.
   rewardWasteReason(node) {
+    const tag = node.tagName.toLowerCase();
+    // A resurrection deal is wasted if one is already arranged (book1/597: "if you
+    // do not have one already"); an item award needs a free carry slot.
+    if (tag === 'resurrection' && this.state.hasResurrection()) return 'You already have a resurrection deal.';
+    if (ITEM_FAMILY_TAGS.has(tag)) {
+      const rawName = node.getAttribute('name') || tag;
+      const isCurrency = tag === 'item' && currencyAward(rawName) != null;
+      if (!isCurrency && this.state.freeSlots() <= 0) return 'No room (12-item carry limit).';
+    }
     const bl = node.getAttribute('blessing');
     if (bl && this.state.hasBlessing(bl)) return 'You already have this blessing.';
-    if (node.tagName.toLowerCase() === 'lose') {
+    if (tag === 'lose') {
       const c = node.getAttribute('curse');
       if (c != null && !this.state.hasCurse(c)) return "You don't have that curse.";
       const d = node.getAttribute('disease');
@@ -1064,6 +1142,11 @@ export class Story {
 
   renderItemAward(container, node, path) {
     const kind = node.tagName.toLowerCase();
+    // A flag-linked item award inside a heterogeneous "choose one" reward menu
+    // (book1/597 amber wand | 500 Shards | resurrection) renders as a single pick,
+    // live only once the choice is armed and blocking its siblings when taken. (task 63)
+    const awardFlag = node.getAttribute('flag');
+    if (awardFlag != null && this.isChooseOne(awardFlag)) return this.renderChoosableReward(container, node, path, awardFlag);
     const rawName = node.getAttribute('name') || (kind === 'weapon' ? 'weapon' : kind);
     // A "N Shards" award is stackable currency, not a possession (dragon hoard §1.16).
     const currency = kind === 'item' ? currencyAward(rawName) : null;
@@ -2435,6 +2518,10 @@ export class Story {
 
   // ---- resurrection --------------------------------------------------------
   renderResurrection(container, node, path) {
+    // A flag-linked resurrection inside a "choose one" reward menu renders as a
+    // pick (book1/597: taking it consumes the single choice). (task 63)
+    const resFlag = node.getAttribute('flag');
+    if (resFlag != null && this.isChooseOne(resFlag)) return this.renderChoosableReward(container, node, path, resFlag);
     const span = document.createElement('span');
     this.appendChildren(span, node, path);
     const section = node.getAttribute('section');

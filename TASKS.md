@@ -91,7 +91,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [ ] 42. Inner `<difficulty>`/`<random>`/`<rankcheck>` rolls inside a `<group>` are unrun *(the `<rest>` half is done — task 61)*
 - [ ] 44. Fold the ring of ultimate power's `Rank`/`Stamina` auras (book5/564)
 - [x] 62. Render `<image file=…>` and use-effect images (map of Bazalek, book3/75)
-- [ ] 63. Heterogeneous "choose one" rewards (item / Shards / resurrection) over-apply (book1/597)
+- [x] 63. Heterogeneous "choose one" rewards (item / Shards / resurrection) over-apply (book1/597)
 
 **Done**
 - [x] 1. Gate combat progression / model fight outcomes
@@ -1868,21 +1868,36 @@ pass=535 fail=0`.
 
 ---
 
-## 63. Heterogeneous "choose one" rewards (item / Shards / resurrection) over-apply (book1/597)  — LOW
+## 63. Heterogeneous "choose one" rewards (item / Shards / resurrection) over-apply (book1/597)  — **done**
 
-Found while doing task 56. The task-43 "choose one" machinery only handles
-*effect*-node rewards (`tick`/`lose`/`gain`) sharing one flag; a menu that mixes
-an item award, a Shards tick and a resurrection deal is not modelled. In
-**book1/597** the reward for the ghoul's head is "choose only one of these three":
-an `<tool name="amber wand" … flag="x"/>`, `<tick shards="500" flag="x"/>`, and a
-`<resurrection … flag="x">`. `renderItemAward` and `renderResurrection` ignore
-`flag=` entirely, so the amber wand's Take button and the resurrection widget are
-always live, while the 500-Shards reward (a dependent effect) shows nothing — and
-nothing enforces the "only one" cap, so a player can take the wand *and* arrange
-resurrection. (After task 56 the hidden price arms flag `x` silently but grants
-nothing, so at least it no longer auto-pays the 500 Shards.) Fix: teach the
-choose-one path to include item/tool/weapon/armour and resurrection rewards —
-render each linked reward as a pick that, once the flag is armed, grants that one
-(item via `addItem`, resurrection via the deal) and consumes the flag, disabling
-the siblings. Test: §1.597 taking the amber wand blocks the 500 Shards and the
-resurrection (and vice versa).
+The task-43 "choose one" machinery only handled *effect*-node rewards
+(`tick`/`lose`/`gain`) sharing one flag; a menu that mixes an item award, a Shards
+tick and a resurrection deal was not modelled. In **book1/597** the reward for the
+ghoul's head is "choose only one of these three": an `<tool name="amber wand" …
+flag="x"/>`, `<tick shards="500" flag="x"/>`, and a `<resurrection … flag="x">`.
+`renderItemAward`/`renderResurrection` ignored `flag=`, so the wand's Take button
+and the resurrection widget were always live while the 500-Shards reward showed
+nothing, and nothing enforced the "only one" cap.
+
+Fix (`web/js/render.js`):
+- `isChooseOne(key)` now accepts item-family (`item/weapon/armour/tool`) and
+  `resurrection` reward nodes in addition to effect nodes, **but** requires the
+  set to be *heterogeneous* (at least one non-item-family node). A pure
+  item/weapon set stays a barter (book4/634 "give one, take one" is untouched);
+  the pure-effect task-43 menus still qualify.
+- `renderItemAward` and `renderResurrection` route a `flag=`-linked node to
+  `renderChoosableReward` when it belongs to a choose-one. A new
+  `grantChoosableReward` grants the picked reward — an item via
+  `addItem`/`makeItem` (currency awards credit Shards), a resurrection via
+  `buyResurrectionDeal` — and clears the flag; effect rewards still clear their
+  own flag through `applyEffect`. `rewardLabel`/`rewardWasteReason` gained
+  item-family + resurrection cases (a Take label with the bonus tail; disabled
+  when the carry cap is full or a resurrection deal is already held), and an
+  unarmed pick under a *hidden* price now reads "You may choose only one" rather
+  than "Pay first".
+
+Verified: 6 new headless assertions (§597 three armed picks, nothing auto-applied;
+taking the wand grants it and blocks the Shards + resurrection; taking
+resurrection blocks the wand + Shards; §634 barter still renders Take buttons,
+not reward picks) + full render-every-section scan. `RESULT ALL PASS pass=541
+fail=0`.

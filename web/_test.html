@@ -1017,6 +1017,37 @@ async function run() {
     st200.begin(await data.getSection(1, '200'), 1, '200');
     ok('§200 renders its inline treasure-map image as a link', !!c200.querySelector('.image-link'));
 
+    // --- task 63: heterogeneous "choose one" rewards (item | Shards | resurrection) ---
+    // §1.597: reward for the ghoul's head — amber wand OR 500 Shards OR resurrection.
+    const g597 = GameState.create({ name:'Ghoul', gender:'m', profession:'Warrior', book:1, adv });
+    const shards0597 = g597.data.shards;
+    const c597 = document.createElement('div');
+    const st597 = new Story(c597, g597, { navigate(){}, onDeath(){}, notify(){} });
+    st597.begin(await data.getSection(1, '597'), 1, '597');
+    const picks597 = () => Array.from(c597.querySelectorAll('.reward-pick'));
+    ok('§597 shows three reward picks (wand / Shards / resurrection)', picks597().length === 3, `n=${picks597().length}`);
+    ok('§597 the picks are armed and nothing auto-applied on entry', picks597().every((b) => !b.disabled) && g597.data.shards === shards0597 && !g597.hasResurrection() && g597.findItems('amber wand').length === 0, `sh=${g597.data.shards} res=${g597.hasResurrection()} wand=${g597.findItems('amber wand').length}`);
+    picks597().find((b) => /amber wand/i.test(b.textContent)).click();
+    ok('§597 taking the amber wand grants exactly that item', g597.findItems('amber wand').length === 1);
+    ok('§597 the wand choice blocks the 500 Shards and the resurrection', picks597().every((b) => b.disabled) && g597.data.shards === shards0597 && !g597.hasResurrection(), `sh=${g597.data.shards} res=${g597.hasResurrection()}`);
+
+    // and the reverse: taking resurrection blocks the wand and the 500 Shards
+    const g597b = GameState.create({ name:'Ghoul2', gender:'m', profession:'Warrior', book:1, adv });
+    const sh0597b = g597b.data.shards;
+    const c597b = document.createElement('div');
+    const st597b = new Story(c597b, g597b, { navigate(){}, onDeath(){}, notify(){} });
+    st597b.begin(await data.getSection(1, '597'), 1, '597');
+    Array.from(c597b.querySelectorAll('.reward-pick')).find((b) => /resurrection/i.test(b.textContent)).click();
+    ok('§597 taking resurrection arranges the deal and blocks the other two', g597b.hasResurrection() && g597b.findItems('amber wand').length === 0 && g597b.data.shards === sh0597b && Array.from(c597b.querySelectorAll('.reward-pick')).every((b) => b.disabled), `res=${g597b.hasResurrection()} wand=${g597b.findItems('amber wand').length} sh=${g597b.data.shards}`);
+
+    // book4/634 barter (pure item-family rewards) must NOT become a choose-one:
+    // its item awards stay independent Take buttons, not flag-gated reward picks.
+    const g634 = GameState.create({ name:'Fish', gender:'m', profession:'Warrior', book:4, adv });
+    const c634 = document.createElement('div');
+    const st634 = new Story(c634, g634, { navigate(){}, onDeath(){}, notify(){} });
+    st634.begin(await data.getSection(4, '634'), 4, '634');
+    ok('§634 barter is untouched: item awards render as Take buttons, not reward picks', c634.querySelectorAll('.reward-pick').length === 0 && c634.querySelectorAll('.take-item').length >= 3, `picks=${c634.querySelectorAll('.reward-pick').length} takes=${c634.querySelectorAll('.take-item').length}`);
+
     // --- selling the starting "leather jerkin" at an armourer that lists "leather" --
     // Armour is valued by Defence tier, so the tier-1 jerkin sells at the "leather" row.
     const gsell = GameState.create({ name:'S', gender:'m', profession:'Warrior', book:1, adv });
