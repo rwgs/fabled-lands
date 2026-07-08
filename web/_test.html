@@ -875,6 +875,18 @@ async function run() {
     ok('sheet renders up/down controls per item', csheet.querySelectorAll('.item-move').length === go.data.items.length * 2, String(csheet.querySelectorAll('.item-move').length));
     ok('sheet disables the top-up and bottom-down controls', csheet.querySelectorAll('.item-move:disabled').length === 2, String(csheet.querySelectorAll('.item-move:disabled').length));
 
+    // --- task 57: adventure sheet shows afflictions by name; diseases/poisons visible
+    const gaf = GameState.create({ name:'Af', gender:'m', profession:'Warrior', book:1, adv });
+    gaf.addCurse('Curse of the Shadar');
+    gaf.addAffliction('disease', { name:'Ghoulbite', effects:[{ ability:'combat', bonus:-1 }] });
+    gaf.addAffliction('poison', { name:'Scorpion Poison', effects:[{ ability:'stamina', bonus:-1 }] });
+    const csheet2 = document.createElement('div');
+    renderSheet(gaf, csheet2);
+    const sheetTxt = csheet2.textContent;
+    ok('sheet lists a curse by name (not the literal "curse")', /Curse of the Shadar/.test(sheetTxt));
+    ok('sheet has a Diseases section listing Ghoulbite', /Diseases/.test(sheetTxt) && /Ghoulbite/.test(sheetTxt), sheetTxt.slice(0, 400));
+    ok('sheet has a Poisons section listing Scorpion Poison', /Poisons/.test(sheetTxt) && /Scorpion Poison/.test(sheetTxt), sheetTxt.slice(0, 400));
+
     // --- selling the starting "leather jerkin" at an armourer that lists "leather" --
     // Armour is valued by Defence tier, so the tier-1 jerkin sells at the "leather" row.
     const gsell = GameState.create({ name:'S', gender:'m', profession:'Warrior', book:1, adv });

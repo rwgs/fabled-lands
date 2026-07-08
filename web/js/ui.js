@@ -180,7 +180,12 @@ export function renderSheet(state, container, opts = {}) {
   }
 
   if (d.blessings.length) { container.appendChild(sectionTitle('Blessings')); container.appendChild(chipList(d.blessings)); }
-  if (d.curses.length) { container.appendChild(sectionTitle('Curses')); container.appendChild(chipList(d.curses.map((c) => c.type))); }
+  // Afflictions chip by their own name (fall back to the type), and diseases/poisons
+  // get their own sections — a hidden penalty must be visible on the sheet (task 57).
+  const afflictionNames = (list) => list.map((a) => (a && (a.name || a.type)) || '').filter(Boolean);
+  if (d.curses.length) { container.appendChild(sectionTitle('Curses')); container.appendChild(chipList(afflictionNames(d.curses))); }
+  if (d.diseases.length) { container.appendChild(sectionTitle('Diseases')); container.appendChild(chipList(afflictionNames(d.diseases))); }
+  if (d.poisons.length) { container.appendChild(sectionTitle('Poisons')); container.appendChild(chipList(afflictionNames(d.poisons))); }
   if (d.gods.length) { container.appendChild(sectionTitle('Gods')); container.appendChild(chipList(d.gods)); }
   if (d.titles.length) { container.appendChild(sectionTitle('Titles')); container.appendChild(chipList(d.titles.map((t) => t.name + (t.value ? ` (${t.value})` : '')))); }
 

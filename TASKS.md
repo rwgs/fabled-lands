@@ -68,7 +68,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 54. Mid-fight escape brackets (tick…lose codeword) collapse — surrender/flee routes unreachable
 - [x] 55. `<choice item=… pay="t">` doesn't consume the item
 - [x] 56. `hidden="t"` payments render a phantom "Pay" button instead of arming silently
-- [ ] 57. Adventure Sheet: curses all display as "curse"; diseases/poisons invisible
+- [x] 57. Adventure Sheet: curses all display as "curse"; diseases/poisons invisible
 - [ ] 58. Market `<sold>` hooks match the shop row's tags, not the sold item's
 - [ ] 59. `<tick god=…>` drops `<effect>` children — Sig initiates never get +1 THIEVERY
 - [ ] 60. Affliction `<effect>` forms `divide`/`target`/`stamina` inert; item `<curse>` children never attach
@@ -1677,16 +1677,21 @@ render-every-section scan (4369). `RESULT ALL PASS pass=497 fail=0`.
 
 ---
 
-## 57. Adventure Sheet: curses all display as "curse"; diseases/poisons invisible  — MEDIUM
+## 57. Adventure Sheet: curses all display as "curse"; diseases/poisons invisible  — **done**
 
-`ui.js:183` renders `d.curses.map((c) => c.type)` — the literal word "curse" for
-every entry (afflictions are stored `{name, type, …}`) — and **nothing renders
-`d.diseases` or `d.poisons` at all**. A player afflicted with Ghoulbite
-(book1/196) or Scorpion Poison (book1/532) sees nothing on the sheet while the
-penalty silently depresses their abilities; multiple curses are
-indistinguishable. Fix: chip by `c.name` (fall back to type) and add Diseases /
-Poisons sections beside Curses. Test: renderSheet output lists an inflicted
-disease by name.
+`renderSheet` chipped curses by `c.type` (the literal word "curse" for every
+entry) and rendered nothing for `d.diseases`/`d.poisons`, so a player afflicted
+with Ghoulbite (book1/196) or Scorpion Poison (book1/532) saw nothing while the
+penalty silently depressed their abilities, and multiple curses were
+indistinguishable.
+
+Fix (`web/js/ui.js`): a shared `afflictionNames(list)` maps each entry to
+`a.name || a.type`; Curses now chip by name, and new **Diseases** and **Poisons**
+sections render the same way beside Curses.
+
+Verified: 3 new headless assertions (a curse chips by its name not "curse"; a
+Diseases section lists Ghoulbite; a Poisons section lists Scorpion Poison) + full
+render-every-section scan (4369). `RESULT ALL PASS pass=500 fail=0`.
 
 ---
 
