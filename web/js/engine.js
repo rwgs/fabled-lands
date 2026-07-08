@@ -2,7 +2,7 @@
 // Reads attributes off the parsed XML elements and applies them to a GameState.
 
 import { ABILITIES, canonShipType, CREW_LEVELS } from './rules.js';
-import { makeItem, normalize, matchItems, isShardsCurrency } from './state.js';
+import { makeItem, normalize, matchItems, matchItemQuery, isShardsCurrency } from './state.js';
 import { availableBooks } from './data.js';
 
 // ---- dice ------------------------------------------------------------------
@@ -161,17 +161,9 @@ export function evaluateCondition(el, state) {
   add(get('ticks'), () => state.tickCount() === resolveValue(state, get('ticks')));
   add(get('shards'), () => money >= resolveValue(state, get('shards')));
   add(get('item'), () => {
-    const pattern = get('item');
-    const tags = get('tags');
-    let matches;
-    if (pattern === '?') {
-      // "any possession", optionally filtered to those carrying every listed tag
-      // (e.g. <if item="?" tags="light"> — do you have a light source?).
-      matches = itemPool.slice();
-      if (tags) { const want = tags.split(/[,|]/).map((t) => normalize(t)); matches = matches.filter((it) => want.every((t) => (it.tags || []).map(normalize).includes(t))); }
-    } else {
-      matches = matchItems(itemPool, pattern);
-    }
+    // "?" = any possession, optionally tag-filtered (e.g. <if item="?" tags="light">
+    // — do you have a light source?); a concrete name/glob defers to matchItems.
+    const matches = matchItemQuery(itemPool, get('item'), get('tags'));
     const cmp = compare(matches.length);
     return cmp == null ? matches.length > 0 : cmp;
   });
@@ -684,16 +676,27 @@ function applyAdjust(el, state) {
   return '';
 }
 
+// A <set modifier="natural|affected"> is NOT an additive amount — it is a
+// resolution mode for the ability/stamina identifiers inside value= (JaFL
+// SetVarNode). Treating it as an addend (the old bug) discarded the computed
+// value: `resolveValue(state,'natural')` looked up a non-existent var → 0, so
+// e.g. every book-2 rank ceremony's `<set var="r" value="rank" modifier="natural"/>`
+// stored r=0 and the "roll 2d > r to gain a Rank" check auto-succeeded (task 46).
+function setValueMode(mod) {
+  const m = String(mod || '').trim().toLowerCase();
+  return (m === 'natural' || m === 'affected') ? m : null;
+}
+
 function applySet(el, state) {
   const get = (a) => el.getAttribute(a);
   const name = get('var');
   if (get('dock') != null) { state.ships.forEach((s) => { s.docked = get('dock'); }); state.changed(); return ''; }
   if (!name) return '';
+  const mode = setValueMode(get('modifier'));
   let val;
-  if (get('value') != null) val = evalExpression(get('value'), state);
+  if (get('value') != null) val = evalExpression(get('value'), state, mode);
   else if (get('codeword') != null) val = state.codewordValue(get('codeword'));
   else val = 0;
-  if (get('modifier') != null) val = state.getVar(name) + resolveValue(state, get('modifier'));
   state.setVar(name, val);
   return '';
 }
@@ -796,17 +799,27 @@ export function useItemEffect(state, item, effect, bodyNode = null) {
  *  weapon, defence, stamina, shards, rank, crew and the ability names, then any
  *  stored variable (undefined → 0). This is the value= side; the amount=/adjust
  *  side is variable-first — see resolveValue. */
-export function evalExpression(expr, state) {
+// `mode` reflects a <set modifier="natural|affected">, which selects how ability
+// and stamina identifiers resolve (JaFL SetVarNode.resolveIdentifier): natural =
+// the WRITTEN score / unwounded max; affected = the item-boosted score / affected
+// max. With no mode the historical behaviour holds — abilities read the boosted
+// score and a bare `stamina` reads *current* Stamina.
+export function evalExpression(expr, state, mode = null) {
   const resolve = (word) => {
     const w = word.toLowerCase();
-    if (w === 'stamina') return state.data.stamina;
+    // stamina: natural/affected → the unwounded max; no modifier → current.
+    if (w === 'stamina') return mode ? state.data.staminaMax : state.data.stamina;
     if (w === 'shards') return state.data.shards;
     if (w === 'rank') return state.data.rank;
     if (w === 'defence') return state.defence();
     if (w === 'armour') return state.armourBonus();
     if (w === 'weapon') return state.wieldedWeapon()?.bonus || 0;
     if (w === 'crew') return CREW_LEVELS.indexOf(state.ships[0]?.crew) + 1 || 0;
-    if (ABILITIES.includes(w)) return state.ability(w);
+    if (ABILITIES.includes(w)) {
+      if (mode === 'natural') return state.abilityForCheck(w, true);  // written score
+      if (mode === 'affected') return state.abilityForCheck(w, false); // item-boosted
+      return state.ability(w); // no modifier — unchanged
+    }
     return state.getVar(word); // stored variable; 0 when undefined
   };
   const s = String(expr).replace(/\s+/g, '');

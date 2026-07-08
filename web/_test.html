@@ -809,6 +809,55 @@ async function run() {
     eng.applyEffect(parse('<lose ability="stamina" amount="-s"><adjust ability="stamina" modifier="natural"/></lose>'), g579, {});
     ok('§2.579 unwounded Stamina reset to the 2d roll (7)', g579.data.staminaMax === 7, `max=${g579.data.staminaMax}`);
 
+    // --- task 46: <set var … modifier="natural|affected"> selects a resolution mode ---
+    // modifier= is NOT an additive amount (the old bug): the value= expression's
+    // ability/stamina identifiers resolve as the WRITTEN (natural) score.
+    const gset = GameState.create({ name:'SET', gender:'m', profession:'Warrior', book:2, adv });
+    gset.data.rank = 4;
+    // §2.752 rank ceremony: r must equal the natural Rank (was 0 under the additive bug).
+    eng.applyEffect(parse('<set var="r" value="rank" modifier="natural"/>'), gset, {});
+    ok('§2.752 <set r=rank modifier=natural> stores the real Rank, not 0', gset.getVar('r') === 4, `r=${gset.getVar('r')}`);
+    // The 2d>r check would auto-succeed if r were 0 (min roll 2); with r=4 it is a real test.
+    ok('§2.752 rank ceremony is a real check (r>0)', gset.getVar('r') > 0);
+    // §6.332: c = 12 − natural CHARISMA (a no-op under the additive bug — set to 0).
+    const gcha = GameState.create({ name:'CHA', gender:'m', profession:'Warrior', book:6, adv });
+    const natCha = gcha.abilityNatural('charisma');
+    eng.applyEffect(parse('<set var="c" value="12-charisma" modifier="natural"/>'), gcha, {});
+    ok('§6.332 <set c=12-charisma modifier=natural> = 12 − natural CHARISMA', gcha.getVar('c') === 12 - natCha, `c=${gcha.getVar('c')} natCha=${natCha}`);
+    // modifier="natural" reads the WRITTEN score, ignoring an item's ability bonus;
+    // modifier="affected" reads the item-boosted score.
+    const gnb = GameState.create({ name:'NB', gender:'m', profession:'Warrior', book:2, adv });
+    gnb.addItem(makeItem('tool', 'lucky charm', 12, 'thievery')); // a big THIEVERY tool (no starting tool competes)
+    const gnbNat = gnb.abilityNatural('thievery'), gnbAff = gnb.ability('thievery');
+    ok('the THIEVERY tool boosts the affected score', gnbAff > gnbNat, `nat=${gnbNat} aff=${gnbAff}`);
+    eng.applyEffect(parse('<set var="cn" value="thievery" modifier="natural"/>'), gnb, {});
+    eng.applyEffect(parse('<set var="ca" value="thievery" modifier="affected"/>'), gnb, {});
+    ok('modifier="natural" reads the written THIEVERY (ignores the tool bonus)', gnb.getVar('cn') === gnbNat, `cn=${gnb.getVar('cn')} nat=${gnbNat}`);
+    ok('modifier="affected" reads the item-boosted THIEVERY', gnb.getVar('ca') === gnbAff, `ca=${gnb.getVar('ca')} aff=${gnbAff}`);
+    // §3.104: curr=stamina (current), max=stamina affected (unwounded max) → detect a wound.
+    const g104 = GameState.create({ name:'W104', gender:'m', profession:'Warrior', book:3, adv });
+    g104.data.staminaMax = 20; g104.data.stamina = 12;
+    eng.applyEffect(parse('<set var="curr" value="stamina"/>'), g104, {});
+    eng.applyEffect(parse('<set var="max" value="stamina" modifier="affected"/>'), g104, {});
+    ok('§3.104 bare stamina = current, affected stamina = unwounded max', g104.getVar('curr') === 12 && g104.getVar('max') === 20, `curr=${g104.getVar('curr')} max=${g104.getVar('max')}`);
+    ok('§3.104 wounded detected (curr < max)', g104.getVar('curr') < g104.getVar('max'));
+    // evalExpression mode plumbing directly.
+    ok('evalExpression(rank, natural) reads the Rank, not 0', eng.evalExpression('rank', gset, 'natural') === 4);
+
+    // --- task 47: <choice item="?" tags="light"> gates on a light source ---
+    const g291 = GameState.create({ name:'C291', gender:'m', profession:'Warrior', book:2, adv });
+    const c291 = document.createElement('div');
+    const st291 = new Story(c291, g291, { navigate(){}, onDeath(){}, notify(){} });
+    const s291b = await data.getSection(2, '291'); st291.begin(s291b, 2, '291');
+    const enter291 = () => Array.from(c291.querySelectorAll('.choice')).find((b) => /Enter the castle/.test(b.textContent));
+    ok('§2.291 "Enter the castle" is locked without a light source', (() => { const b = enter291(); return b && b.disabled === true; })(), (() => { const b = enter291(); return b ? `dis=${b.disabled}` : 'no choice'; })());
+    g291.addItem(makeItem('item', 'lantern', 0, null, ['light']));
+    st291.rerender();
+    ok('§2.291 "Enter the castle" unlocks with a light-tagged item', (() => { const b = enter291(); return b && b.disabled === false; })(), (() => { const b = enter291(); return b ? `dis=${b.disabled}` : 'no choice'; })());
+    // hasItemMatch matcher agrees with the <if item="?" tags=…> path.
+    ok('hasItemMatch("?","light") true with a lantern', g291.hasItemMatch('?', 'light') === true);
+    ok('hasItemMatch("?","light") false without one', GameState.create({ name:'NL', gender:'m', profession:'Warrior', book:2, adv }).hasItemMatch('?', 'light') === false);
+
     // --- task 26: the remaining <fight> attributes ---
     // makeFight parses the new attributes.
     const fparse = makeFight(parse('<fight name="X" combat="8" defence="20" stamina="21" attackDice="1" attacks="3" modifiers="noarmour" playerDefence="d" abilityDamaged="stamina" staminaLost="MD" group="g"/>'));
@@ -888,11 +937,51 @@ async function run() {
     ok('group not yet defeated', !gfights.every(isDefeated));
     let grGuard = 0; while (!gfights.every(isDefeated) && !ggr.isDead() && grGuard++ < 300) groupFightRound(ggr, gfights, null);
     ok('group fight resolves with all foes defeated', gfights.every(isDefeated) && !ggr.isDead(), `def=${gfights.map(isDefeated)} dead=${ggr.isDead()}`);
-    // §6.192 renders the combined group widget with a single Attack button.
+    // §6.192 renders the combined group widget (one box for all three foes).
     const cgr = document.createElement('div');
     const storyGr = new Story(cgr, GameState.create({ name:'GRV', gender:'m', profession:'Warrior', book:6, adv }), { navigate(){}, onDeath(){}, notify(){} });
     const s192 = await data.getSection(6,'192'); storyGr.begin(s192,6,'192');
     ok('§6.192 draws one combined group widget (not three)', cgr.querySelectorAll('.fight').length === 1 && /3 foes/.test(cgr.textContent), `boxes=${cgr.querySelectorAll('.fight').length}`);
+
+    // --- task 48: group fights — surrender, flee button, target choice ---
+    // §6.192 offers one Attack button PER living foe (choose your target each round).
+    const atkBtns192 = Array.from(cgr.querySelectorAll('.fight-controls .btn-roll'));
+    ok('§6.192 offers one Attack button per foe (target choice)', atkBtns192.length === 3 && atkBtns192.every((b) => /Attack /.test(b.textContent)), `n=${atkBtns192.length}`);
+    // groupFightRound strikes the CHOSEN foe (member 3), not just the first.
+    const gtc = GameState.create({ name:'TC', gender:'m', profession:'Warrior', book:6, adv });
+    gtc.data.stamina = 500; gtc.data.staminaMax = 500; gtc.data.abilities.combat = 12;
+    const tcFights = [
+      makeFight(parse('<fight name="A" combat="0" defence="0" stamina="30" group="t"/>'), gtc),
+      makeFight(parse('<fight name="B" combat="0" defence="0" stamina="30" group="t"/>'), gtc),
+      makeFight(parse('<fight name="C" combat="0" defence="0" stamina="30" group="t"/>'), gtc),
+    ];
+    groupFightRound(gtc, tcFights, null, tcFights[2]); // attack member 3
+    ok('group round strikes the chosen foe (member 3), sparing members 1 & 2',
+       tcFights[2].stamina < 30 && tcFights[0].stamina === 30 && tcFights[1].stamina === 30,
+       `stam=${tcFights.map((f) => f.stamina)}`);
+
+    // §6.618 Surrender (flee="t" choice, no <flee> body) must NOT throw and navigates to 452.
+    let nav618 = null;
+    const c618 = document.createElement('div');
+    const g618 = GameState.create({ name:'S618', gender:'m', profession:'Warrior', book:6, adv });
+    const st618 = new Story(c618, g618, { navigate:(b,s)=>{nav618={b,s};}, onDeath(){}, notify(){} });
+    const s618 = await data.getSection(6,'618'); st618.begin(s618,6,'618');
+    const surrender618 = Array.from(c618.querySelectorAll('.choice')).find((b) => /Surrender/.test(b.textContent));
+    ok('§6.618 shows a live Surrender option during the group fight', !!surrender618 && surrender618.disabled === false, surrender618 ? `dis=${surrender618.disabled}` : 'no choice');
+    surrender618.click(); // previously threw a TypeError on the getter-only outcome
+    ok('§6.618 surrender navigates to 452 (no TypeError)', nav618 && String(nav618.s) === '452', `nav=${JSON.stringify(nav618)}`);
+
+    // §6.291 shows a Flee button (a <flee> with its own goto), which navigates to 745.
+    let nav291 = null;
+    const c291f = document.createElement('div');
+    const g291f = GameState.create({ name:'F291', gender:'m', profession:'Warrior', book:6, adv });
+    g291f.data.stamina = 200; g291f.data.staminaMax = 200;
+    const st291f = new Story(c291f, g291f, { navigate:(b,s)=>{nav291={b,s};}, onDeath(){}, notify(){} });
+    const s291g = await data.getSection(6,'291'); st291f.begin(s291g,6,'291');
+    const flee291 = Array.from(c291f.querySelectorAll('.fight-controls button')).find((b) => /Flee/.test(b.textContent));
+    ok('§6.291 group widget shows a Flee button', !!flee291);
+    flee291.click();
+    ok('§6.291 fleeing navigates to 745', nav291 && String(nav291.s) === '745', `nav=${JSON.stringify(nav291)}`);
 
     // --- task 27: cap visit-box ticks so a matched <if ticks="N"> guard stays matched ---
     const gtk = GameState.create({ name:'TK', gender:'m', profession:'Warrior', book:1, adv });
@@ -944,6 +1033,47 @@ async function run() {
     const gate = stAlive.computeFightGate(fgSec);
     const deadGoto = fgSec.querySelector('goto[dead="t"]');
     ok('fight gate marks a dead="t" goto as the lose-branch', !!gate && gate.loseNodes.has(deadGoto) && gate.hasLosePath === true, `has=${!!gate && gate.loseNodes.has(deadGoto)}`);
+
+    // --- task 45: sequential multi-fight sections gate on ALL fights, not the last ---
+    // §1.121: three Repulsive Ones, "fight one at a time", "if you beat all three → 213".
+    const g121 = GameState.create({ name:'M121', gender:'m', profession:'Warrior', book:1, adv });
+    g121.data.stamina = 100; g121.data.staminaMax = 100;
+    const c121 = document.createElement('div');
+    const st121 = new Story(c121, g121, { navigate(){}, onDeath(){}, notify(){} });
+    const s121 = await data.getSection(1, '121'); st121.begin(s121, 1, '121');
+    ok('§1.121 renders all three sequential fight widgets', c121.querySelectorAll('.fight').length === 3, `n=${c121.querySelectorAll('.fight').length}`);
+    const findGoto121 = () => Array.from(c121.querySelectorAll('.goto')).find((b) => b.textContent.trim() === '213');
+    ok('§1.121 exit to 213 is gated on entry', (() => { const b = findGoto121(); return b && b.disabled === true; })());
+    ok('§1.121 only the first fight is active (2nd/3rd locked)', c121.querySelectorAll('.fight .btn-roll').length === 1, `attacks=${c121.querySelectorAll('.fight .btn-roll').length}`);
+    // Winning only the FIRST fight must NOT open the exit (previously winning the
+    // last one alone did — the bug this task fixes).
+    st121.sectionFights[0].outcome = 'win';
+    st121.rerender();
+    ok('§1.121 exit stays gated when only the first fight is won', (() => { const b = findGoto121(); return b && b.disabled === true; })());
+    ok('§1.121 the second fight unlocks after the first is won', c121.querySelectorAll('.fight .btn-roll').length === 1, `attacks=${c121.querySelectorAll('.fight .btn-roll').length}`);
+    // Win all three: the exit opens.
+    st121.sectionFights.forEach((f) => { f.outcome = 'win'; });
+    st121.rerender();
+    ok('§1.121 exit to 213 opens once all three are won', (() => { const b = findGoto121(); return b && b.disabled === false; })());
+
+    // §5.80: three fights with an explicit "if you lose → §7 (dead)" branch.
+    // Dying to the FIRST fight must defer death to that lose-branch (the old code
+    // read only the last fight, whose outcome was null, so real death fired).
+    const g80 = GameState.create({ name:'M80', gender:'m', profession:'Warrior', book:5, adv });
+    g80.data.stamina = 100; g80.data.staminaMax = 100;
+    let died80 = false;
+    const c80 = document.createElement('div');
+    const st80 = new Story(c80, g80, { navigate(){}, onDeath(){ died80 = true; }, notify(){} });
+    const s80 = await data.getSection(5, '80'); st80.begin(s80, 5, '80');
+    ok('§5.80 has a lose-branch (hasLosePath)', st80.fightGate && st80.fightGate.hasLosePath === true);
+    // Simulate a loss on fight 1: the player is slain and drawFight marks that fight.
+    g80.data.stamina = 0;
+    st80.sectionFights[0].outcome = 'lose';
+    st80.rerender();
+    ok('§5.80 losing the first fight defers death (onDeath NOT fired)', died80 === false);
+    const g80goto = (s) => Array.from(c80.querySelectorAll('.goto')).find((b) => b.textContent.trim() === s);
+    ok('§5.80 the dead="t" §7 lose-branch is the enabled route after a loss', (() => { const b = g80goto('7'); return b && b.disabled === false; })());
+    ok('§5.80 the win exit §123 is disabled after a loss', (() => { const b = g80goto('123'); return b && b.disabled === true; })());
 
     // --- task 29: market & item polish (currency items, pipe names, headers) ---
     // part 1: a "N Shards" award is stackable currency, not a carried item.

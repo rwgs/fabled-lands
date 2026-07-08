@@ -147,13 +147,15 @@ export function isDefeated(fight) { return fight.stamina <= fight.winThreshold; 
 
 /**
  * One round of a simultaneous group fight (group="…"): the player strikes ONE
- * still-standing enemy (the first undefeated one), then EVERY still-standing
- * enemy strikes back — "each time you strike at one, they all get to strike back"
- * (§6.192/273/291/618). Mutates each fight and the shared `state`.
+ * still-standing enemy (the one they choose — §6.618 "against whichever opponent
+ * you choose"; falls back to the first undefeated when no valid target is given),
+ * then EVERY still-standing enemy strikes back — "each time you strike at one,
+ * they all get to strike back" (§6.192/273/291/618). Mutates each fight and the
+ * shared `state`. (task 48)
  */
-export function groupFightRound(state, fights, dmgNode) {
-  const target = fights.find((f) => !isDefeated(f));
-  if (target) playerStrike(state, target);
+export function groupFightRound(state, fights, dmgNode, target = null) {
+  const chosen = (target && !isDefeated(target)) ? target : fights.find((f) => !isDefeated(f));
+  if (chosen) playerStrike(state, chosen);
   for (const f of fights) {
     if (state.isDead()) break;
     if (isDefeated(f)) continue;

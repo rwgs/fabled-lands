@@ -119,7 +119,8 @@ export class Story {
     // follows it must not be clickable (else the player skips the fight). See
     // computeFightGate / applyFightGate.
     this.fightGate = this.computeFightGate(el);
-    this.sectionFight = null; // the fight rendered this pass (set in renderFight)
+    this.sectionFight = null; // aggregate proxy for the section's fight(s) (set in renderFight)
+    this.sectionFights = []; // every sequential (non-group) fight drawn this pass, in order (task 45)
     this.renderedGroups = new Set(); // group= ids already drawn this pass (task 26)
     this.appendChildren(flow, el, 'r');
     this.applyFightGate(flow);
@@ -934,6 +935,7 @@ export class Story {
     const wallet = foreignCoin ? this.state.currencyBalance(currency) : this.state.data.shards;
     const pay = node.getAttribute('shards') != null && !(node.getAttribute('pay') != null && !boolAttr(node.getAttribute('pay')));
     const itemReq = node.getAttribute('item');
+    const itemTags = node.getAttribute('tags'); // e.g. <choice item="?" tags="light"> (task 47)
     const boxWord = node.getAttribute('box');
     const profession = node.getAttribute('profession');
     const god = node.getAttribute('god');
@@ -945,7 +947,10 @@ export class Story {
     const reasons = [];
     const cost = shards != null ? resolveValue(this.state, shards) : 0;
     if (shards != null && wallet < cost) reasons.push(`needs ${cost} ${coinLabel}`);
-    if (itemReq && !this.state.hasItem(itemReq)) reasons.push(`needs ${itemReq}`);
+    // item= gate: "?" (+ optional tags=) means "any possession carrying these tags"
+    // (a light source, etc.) — the same matcher as <if item="?" tags=…>, so a
+    // light-gated choice is no longer permanently locked (task 47).
+    if (itemReq && !this.state.hasItemMatch(itemReq, itemTags)) reasons.push(itemReq === '?' ? `needs ${itemTags || 'an item'}` : `needs ${itemReq}`);
     if (boxWord && !this.state.hasCodeword(boxWord)) reasons.push('box not ticked');
     if (profession && normalize(profession) !== normalize(this.state.data.profession)) reasons.push(profession + ' only');
     if (god && !this.state.hasGod(god)) reasons.push('requires ' + god);
@@ -1345,6 +1350,20 @@ export class Story {
   }
 
   // ---- fight ---------------------------------------------------------------
+  // The aggregate outcome of a section's sequential fights (task 45): a section
+  // is only WON once every fight is won; a LOSS on any fight (death deferred to
+  // an "if you lose…" branch) makes the whole section a loss; a flee ends it;
+  // otherwise it is still unresolved (null — the gate stays shut). This is what
+  // applyFightGate and the death-deferral guard read, so dying to (or winning)
+  // any fight but the last is tracked, not just the document-order last one.
+  aggregateFightOutcome(fights) {
+    if (!fights.length) return null;
+    if (fights.some((f) => f.outcome === 'lose')) return 'lose';
+    if (fights.some((f) => f.outcome === 'fled')) return 'fled';
+    if (fights.every((f) => f.outcome === 'win')) return 'win';
+    return null;
+  }
+
   renderFight(container, node, path) {
     // group="G": all <fight> in the section sharing the id are one simultaneous
     // battle (task 26). Draw the whole group once, at its first member, and skip
@@ -1358,7 +1377,32 @@ export class Story {
       fight = makeFight(node, this.state);
       this.ctx.fights.set(key, fight);
     }
-    this.sectionFight = fight; // the section's fight, for the gate + death guard
+
+    // Sequential multi-fight sections ("fight them one at a time" — book1/121
+    // and ~17 others) resolve their fights in document order. This widget stays
+    // LOCKED until every earlier fight is won, and all of the section's fights
+    // feed one aggregate outcome (task 45). A fight drawn inside an untaken
+    // branch (this.inactive) is display-only — never tracked, and never allowed
+    // to hold the gate closed.
+    let locked = false;
+    if (!this.inactive) {
+      locked = this.sectionFights.some((f) => f.outcome !== 'win');
+      this.sectionFights.push(fight);
+      const self = this;
+      // A settable proxy: applyFightGate / the death guard read `outcome`, and a
+      // flee="t" choice may assign it (render.js renderChoice) — an override wins
+      // over the computed aggregate so that assignment doesn't throw on a getter.
+      this.sectionFight = {
+        _override: null,
+        get name() {
+          const pending = self.sectionFights.find((f) => f.outcome !== 'win');
+          return (pending || fight).name;
+        },
+        get outcome() { return this._override || self.aggregateFightOutcome(self.sectionFights); },
+        set outcome(v) { this._override = v; },
+      };
+    }
+
     // Find the section's <fightdamage>/<flee> ANYWHERE (they may sit inside a <p>,
     // or even before the <fight> — book2/152/207/297/313 etc.), not just as a
     // forward same-level sibling.
@@ -1368,7 +1412,7 @@ export class Story {
     const box = document.createElement('div');
     box.className = 'fight';
     container.appendChild(box);
-    this.drawFight(box, fight, node, dmgNode, fleeNode, key);
+    this.drawFight(box, fight, node, dmgNode, fleeNode, key, locked);
     return box;
   }
 
@@ -1385,26 +1429,32 @@ export class Story {
       return f;
     });
     const dmgNode = this.findInSection('fightdamage');
+    const fleeNode = this.findInSection('flee');
     // A shared proxy drives the fight gate + death guard for the whole group: a
     // win once every foe is down; a (non-death) "lose" when the player is slain
     // and the section has an "if you lose…" branch; otherwise unresolved/death.
+    // `outcome` is settable so a flee/surrender ('fled') can be recorded without
+    // throwing on a getter — the override wins over the computed state (task 48).
     const self = this;
     this.sectionFight = {
+      _override: null,
       name: fights.map((f) => f.name).join(', '),
       get outcome() {
+        if (this._override) return this._override;
         if (fights.every((f) => isDefeated(f))) return 'win';
         if (self.state.isDead()) return (self.fightGate && self.fightGate.hasLosePath) ? 'lose' : null;
         return null;
       },
+      set outcome(v) { this._override = v; },
     };
     const box = document.createElement('div');
     box.className = 'fight';
     container.appendChild(box);
-    this.drawGroupFight(box, fights, dmgNode, group);
+    this.drawGroupFight(box, fights, dmgNode, group, fleeNode);
     return box;
   }
 
-  drawGroupFight(box, fights, dmgNode, group) {
+  drawGroupFight(box, fights, dmgNode, group, fleeNode = null) {
     box.innerHTML = '';
     const title = document.createElement('div');
     title.className = 'fight-title';
@@ -1438,19 +1488,48 @@ export class Story {
 
     const controls = document.createElement('div');
     controls.className = 'fight-controls';
-    const attack = document.createElement('button');
-    attack.className = 'btn-roll';
-    attack.textContent = 'Attack';
-    attack.addEventListener('click', async () => {
-      controls.querySelectorAll('button').forEach((b) => (b.disabled = true));
-      await animateDice(box, true);
-      groupFightRound(this.state, fights, dmgNode);
-      // On any resolution (all foes down) or death, rerender so the gate (and the
-      // death/lose guard, via the sectionFight proxy above) re-evaluates.
-      if (fights.every((f) => isDefeated(f)) || this.state.isDead()) { this.rerender(); return; }
-      this.drawGroupFight(box, fights, dmgNode, group); // fight continues
+    // One Attack button PER still-standing foe: the player chooses their target
+    // each round (§6.618 "against whichever opponent you choose"; §6.192 the
+    // Combat-12 Third Spider can be saved for last) — task 48.
+    const living = fights.filter((f) => !isDefeated(f));
+    living.forEach((target) => {
+      const attack = document.createElement('button');
+      attack.className = 'btn-roll';
+      attack.textContent = living.length > 1 ? `Attack ${target.name}` : 'Attack';
+      attack.addEventListener('click', async () => {
+        controls.querySelectorAll('button').forEach((b) => (b.disabled = true));
+        await animateDice(box, true);
+        groupFightRound(this.state, fights, dmgNode, target);
+        // On any resolution (all foes down) or death, rerender so the gate (and the
+        // death/lose guard, via the sectionFight proxy above) re-evaluates.
+        if (fights.every((f) => isDefeated(f)) || this.state.isDead()) { this.rerender(); return; }
+        this.drawGroupFight(box, fights, dmgNode, group, fleeNode); // fight continues
+      });
+      controls.appendChild(attack);
     });
-    controls.appendChild(attack);
+
+    // A <flee> escape (e.g. §6.291 "flee back to your ship, →745"): apply the
+    // flee body on click, mark the group fled, then follow the flee's goto.
+    if (fleeNode) {
+      const flee = document.createElement('button');
+      flee.className = 'btn-secondary';
+      flee.textContent = 'Flee';
+      flee.addEventListener('click', () => {
+        applyEffectBody(fleeNode, this.state);
+        this.sectionFight.outcome = 'fled';
+        if (this.state.isDead()) { this.rerender(); return; } // a fatal parting wound
+        const fgoto = fleeNode.querySelector('goto');
+        const fchoice = this.sectionEl && this.sectionEl.querySelector('choice[flee="t"][section]');
+        if (fgoto && fgoto.getAttribute('section') != null) {
+          this.navigate(fgoto.getAttribute('book') ? Number(fgoto.getAttribute('book')) : this.book, fgoto.getAttribute('section'));
+        } else if (fchoice) {
+          this.navigate(fchoice.getAttribute('book') ? Number(fchoice.getAttribute('book')) : this.book, fchoice.getAttribute('section'));
+        } else {
+          this.rerender();
+        }
+      });
+      controls.appendChild(flee);
+    }
     box.appendChild(controls);
   }
 
@@ -1460,7 +1539,7 @@ export class Story {
     return this.sectionEl ? this.sectionEl.querySelector(tag) : null;
   }
 
-  drawFight(box, fight, node, dmgNode, fleeNode, key) {
+  drawFight(box, fight, node, dmgNode, fleeNode, key, locked = false) {
     box.innerHTML = '';
     const title = document.createElement('div');
     title.className = 'fight-title';
@@ -1488,8 +1567,18 @@ export class Story {
       const b = document.createElement('div'); b.className = 'roll-outcome ok'; b.textContent = `${fight.name} is defeated!`; box.appendChild(b);
       return;
     }
+    if (fight.outcome === 'lose') {
+      const b = document.createElement('div'); b.className = 'roll-outcome bad'; b.textContent = `You are defeated by the ${fight.name}.`; box.appendChild(b);
+      return;
+    }
     if (fight.outcome === 'fled') {
       const b = document.createElement('div'); b.className = 'roll-outcome'; b.textContent = 'You fled the fight.'; box.appendChild(b);
+      return;
+    }
+    // Sequential lock: an earlier fight in this section is not yet won, so this
+    // foe can't be engaged yet (task 45). Show the stats but no controls.
+    if (locked) {
+      const b = document.createElement('div'); b.className = 'roll-outcome'; b.textContent = 'Defeat the previous foe first.'; box.appendChild(b);
       return;
     }
 
@@ -1508,7 +1597,7 @@ export class Story {
       // On any resolution (win/lose/fled) or death, re-render the whole section so
       // the fight gate re-evaluates which onward links are enabled.
       if (fight.outcome || this.state.isDead()) { this.rerender(); return; }
-      this.drawFight(box, fight, node, dmgNode, fleeNode, key); // fight continues
+      this.drawFight(box, fight, node, dmgNode, fleeNode, key, false); // fight continues (never locked mid-fight)
     });
     controls.appendChild(attack);
 

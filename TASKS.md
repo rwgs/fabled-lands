@@ -24,10 +24,10 @@ currency wallet routing; ship canonicalisation; tick caps; the roll-payment
 arm/consume/re-arm cycle.
 
 **HIGH**
-- [ ] 45. Multi-fight sections: the fight gate & death-deferral track only the *last* `<fight>`
-- [ ] 46. `<set var … modifier="natural">` discards the value — book-2 rank ceremonies auto-succeed
-- [ ] 47. `<choice item="?" tags=…>` is never enabled — light-gated passages hard-locked
-- [ ] 48. Group fights: Surrender/flee throws a TypeError; no Flee button; no target choice
+- [x] 45. Multi-fight sections: the fight gate & death-deferral track only the *last* `<fight>`
+- [x] 46. `<set var … modifier="natural">` discards the value — book-2 rank ceremonies auto-succeed
+- [x] 47. `<choice item="?" tags=…>` is never enabled — light-gated passages hard-locked
+- [x] 48. Group fights: Surrender/flee throws a TypeError; no Flee button; no target choice
 - [ ] 49. `special="attack|defence"` grant permanent, save-persisted bonuses
 - [ ] 50. Var-keyed `<success>/<failure>` branches fire on entry (unset/stale vars)
 - [ ] 51. `<difficulty|rankcheck flag=…>` roll gates unimplemented; shared `<success>` binds only the last roll
@@ -1238,83 +1238,145 @@ ring raises Rank by 2 and Stamina max by 10; dropping it restores both).
 
 ---
 
-## 45. Multi-fight sections: the fight gate & death-deferral track only the *last* `<fight>`  — HIGH
+## 45. Multi-fight sections: the fight gate & death-deferral track only the *last* `<fight>`  — **done**
 
-`renderFight` does `this.sectionFight = fight` for **every** fight in document
-order (render.js:1361), so in a sequential multi-fight section the last one
-wins; `applyFightGate` and the death-deferral check read only `sectionFight`.
-Trigger: the ~18 sequential (non-`group`) multi-fight sections — book1/96, 121,
-210, 297, 371, 479, 569; book2/128, 582, 726, 770; book3/73, 587, 675, 685;
-book5/80; book6/116, 186. In book1/121 ("you may fight them one at a time",
-"If you beat all three, goto 213") all three fight widgets are live at once and
-winning **only the third** unlocks §213 — the first two can be skipped. Worse,
-dying to a non-last fight sets `outcome='lose'` on *that* fight object, but the
-death-deferral reads the last fight (outcome still null), so real death fires
-even when the section has an "if you lose…" branch. Expected (JaFL): fights
-resolve sequentially and navigation opens only after **all** are won. Fix: track
-all of a section's fights (win = every one won; lose = any lost), and disable
-fight N+1's widget until fight N is won. Add §1.121 tests (exit gated until all
-three die; a loss on fight 1 defers correctly).
+`renderFight` did `this.sectionFight = fight` for **every** fight in document
+order, so in a sequential multi-fight section the last one won; `applyFightGate`
+and the death-deferral check read only that single `sectionFight`. In the ~18
+sequential (non-`group`) multi-fight sections — book1/96, 121, 210, 297, 371,
+479, 569; book2/128, 582, 726, 770; book3/73, 587, 675, 685; book5/80; book6/116,
+186 — all fight widgets were live at once, and winning **only the last** unlocked
+the exit (the earlier fights could be skipped). Worse, dying to a non-last fight
+set `outcome='lose'` on *that* fight object while the death-deferral read the last
+fight (outcome still null), so real death fired even when the section had an
+"if you lose…" branch.
+
+Fix (`web/js/render.js`):
+- **Track every fight.** A new `this.sectionFights[]` collects each sequential
+  (non-`group`) fight drawn this pass, in document order (skipping fights inside
+  an untaken `this.inactive` branch, which are display-only). A new
+  `aggregateFightOutcome()` returns the section's outcome: **lose** if any fight
+  is lost, **fled** if any fled, **win** only once **every** fight is won, else
+  unresolved (`null`). `this.sectionFight` is now a small settable proxy over that
+  aggregate (its `name` getter names the first not-yet-won foe for the gate
+  tooltip; a settable `outcome` lets a `flee="t"` choice mark it fled without
+  throwing on a getter). `applyFightGate` and the death-deferral guard read the
+  proxy unchanged, so the exit opens only after **all** fights are won and a loss
+  on any fight now defers death to the "if you lose…" branch.
+- **Sequential locking.** `renderFight` computes `locked = ` any earlier fight not
+  yet won and passes it to `drawFight`, which renders a locked foe's stats with
+  "Defeat the previous foe first." and **no** controls — so only the current foe
+  can be engaged. `drawFight` also gained an explicit `lose` display case ("You are
+  defeated by the …") instead of falling through to a stray Attack button.
+
+The group-fight path (task 26) is untouched — it already uses its own aggregate
+proxy and does not populate `sectionFights`.
+
+Verified: 10 new headless assertions (§1.121 — three widgets, exit gated on entry,
+only the first foe active, exit **stays** gated when only the first is won, the
+second unlocks after the first, exit opens once all three are won; §5.80 —
+hasLosePath, a loss on fight 1 defers death instead of firing `onDeath`, the
+`dead="t"` §7 lose-branch is the enabled route and the §123 win exit is disabled)
++ full render-every-section scan (4369). `RESULT ALL PASS pass=391 fail=0`.
 
 ---
 
-## 46. `<set var … modifier="natural">` discards the value — book-2 rank ceremonies auto-succeed  — HIGH
+## 46. `<set var … modifier="natural">` discards the value — book-2 rank ceremonies auto-succeed  — **done**
 
-`applySet` (engine.js:696) treats `modifier=` as an *additive amount*:
+`applySet` treated `modifier=` as an *additive amount*:
 `val = state.getVar(name) + resolveValue(state, get('modifier'))` — overwriting
-the already-computed `value=` expression. `resolveValue(state,'natural')` is a
-var lookup → 0, so the var is set to 0. In JaFL (`SetVarNode`,
-`Adventurer.getAbilityModifier`) `modifier="natural"/"affected"/"noweapon"`
-selects **how ability identifiers inside `value=` resolve** (written score vs
+the already-computed `value=` expression. `resolveValue(state,'natural')` was a
+var lookup → 0, so the var was set to 0. In JaFL (`SetVarNode.resolveIdentifier`,
+`Adventurer.getAbilityValue`) `modifier="natural"/"affected"` selects **how
+ability/stamina identifiers inside `value=` resolve** (written score vs
 item-boosted), never an addend. 30 occurrences in 29 sections: book2/270, 345,
 362, 529, 536, 563, 584, 614, 637, 683, 752 (`<set var="r" value="rank"
 modifier="natural"/>` then "roll 2d > r to gain a Rank" — with r=0 **every book-2
-rank-up ceremony auto-succeeds**); book3/104, 179, 267, 379, 412, 455, 492, 559,
+rank-up ceremony auto-succeeded**); book3/104, 179, 267, 379, 412, 455, 492, 559,
 583, 696; book6/17, 50, 118, 332, 344, 402, 479, 738 (book6/332's
-`value="12-charisma"` raise is a no-op). Fix: drop the additive branch; pass a
-resolution mode into `evalExpression`'s identifier lookup (route ability idents
-through `abilityForCheck(ab, natural)`). Tests: §2.752 r = natural rank;
-§6.332 c = 12−charisma.
+`value="12-charisma"` raise was a no-op).
+
+Fix (`web/js/engine.js`):
+- **`evalExpression(expr, state, mode)`** gained a `mode` param. A `<set
+  modifier="natural">` resolves ability identifiers via `abilityForCheck(ab,
+  true)` (the written score) and `stamina` as the **unwounded max**;
+  `modifier="affected"` uses `abilityForCheck(ab, false)` (item-boosted) and the
+  affected max; with no modifier the historical behaviour holds (abilities read
+  the boosted score, a bare `stamina` reads *current* Stamina — the JaFL
+  `stamina && modifier==null` special case). Verified against the Java
+  `getAbilityValue(ability, modifier)`: NATURAL→`stat.natural`,
+  AFFECTED→`stat.affected`, and the stamina current/max split.
+- **`applySet`** drops the additive `modifier` branch entirely and threads the
+  mode (`setValueMode()` maps `natural`/`affected`, ignores anything else — the
+  corpus never uses a numeric `<set modifier>`) into `evalExpression`.
+
+This also makes book3/104's wound check work: `curr = stamina` (current) vs
+`max = stamina modifier="affected"` (unwounded max) now differ when wounded.
+
+Verified: 9 new headless assertions (§2.752 r = the real Rank not 0, and the 2d>r
+check is a genuine test; §6.332 c = 12 − natural CHARISMA; a `modifier="natural"`
+read ignores a +tool ability bonus while `modifier="affected"` includes it;
+§3.104 bare `stamina` = current and affected `stamina` = unwounded max, wound
+detected; `evalExpression('rank', state, 'natural')` reads the Rank) + the
+existing task-25 `12-charisma` (no-modifier) test still green + full
+render-every-section scan (4369). `RESULT ALL PASS pass=400 fail=0`.
 
 ---
 
-## 47. `<choice item="?" tags=…>` is never enabled — light-gated passages hard-locked  — HIGH
+## 47. `<choice item="?" tags=…>` is never enabled — light-gated passages hard-locked  — **done**
 
-`renderChoice` gates on `this.state.hasItem(itemReq)` (render.js:948), but
-`matchItems` (state.js:791) has **no** `"?"` wildcard handling (that special
-case lives only in `evaluateCondition`'s item path, engine.js:167), and `tags=`
-on a `<choice>` is never consulted — so the button is permanently disabled with
-tooltip "needs ?". Nine sections hard-lock: book2/291 (`<choice section="440"
-item="?" tags="light">Enter the castle`), book2/720, book3/11, book3/414,
-book3/471, book4/6, book4/35, book4/405, book6/530. Expected: enabled when any
-possession carries every listed tag (a lantern/candle). Fix: route the choice
-item gate through the same matcher as `<if item="?" tags=…>` (task 18's path).
-Test: §2.291 disabled without a light-tagged item, enabled with one.
+`renderChoice` gated on `this.state.hasItem(itemReq)`, but `matchItems`
+(state.js) has **no** `"?"` wildcard handling (that special case lived only in
+`evaluateCondition`'s item path), and `tags=` on a `<choice>` was never consulted
+— so the button was permanently disabled with tooltip "needs ?". Nine sections
+hard-locked: book2/291 (`<choice section="440" item="?" tags="light">Enter the
+castle`), book2/720, book3/11, book3/414, book3/471, book4/6, book4/35, book4/405,
+book6/530 — all `item="?" tags="light"` (a lantern/candle gate).
+
+Fix: extracted the `"?"`-plus-tags matcher into a shared **`matchItemQuery(items,
+pattern, tags)`** (state.js) — `"?"`/blank = any possession, narrowed to those
+carrying every listed tag; a concrete name/glob defers to `matchItems`. Both the
+`<if item=…>` path (`evaluateCondition`, engine.js) and the `<choice>` item gate
+now go through it: `evaluateCondition` calls `matchItemQuery` directly, and a new
+`GameState.hasItemMatch(pattern, tags)` backs `renderChoice`'s gate (the choice
+also reads its own `tags=`, and the disabled tooltip now reads "needs light"). The
+two matchers can no longer diverge.
+
+Verified: 4 new headless assertions (§2.291 "Enter the castle" locked without a
+light source, unlocks once a `light`-tagged lantern is carried; `hasItemMatch("?",
+"light")` true with a lantern / false without) + full render-every-section scan
+(4369). `RESULT ALL PASS pass=404 fail=0`.
 
 ---
 
-## 48. Group fights: Surrender/flee throws a TypeError; no Flee button; no target choice  — HIGH
+## 48. Group fights: Surrender/flee throws a TypeError; no Flee button; no target choice  — **done**
 
-Three gaps in the task-26 group-fight widget:
-1. **Surrender throws.** The group `sectionFight` proxy defines `outcome` as a
-   getter only (render.js:1392–1399), but a `flee="t"` choice's click handler
-   assigns `this.sectionFight.outcome = 'fled'` (render.js:984) — ES modules are
-   strict mode, so the assignment throws a `TypeError` and aborts before
-   `navigate()`. book6/618 (three `group="a"` fights + `<choice flee="t"
-   section="452">Surrender</choice>`): the player cannot surrender.
-2. **No Flee button.** `drawGroupFight` (render.js:1407–1455) renders only
-   Attack; only `drawFight` wires a `<flee>` node. book6/291's "flee back to
-   your ship" (`<flee>…<goto section="745"/></flee>`) is unreachable — win or
-   die against three Shrine Wardens (63 total Stamina).
-3. **No target choice.** `groupFightRound` always strikes the first undefeated
-   member (combat.js:155); JaFL gives each grouped FightNode its own attack, so
-   the player picks a target each round. In book6/192 the Combat-12 Third
-   Spider must be killed last; in book6/618 Jiro (Combat 10) soaks free rounds.
+Three gaps in the task-26 group-fight widget, all fixed:
+1. **Surrender throws.** The group `sectionFight` proxy defined `outcome` as a
+   getter only, but a `flee="t"` choice's click handler assigns
+   `this.sectionFight.outcome = 'fled'` — ES modules are strict mode, so the
+   assignment threw a `TypeError` and aborted before `navigate()`. book6/618
+   (three `group="a"` fights + `<choice flee="t" section="452">Surrender`): the
+   player could not surrender. **Fix:** the proxy's `outcome` is now a
+   getter/setter over an `_override` (mirrors the task-45 sequential proxy), so a
+   `'fled'` assignment is honoured and never throws.
+2. **No Flee button.** `drawGroupFight` rendered only Attack; only `drawFight`
+   wired a `<flee>` node. **Fix:** `renderGroupFight` now finds the section's
+   `<flee>` and passes it in; `drawGroupFight` renders a Flee button that applies
+   the flee body, marks the group fled, and follows the flee's `<goto>` (else a
+   `flee="t"` choice's section) — book6/291's "flee back to your ship" → §745.
+3. **No target choice.** `groupFightRound` always struck the first undefeated
+   member. **Fix:** `groupFightRound(state, fights, dmgNode, target)` takes the
+   chosen foe (falling back to the first undefeated), and `drawGroupFight` renders
+   one **Attack ‹name›** button per still-standing foe, so the player picks their
+   target each round (book6/192's Combat-12 Third Spider can be saved for last;
+   book6/618 Jiro no longer soaks free rounds).
 
-Fix: make the proxy's `outcome` settable (store an override the getter honours),
-wire `fleeNode` into `drawGroupFight`, and add a per-round target picker.
-Tests: §6.618 Surrender applies the flee body and navigates to §452; §6.291
-shows a Flee option; a group round can target member 3 first.
+Verified: 6 new headless assertions (§6.192 one Attack button per foe; a group
+round strikes the chosen member 3 while sparing 1 & 2; §6.618 Surrender is live
+and navigates to §452 with no TypeError; §6.291 shows a Flee button that
+navigates to §745) + the existing group-fight tests still green + full
+render-every-section scan (4369). `RESULT ALL PASS pass=410 fail=0`.
 
 ---
 

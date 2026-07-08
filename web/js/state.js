@@ -294,6 +294,11 @@ export class GameState {
 
   hasItem(pattern) { return this.findItems(pattern).length > 0; }
 
+  /** True if a possession satisfies an item= requirement, honouring "?" + tags=
+   *  (a light-source gate, etc.) — the same matcher the <if item="?" tags=…> path
+   *  uses, so a <choice item="?" tags="light"> is no longer permanently locked. (task 47) */
+  hasItemMatch(pattern, tags) { return matchItemQuery(this.data.items, pattern, tags).length > 0; }
+
   // ---- caches: named stashes / banks (money + items, lockable) --------
   // A cache is a stash the books address by name: an investment box, a bank
   // account (e.g. "MerchantBank"), a gambling pot, or a villa strongroom where
@@ -795,6 +800,24 @@ export function matchItems(items, pattern) {
     const n = normalize(it.name);
     return pats.some((p) => n === p || (it.tags || []).map(normalize).includes(p));
   });
+}
+
+/** Match items against a `<choice>`/`<if>` item= requirement, honouring the `"?"`
+ *  wildcard + optional tag filter that plain name-based matchItems does not:
+ *  `pattern="?"` (or blank) = "any possession", narrowed to those carrying EVERY
+ *  listed tag when tags= is given (e.g. item="?" tags="light" — any light source).
+ *  A concrete name/glob pattern defers to matchItems. Shared by the `<if>` item
+ *  path and the `<choice>` item gate so both matchers agree. (tasks 18, 47) */
+export function matchItemQuery(items, pattern, tags) {
+  if (pattern === '?' || pattern == null || pattern === '') {
+    let matches = (items || []).slice();
+    if (tags) {
+      const want = tags.split(/[,|]/).map((t) => normalize(t)).filter(Boolean);
+      matches = matches.filter((it) => want.every((t) => (it.tags || []).map(normalize).includes(t)));
+    }
+    return matches;
+  }
+  return matchItems(items, pattern);
 }
 
 /** True if an affliction list holds `name`; '*'/'?'/'' mean "any affliction". */

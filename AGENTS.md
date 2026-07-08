@@ -87,4 +87,5 @@ checklist is at the top of the file; the detail for each is in the sections belo
    task `- [x]`. Update `README.md` if the task instructs it.
 4. If you identify a model error, missing assumption, or undocumented
    simplification, add it as a new `- [ ]` task at the bottom of `TASKS.md` before
-   continuing. Do not leave findings only in conversation.
+   continuing. Do not leave findings only in conversation
+# 5. Commit after every completed task.
