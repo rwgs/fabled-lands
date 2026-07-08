@@ -67,7 +67,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 53. `<difficulty modifier="noweapon">` still counts the weapon bonus
 - [x] 54. Mid-fight escape brackets (tick…lose codeword) collapse — surrender/flee routes unreachable
 - [x] 55. `<choice item=… pay="t">` doesn't consume the item
-- [ ] 56. `hidden="t"` payments render a phantom "Pay" button instead of arming silently
+- [x] 56. `hidden="t"` payments render a phantom "Pay" button instead of arming silently
 - [ ] 57. Adventure Sheet: curses all display as "curse"; diseases/poisons invisible
 - [ ] 58. Market `<sold>` hooks match the shop row's tags, not the sold item's
 - [ ] 59. `<tick god=…>` drops `<effect>` children — Sig initiates never get +1 THIEVERY
@@ -91,6 +91,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [ ] 42. `<rest>` (and other roll/action children) inside a `<group>` are ignored
 - [ ] 44. Fold the ring of ultimate power's `Rank`/`Stamina` auras (book5/564)
 - [ ] 62. Render `<image file=…>` and use-effect images (map of Bazalek, book3/75)
+- [ ] 63. Heterogeneous "choose one" rewards (item / Shards / resurrection) over-apply (book1/597)
 
 **Done**
 - [x] 1. Gate combat progression / model fight outcomes
@@ -1644,19 +1645,35 @@ render-every-section scan (4369). `RESULT ALL PASS pass=490 fail=0`.
 
 ---
 
-## 56. `hidden="t"` payments render a phantom "Pay" button instead of arming silently  — MEDIUM
+## 56. `hidden="t"` payments render a phantom "Pay" button instead of arming silently  — **done**
 
-`renderRollPayment` (render.js:688–715) and `renderOptionalPay`
-(render.js:645–672) never check `hidden=` — `renderPassive` honours it only on
-the plain-effect path (render.js:431/437). JaFL executes a hidden price node
-silently on entry (one arming per visit). Seven sections show a bare, unlabelled
-"Pay"/"Confirm" button the player must discover: book1/597, book2/122,
-book3/472, book3/680, book4/127, book5/365, book6/630 — and because the button
-is gated purely on the flag, it can be re-clicked for unlimited re-arms within a
-visit where JaFL grants one. Interacts with task 51 (these hidden prices arm the
-either-or difficulty rolls). Fix: a `hidden="t"` payment auto-fires once per
-visit with no widget; cap re-arms accordingly. Test: §6.630 shows no Pay button
-and the rolls are armed exactly once on entry.
+The price routing in `renderPassive` never checked `hidden=`, so a
+`<tick price="k" hidden="t"/>` rendered a bare "Pay"/"Confirm" button the player
+had to discover — and, gated purely on the flag, it could be re-clicked to re-arm.
+
+Fix (`web/js/render.js`): a new guard at the top of the price/flag handling — when
+`price != null && hidden` — fires the node once per visit (memoised on
+`'pay@'+path`) and renders **nothing**. It calls `applyEffect(node)` to set the
+flag (and apply any real cost), and if the price has **exactly one** linked
+reward that isn't a roll gate, applies that reward too. This covers every shape:
+- **roll gates** (book6/630 SCOUTING|SANCTITY, book2/122 MAGIC|SCOUTING) — arm the
+  either-or `<difficulty flag=…>` rolls on entry (task 51); no button, both rolls
+  live at once, and re-arming is capped at once per visit.
+- **choose-one menus** (book4/127 bet on a contestant, book5/365 pick a blessing) —
+  arm the flag so the task-43 pick buttons go live; the picks do the granting.
+- **a lone linked reward** (book3/472 — a SCOUTING success sets the hidden flag →
+  gain the codeword Chance) — granted directly.
+
+Left as-is: book3/680's hidden `<gain price="x">` lives inside a `<group>` (applied
+on click, never a standalone widget → no phantom button; the roll-in-a-group is
+task 42). book1/597's reward is a *heterogeneous* choose-one (tool / 500 Shards /
+resurrection) that `isChooseOne` can't model — the phantom button is gone and the
+flag arms, but proper mutual exclusivity is filed as new task **63**.
+
+Verified: 7 new headless assertions (§630 no Pay button, flag armed on entry, both
+rolls enabled; a synthetic single-reward hidden price grants its reward with no
+button; §127 no button + both bet picks live + no bet auto-placed) + full
+render-every-section scan (4369). `RESULT ALL PASS pass=497 fail=0`.
 
 ---
 
@@ -1755,3 +1772,24 @@ no-op — the item's sole purpose (viewing the island map) is inaccessible. Fix:
 read `file=` (resolve against the owning book's asset folder) and let a use
 effect surface an image (e.g. the existing image modal). Test: §3.75 award
 carries the use effect and Read produces an image element.
+
+---
+
+## 63. Heterogeneous "choose one" rewards (item / Shards / resurrection) over-apply (book1/597)  — LOW
+
+Found while doing task 56. The task-43 "choose one" machinery only handles
+*effect*-node rewards (`tick`/`lose`/`gain`) sharing one flag; a menu that mixes
+an item award, a Shards tick and a resurrection deal is not modelled. In
+**book1/597** the reward for the ghoul's head is "choose only one of these three":
+an `<tool name="amber wand" … flag="x"/>`, `<tick shards="500" flag="x"/>`, and a
+`<resurrection … flag="x">`. `renderItemAward` and `renderResurrection` ignore
+`flag=` entirely, so the amber wand's Take button and the resurrection widget are
+always live, while the 500-Shards reward (a dependent effect) shows nothing — and
+nothing enforces the "only one" cap, so a player can take the wand *and* arrange
+resurrection. (After task 56 the hidden price arms flag `x` silently but grants
+nothing, so at least it no longer auto-pays the 500 Shards.) Fix: teach the
+choose-one path to include item/tool/weapon/armour and resurrection rewards —
+render each linked reward as a pick that, once the flag is armed, grants that one
+(item via `addItem`, resurrection via the deal) and consumes the flag, disabling
+the siblings. Test: §1.597 taking the amber wand blocks the 500 Shards and the
+resurrection (and vice versa).

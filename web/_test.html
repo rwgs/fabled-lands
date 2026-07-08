@@ -663,6 +663,37 @@ async function run() {
     cpf.querySelector('.choice').click();
     ok('§ pay="f" shards choice does NOT deduct', gpf.data.shards === 50, String(gpf.data.shards));
 
+    // --- task 56: hidden price nodes arm silently (no phantom Pay button) ---------
+    // §6.630: <tick price="a" hidden="t"/> arms the either/or SCOUTING|SANCTITY rolls
+    // on entry — no button to find, both rolls live at once.
+    const g630 = GameState.create({ name:'M630', gender:'m', profession:'Warrior', book:6, adv });
+    const c630 = document.createElement('div');
+    const story630 = new Story(c630, g630, { navigate(){}, onDeath(){}, notify(){} });
+    const s630 = await data.getSection(6,'630'); story630.begin(s630,6,'630');
+    ok('§630 shows no phantom Pay button', !c630.querySelector('.pay-action'));
+    ok('§630 the hidden price arms its flag on entry', g630.getFlag('a') === true);
+    const rolls630 = Array.from(c630.querySelectorAll('.btn-roll'));
+    ok('§630 both rolls are armed (enabled) on entry', rolls630.length === 2 && rolls630.every((b) => !b.disabled), `n=${rolls630.length} disabled=${JSON.stringify(rolls630.map(b=>b.disabled))}`);
+
+    // a hidden price with exactly one linked reward grants it on entry (book3/472:
+    // a SCOUTING success sets the hidden flag → gain the codeword Chance).
+    const gsr = GameState.create({ name:'SR', gender:'m', profession:'Warrior', book:3, adv });
+    const csr = document.createElement('div');
+    const storysr = new Story(csr, gsr, { navigate(){}, onDeath(){}, notify(){} });
+    storysr.begin(parse('<section name="x"><tick codeword="Chance" flag="x">Get Chance</tick><tick price="x" hidden="t"/></section>'), 3, 'x');
+    ok('hidden price grants its single linked reward', gsr.hasCodeword('Chance'));
+    ok('hidden single-reward price shows no phantom button', !csr.querySelector('.pay-action'));
+
+    // §4.127: the hidden price arms a "choose one" bet — both contestant picks live,
+    // no phantom button, and neither bet is auto-placed.
+    const g127 = GameState.create({ name:'B127', gender:'m', profession:'Warrior', book:4, adv });
+    const c127 = document.createElement('div');
+    const story127 = new Story(c127, g127, { navigate(){}, onDeath(){}, notify(){} });
+    const s127 = await data.getSection(4,'127'); story127.begin(s127,4,'127');
+    const picks127 = Array.from(c127.querySelectorAll('.reward-pick'));
+    ok('§127 no phantom button; both bet picks armed on entry', !c127.querySelector('.pay-action') && picks127.length === 2 && picks127.every((b) => !b.disabled));
+    ok('§127 no bet is auto-placed on entry', !g127.hasCodeword('4.127.1') && !g127.hasCodeword('4.127.2'));
+
     // scan: render EVERY section of EVERY book without throwing
     let renderErrors = 0, firstErr='', total=0;
     const gs2 = GameState.create({ name:'Scan', gender:'m', profession:'Rogue', book:1, adv });

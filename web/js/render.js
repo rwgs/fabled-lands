@@ -488,6 +488,25 @@ export class Story {
     const price = node.getAttribute('price');
     const flag = node.getAttribute('flag');
 
+    // A hidden price node (<tick price="k" hidden="t"/> — book6/630, book2/122,
+    // book4/127, book5/365; a <success><tick price="x" hidden/> in book3/472) arms
+    // its linked roll / choose-one / reward silently on entry — JaFL runs it once per
+    // visit with no widget. Fire it once (memoised) and render nothing, instead of a
+    // phantom "Pay"/"Confirm" button the player must find (and could re-click to
+    // re-arm). A lone linked reward is granted too (book3/472's codeword Chance on a
+    // SCOUTING success); roll gates and choose-one menus arm only, their rolls/picks
+    // doing the granting. (task 56)
+    if (price != null && hidden) {
+      const memo = 'pay@' + path;
+      if (!this.ctx.applied.has(memo)) {
+        this.ctx.applied.add(memo);
+        applyEffect(node, this.state, {}); // set the flag (and apply any real cost)
+        const rewards = this.linkedRewards(price);
+        if (!this.isRollGate(price) && rewards.length === 1) applyEffect(rewards[0], this.state, {});
+      }
+      return null;
+    }
+
     // JaFL "price/flag" optional purchase: a node with price="k" is a click-to-pay
     // cost; nodes with flag="k" are its linked rewards. These must NOT auto-apply —
     // the player opts in by clicking the cost, which also applies the linked rewards.
