@@ -1060,9 +1060,15 @@ export class Story {
       btn.textContent = 'Take ' + display;
       const tags = [...parseTags(node.getAttribute('tags')), ...alts];
       const effects = readItemEffects(node); // <effect> use/aura/wielded children (task 41)
+      // A trapped treasure carries a <curse>/<disease>/<poison> child that only
+      // bites once the item is taken (book5/238 stone bracelet → half MAGIC). (task 60)
+      const afflictions = Array.from(node.querySelectorAll(':scope > curse, :scope > disease, :scope > poison'));
       btn.addEventListener('click', () => {
         if (currency != null) this.state.adjustMoney(currency); // stackable "N Shards" treasure
-        else this.state.addItem(makeItem(kind, name, bonus, ability, tags, effects));
+        else {
+          this.state.addItem(makeItem(kind, name, bonus, ability, tags, effects));
+          afflictions.forEach((aff) => applyEffect(aff, this.state));
+        }
         this.ctx.applied.add(key);
         if (limit != null) this.ctx.groupPicks.set(group, groupCount + 1);
         this.rerender();
@@ -1742,7 +1748,7 @@ export class Story {
 
     const you = document.createElement('div');
     you.className = 'fight-stats you';
-    you.innerHTML = `<span>Your Combat ${this.state.ability('combat')}</span><span>Your Defence ${this.state.defence()}</span><span>Your Stamina ${this.state.data.stamina}/${this.state.data.staminaMax}</span>`;
+    you.innerHTML = `<span>Your Combat ${this.state.ability('combat')}</span><span>Your Defence ${this.state.defence()}</span><span>Your Stamina ${this.state.data.stamina}/${this.state.effectiveStaminaMax()}</span>`;
     box.appendChild(you);
 
     const logEl = document.createElement('div');
@@ -1825,7 +1831,7 @@ export class Story {
 
     const you = document.createElement('div');
     you.className = 'fight-stats you';
-    you.innerHTML = `<span>Your Combat ${this.state.ability('combat')}</span><span>Your Defence ${this.state.defence()}</span><span>Your Stamina ${this.state.data.stamina}/${this.state.data.staminaMax}</span>`;
+    you.innerHTML = `<span>Your Combat ${this.state.ability('combat')}</span><span>Your Defence ${this.state.defence()}</span><span>Your Stamina ${this.state.data.stamina}/${this.state.effectiveStaminaMax()}</span>`;
     box.appendChild(you);
 
     const logEl = document.createElement('div');
@@ -2219,7 +2225,7 @@ export class Story {
     btn.className = 'btn-secondary';
     const healLabel = hasAmt ? `+${/d/i.test(perUse) ? perUse : parseInt(perUse, 10)} Stamina` : 'heal all Stamina';
     btn.textContent = cost ? `Rest (${healLabel}, ${cost} Shards)` : `Rest (${healLabel})`;
-    const full = this.state.data.stamina >= this.state.data.staminaMax;
+    const full = this.state.data.stamina >= this.state.effectiveStaminaMax();
     btn.disabled = full || (cost > 0 && this.state.data.shards < cost);
     if (full) btn.title = 'Already at full Stamina';
     btn.addEventListener('click', () => {

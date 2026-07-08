@@ -158,8 +158,10 @@ export class GameState {
     return sum;
   }
 
-  /** Total ability penalty/bonus from active afflictions (curses/diseases/poisons).
-   *  Removed automatically when the affliction is cured, restoring the score. */
+  /** Total additive ability penalty/bonus from active afflictions
+   *  (curses/diseases/poisons). Removed automatically when the affliction is
+   *  cured, restoring the score. Divide/target/stamina effects are applied
+   *  separately (afflictionMod / afflictionStaminaMod). */
   afflictionBonus(ability) {
     let sum = 0;
     for (const list of [this.data.curses, this.data.diseases, this.data.poisons]) {
@@ -167,6 +169,37 @@ export class GameState {
     }
     return sum;
   }
+
+  /** Apply the non-additive affliction transforms to an already-summed score:
+   *  a `divide` halves it (round up — JaFL DIVIDE_ABILITY; book5/198 Champion's
+   *  Curse "half your COMBAT"), a `target` pins it (TARGET_ABILITY; book5/705
+   *  "CHARISMA falls to 1"). Divide applies after the additive bonuses; a target
+   *  overrides everything. (task 60) */
+  afflictionMod(ability, value) {
+    let v = value, target = null;
+    for (const list of [this.data.curses, this.data.diseases, this.data.poisons]) {
+      for (const a of (list || [])) for (const e of (a.effects || [])) {
+        if (e.ability !== ability) continue;
+        if (e.divide) v = Math.ceil(v / e.divide);
+        if (e.target != null) target = e.target;
+      }
+    }
+    return target != null ? target : v;
+  }
+
+  /** Stamina-total change from active afflictions (≤0): book5/306's poison cuts
+   *  the total by 6 until cured. Reversible — folded into effectiveStaminaMax(). */
+  afflictionStaminaMod() {
+    let sum = 0;
+    for (const list of [this.data.curses, this.data.diseases, this.data.poisons]) {
+      for (const a of (list || [])) for (const e of (a.effects || [])) if (e.ability === 'stamina') sum += (e.bonus || 0);
+    }
+    return sum;
+  }
+
+  /** The Stamina maximum the player currently has, after any affliction cut
+   *  (never below 1). Cured afflictions restore it automatically. (task 60) */
+  effectiveStaminaMax() { return Math.max(1, this.data.staminaMax + this.afflictionStaminaMod()); }
 
   /** Passive item-effect bonus for an ability key (task 41): a `type="aura"` effect
    *  counts while the item is carried; `type="wielded"` only while it is the
@@ -223,7 +256,8 @@ export class GameState {
    *  the displayed/derived score is the real one; the flags bite only in checks. */
   ability(ability) {
     const base = this.data.abilities[ability] || 0;
-    return clampAbility(base + this.itemBonus(ability) + this.effectBonus(ability) + this.afflictionBonus(ability) + this.auraBonus(ability) + this.potionBonusFor(ability));
+    const sum = base + this.itemBonus(ability) + this.effectBonus(ability) + this.afflictionBonus(ability) + this.auraBonus(ability) + this.potionBonusFor(ability);
+    return clampAbility(this.afflictionMod(ability, sum));
   }
 
   /** Ability score as seen by a check (difficulty/rank/if): a cursed ability
@@ -257,7 +291,8 @@ export class GameState {
    *  before the 1..12 clamp so a ceiling hit doesn't distort it (JaFL NOTOOL). */
   abilityNoWeapon(ability) {
     const base = this.data.abilities[ability] || 0;
-    return clampAbility(base + this.effectBonus(ability) + this.afflictionBonus(ability) + this.auraBonus(ability) + this.potionBonusFor(ability));
+    const sum = base + this.effectBonus(ability) + this.afflictionBonus(ability) + this.auraBonus(ability) + this.potionBonusFor(ability);
+    return clampAbility(this.afflictionMod(ability, sum));
   }
 
   hasMask() { return this.data.items.some((it) => normalize(it.name).includes('mask')); }
@@ -453,7 +488,7 @@ export class GameState {
     return this.data.stamina;
   }
   healStamina(amount) {
-    this.data.stamina = Math.min(this.data.staminaMax, this.data.stamina + amount);
+    this.data.stamina = Math.min(this.effectiveStaminaMax(), this.data.stamina + amount);
     this.changed();
   }
   adjustStaminaMax(delta) {
@@ -534,6 +569,10 @@ export class GameState {
     const rec = { name: obj.name || type, type, effects: obj.effects || [], cumulative: !!obj.cumulative, lift: obj.lift || null };
     if (!rec.cumulative && list.some((a) => normalize(a.name || a.type || '') === normalize(rec.name))) return; // already afflicted
     list.push(rec);
+    // A Stamina-cutting affliction (book5/306 poison) lowers the total now; cap
+    // current Stamina to the new maximum. Cure restores the max automatically.
+    const cap = this.effectiveStaminaMax();
+    if (this.data.stamina > cap) this.data.stamina = cap;
     this.changed();
   }
   removeAffliction(type, name) {
@@ -714,8 +753,16 @@ function sanitizeAffliction(a, type) {
   const name = asStr(o.name).trim();
   if (!name) return null;
   const effects = asArr(o.effects)
-    .map((e) => ({ ability: asStr(asObj(e).ability), bonus: asNum(asObj(e).bonus, 0, { int: true }) }))
-    .filter((e) => e.ability);
+    .map((e) => {
+      const eo = asObj(e);
+      const ability = asStr(eo.ability);
+      if (!ability) return null;
+      // Exactly one of bonus/divide/target (task 60); default to a zero bonus.
+      if (eo.divide != null) return { ability, divide: asNum(eo.divide, 1, { min: 1, int: true }) };
+      if (eo.target != null) return { ability, target: asNum(eo.target, 0, { int: true }) };
+      return { ability, bonus: asNum(eo.bonus, 0, { int: true }) };
+    })
+    .filter(Boolean);
   return { name, type, effects, cumulative: asBool(o.cumulative), lift: o.lift == null ? null : asStr(o.lift) };
 }
 

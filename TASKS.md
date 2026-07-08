@@ -71,7 +71,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 57. Adventure Sheet: curses all display as "curse"; diseases/poisons invisible
 - [x] 58. Market `<sold>` hooks match the shop row's tags, not the sold item's
 - [x] 59. `<tick god=…>` drops `<effect>` children — Sig initiates never get +1 THIEVERY
-- [ ] 60. Affliction `<effect>` forms `divide`/`target`/`stamina` inert; item `<curse>` children never attach
+- [x] 60. Affliction `<effect>` forms `divide`/`target`/`stamina` inert; item `<curse>` children never attach
 - [ ] 61. book6/628: the rerunnable `<set>` clobbers the roll's var — inn rest/dysentery never fires
 
 **LOW**
@@ -1745,26 +1745,45 @@ render-every-section scan (4369). `RESULT ALL PASS pass=509 fail=0`.
 
 ---
 
-## 60. Affliction `<effect>` forms `divide`/`target`/`stamina` inert; item `<curse>` children never attach  — MEDIUM
+## 60. Affliction `<effect>` forms `divide`/`target`/`stamina` inert; item `<curse>` children never attach  — **done**
 
-`readEffects` (engine.js:716–728) reads only `ability` + `bonus`, and
-`firstAbility` rejects `stamina`, so four book-5 afflictions do nothing:
-- **book5/198** `<curse name="Champion's Curse"><effect ability="combat"
-  divide="2"/></curse>` — "fight the champion at half your COMBAT score" →
-  recorded with zero effect; fought at full COMBAT. (JaFL
-  `AbilityEffect.createAbilityDivider`.)
-- **book5/238** the stone-bracelet trap item carries that curse as an
-  `<item><curse…>` child — `renderItemAward` never reads a `<curse>` child, so
-  taking the bracelet is harmless; the trap doesn't exist.
+`readEffects` read only `ability` + `bonus`, and `firstAbility` rejected
+`stamina`, so four book-5 afflictions did nothing. All four now work:
+- **book5/198** `<effect ability="combat" divide="2"/>` (Champion's Curse) —
+  "fight at half your COMBAT (round up)".
 - **book5/705** `<effect ability="charisma" target="1"/>` — "CHARISMA falls to 1
-  … until the curse is lifted" → `target=` unsupported, curse inert.
-- **book5/306** `<poison…><effect ability="stamina" bonus="-6"/></poison>` —
-  "lose 6 Stamina permanently … until you find a cure" → dropped.
-Fix: extend the affliction-effect records to `{bonus | divide | target}` +
-`ability="stamina"`, honour them in `afflictionBonus`/`ability()` (divide after
-bonuses; target pins; stamina hits `staminaMax` while afflicted), and attach
-`<curse>` children at item award (curse joins the sheet when the item is taken).
-Tests: one per section above.
+  until the curse is lifted".
+- **book5/306** `<poison><effect ability="stamina" bonus="-6"/></poison>` —
+  "lose 6 Stamina permanently … until you find a cure".
+- **book5/238** the stone-bracelet trap carries its curse as an `<item><curse…>`
+  child; taking the bracelet now attaches the curse.
+
+Fix:
+- **`engine.js`** — a new `afflictionAbility()` accepts the six core abilities
+  **plus `stamina`**; `readEffects` now emits exactly one of `{bonus | divide |
+  target}` per `<effect>` (mirroring JaFL `AbilityEffect`'s ADJUST/DIVIDE/TARGET
+  modify-types), still falling back to a penalty carried on the element itself.
+- **`state.js`** — `afflictionMod(ability, value)` applies the non-additive
+  transforms after the additive `afflictionBonus`: a `divide` halves the summed
+  score rounding up (`Math.ceil`, = JaFL `(v+mod-1)/mod`), a `target` pins it.
+  Wired into `ability()` and `abilityNoWeapon()` (so it flows into `defence()`
+  and every check) but **not** `abilityNatural()` — a curse is an aura, disabled
+  under `modifier="natural"`. A new `afflictionStaminaMod()`/`effectiveStaminaMax()`
+  fold `ability="stamina"` affliction penalties into the Stamina total (reversible
+  on cure); `addAffliction` caps current Stamina to the reduced max and
+  `healStamina` clamps to it. `sanitizeAffliction` round-trips the new
+  `divide`/`target` effect fields.
+- **`ui.js` / `render.js`** — the Adventure-Sheet Stamina bar, both fight-widget
+  Stamina headers and the `<rest>` "already full" check all read
+  `effectiveStaminaMax()` so a Stamina-cutting affliction shows and gates
+  correctly. `renderItemAward`'s Take handler applies any `<curse>`/`<disease>`/
+  `<poison>` child of the item node once the item is taken (a trapped treasure).
+
+Verified: 10 new headless assertions (§198 COMBAT halved round-up + restore on
+lift; §705 CHARISMA pinned to 1 + restore; §306 poison −6 Stamina total + current
+cap + save round-trip + cure restore; §238 the bracelet's Take button attaches
+the curse and halves MAGIC) + full render-every-section scan. `RESULT ALL PASS
+pass=519 fail=0`.
 
 ---
 

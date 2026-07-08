@@ -90,12 +90,13 @@ export function renderSheet(state, container, opts = {}) {
   const stam = el('div', 'stat-block');
   stam.appendChild(el('div', 'stat-label', 'Stamina'));
   const bar = el('div', 'stamina-bar');
-  const pct = Math.max(0, Math.min(100, (d.stamina / Math.max(1, d.staminaMax)) * 100));
+  const maxStam = state.effectiveStaminaMax(); // reduced by a Stamina-cutting affliction (task 60)
+  const pct = Math.max(0, Math.min(100, (d.stamina / Math.max(1, maxStam)) * 100));
   const fill = el('div', 'stamina-fill');
   fill.style.width = pct + '%';
   if (pct < 34) fill.classList.add('low');
   bar.appendChild(fill);
-  const stamText = el('span', 'stamina-text', `${d.stamina} / ${d.staminaMax}`);
+  const stamText = el('span', 'stamina-text', `${d.stamina} / ${maxStam}`);
   bar.appendChild(stamText);
   stam.appendChild(bar);
   container.appendChild(stam);

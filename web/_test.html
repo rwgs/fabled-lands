@@ -912,6 +912,47 @@ async function run() {
     grpSig437 && grpSig437.click();
     ok('§1.437 initiation grants Sig + THIEVERY +1 and costs 50', gSig437.hasGod('Sig') && gSig437.ability('thievery') === thSig437 + 1 && gSig437.data.shards === 50, `god=${gSig437.hasGod('Sig')} th=${gSig437.ability('thievery')}/${thSig437} sh=${gSig437.data.shards}`);
 
+    // --- task 60: affliction divide/target/stamina forms + item <curse> child ---
+    // §5.198: the Champion's Curse halves COMBAT (round up — JaFL DIVIDE_ABILITY).
+    const g198 = GameState.create({ name:'C198', gender:'m', profession:'Warrior', book:5, adv });
+    g198.data.abilities.combat = 7; g198.data.items = []; // odd base, no weapon → COMBAT is a clean 7
+    const cb198 = g198.ability('combat');
+    eng.applyEffect(parse('<curse name="Champion\'s Curse"><effect ability="combat" divide="2"/></curse>'), g198, {});
+    ok('§198 curse halves COMBAT rounding up', g198.ability('combat') === Math.ceil(cb198 / 2), `combat=${g198.ability('combat')} base=${cb198}`);
+    eng.applyEffect(parse('<lose curse="Champion\'s Curse"/>'), g198, {});
+    ok('§198 lifting the curse restores COMBAT', g198.ability('combat') === cb198 && !g198.hasCurse("Champion's Curse"));
+
+    // §5.705: the Curse of Ugliness pins CHARISMA to 1 (JaFL TARGET_ABILITY).
+    const g705 = GameState.create({ name:'C705', gender:'m', profession:'Warrior', book:5, adv });
+    g705.data.abilities.charisma = 9;
+    eng.applyEffect(parse('<curse name="Curse of Ugliness"><effect ability="charisma" target="1"/></curse>'), g705, {});
+    ok('§705 curse pins CHARISMA to 1', g705.ability('charisma') === 1, `cha=${g705.ability('charisma')}`);
+    eng.applyEffect(parse('<lose curse="Curse of Ugliness"/>'), g705, {});
+    ok('§705 lifting the curse restores CHARISMA', g705.ability('charisma') === 9);
+
+    // §5.306: the poison cuts the Stamina total by 6 until cured.
+    const g306 = GameState.create({ name:'P306', gender:'m', profession:'Warrior', book:5, adv });
+    const max306 = g306.data.staminaMax; g306.data.stamina = max306; // full health
+    eng.applyEffect(parse('<poison name="Poison"><effect ability="stamina" bonus="-6"/></poison>'), g306, {});
+    ok('§306 poison cuts the Stamina total by 6', g306.effectiveStaminaMax() === max306 - 6, `max=${g306.effectiveStaminaMax()} raw=${max306}`);
+    ok('§306 poison caps current Stamina to the reduced total', g306.data.stamina === max306 - 6, `stam=${g306.data.stamina}`);
+    const g306b = new GameState(sanitizeData(JSON.parse(JSON.stringify(g306.data))));
+    ok('§306 the stamina affliction survives a save round-trip', g306b.effectiveStaminaMax() === max306 - 6, `max=${g306b.effectiveStaminaMax()}`);
+    eng.applyEffect(parse('<lose poison="*"/>'), g306, {});
+    ok('§306 curing the poison restores the Stamina total', g306.effectiveStaminaMax() === max306 && g306.data.poisons.length === 0);
+
+    // §5.238: the stone bracelet is a trap — taking it attaches Curse of Blighted Magic (½ MAGIC).
+    const g238 = GameState.create({ name:'B238', gender:'m', profession:'Warrior', book:5, adv });
+    g238.data.abilities.magic = 8;
+    const mg238 = g238.ability('magic');
+    const c238 = document.createElement('div');
+    const st238 = new Story(c238, g238, { navigate(){}, onDeath(){}, notify(){} });
+    st238.begin(await data.getSection(5, '238'), 5, '238');
+    const braceletBtn = Array.from(c238.querySelectorAll('.take-item')).find((b) => /stone bracelet/i.test(b.textContent));
+    ok('§238 renders a stone-bracelet take button', !!braceletBtn && !braceletBtn.disabled, braceletBtn ? `disabled=${braceletBtn.disabled}` : 'no btn');
+    braceletBtn.click();
+    ok('§238 taking the bracelet attaches the curse and halves MAGIC', g238.hasCurse('Curse of Blighted Magic') && g238.ability('magic') === Math.ceil(mg238 / 2), `curse=${g238.hasCurse('Curse of Blighted Magic')} magic=${g238.ability('magic')}/${mg238}`);
+
     // --- selling the starting "leather jerkin" at an armourer that lists "leather" --
     // Armour is valued by Defence tier, so the tier-1 jerkin sells at the "leather" row.
     const gsell = GameState.create({ name:'S', gender:'m', profession:'Warrior', book:1, adv });

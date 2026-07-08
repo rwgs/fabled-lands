@@ -723,18 +723,31 @@ function applyAffliction(el, state, type) {
   return type;
 }
 
-/** Read the <effect ability=… bonus=…> children of an affliction/item element. */
+/** Ability key for an affliction/god effect — the six core abilities plus
+ *  `stamina` (an affliction may cut the Stamina total, held until cured). */
+function afflictionAbility(attr) {
+  if (!attr) return null;
+  const a = attr.split('|')[0].trim().toLowerCase();
+  if (a === 'stamina') return 'stamina';
+  return ABILITIES.includes(a) ? a : null;
+}
+
+/** Read the <effect ability=… …> children of an affliction/item element. Each is
+ *  ONE of: a `bonus` (additive), a `divide` (halve the score, round up — JaFL
+ *  AbilityEffect.DIVIDE_ABILITY) or a `target` (pin the score — TARGET_ABILITY).
+ *  Afflictions may also hit `ability="stamina"` (a Stamina-total cut held until
+ *  cured). A curse may instead carry its single penalty on the element itself. */
 function readEffects(el) {
   const out = [];
-  el.querySelectorAll(':scope > effect').forEach((e) => {
-    const ab = firstAbility(e.getAttribute('ability'));
-    if (ab) out.push({ ability: ab, bonus: parseInt(e.getAttribute('bonus') || '0', 10) || 0 });
-  });
-  // A curse may also carry its penalty as attributes on the element itself.
-  if (!out.length && el.getAttribute('ability')) {
-    const ab = firstAbility(el.getAttribute('ability'));
-    if (ab) out.push({ ability: ab, bonus: parseInt(el.getAttribute('bonus') || '0', 10) || 0 });
-  }
+  const readOne = (src) => {
+    const ab = afflictionAbility(src.getAttribute('ability'));
+    if (!ab) return;
+    if (src.getAttribute('divide') != null) out.push({ ability: ab, divide: parseInt(src.getAttribute('divide'), 10) || 1 });
+    else if (src.getAttribute('target') != null) out.push({ ability: ab, target: parseInt(src.getAttribute('target'), 10) || 0 });
+    else out.push({ ability: ab, bonus: parseInt(src.getAttribute('bonus') || '0', 10) || 0 });
+  };
+  el.querySelectorAll(':scope > effect').forEach(readOne);
+  if (!out.length && el.getAttribute('ability')) readOne(el);
   return out;
 }
 
