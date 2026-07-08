@@ -981,6 +981,18 @@ async function run() {
     restGroup628[0].click();
     ok('§628 taking the rest action heals 1 Stamina', g628.data.stamina === stam628 + 1, `stam=${g628.data.stamina} before=${stam628}`);
 
+    // --- task 37: safeAddGod (the source typo safeAddGodd is corrected in book2/67) ---
+    const gsa37 = GameState.create({ name:'SA', gender:'m', profession:'Warrior', book:2, adv });
+    ok('safeAddGod is true when the player worships no god', eng.evaluateCondition(parse('<if safeAddGod="Elnir"/>'), gsa37));
+    gsa37.setGod('Nagil');
+    ok('safeAddGod is false when already an initiate of another god', !eng.evaluateCondition(parse('<if safeAddGod="Elnir"/>'), gsa37));
+    const g267 = GameState.create({ name:'G267', gender:'m', profession:'Warrior', book:2, adv });
+    g267.data.shards = 100;
+    const c267 = document.createElement('div');
+    const st267 = new Story(c267, g267, { navigate(){}, onDeath(){}, notify(){} });
+    st267.begin(await data.getSection(2, '67'), 2, '67');
+    ok('§2.67 offers the Elnir initiation group (corrected safeAddGod matches)', !!c267.querySelector('.group-action'));
+
     // --- selling the starting "leather jerkin" at an armourer that lists "leather" --
     // Armour is valued by Defence tier, so the tier-1 jerkin sells at the "leather" row.
     const gsell = GameState.create({ name:'S', gender:'m', profession:'Warrior', book:1, adv });

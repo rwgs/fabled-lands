@@ -154,8 +154,7 @@ export function evaluateCondition(el, state) {
   const cacheN = get('cache');
   const money = cacheN != null ? state.cacheMoney(cacheN) : state.data.shards;
   const itemPool = cacheN != null ? state.cacheItems(cacheN) : state.data.items;
-  // safeAddGodd is a source-XML typo for safeAddGod (one section); accept both.
-  const safeAdd = get('safeAddGod') != null ? get('safeAddGod') : get('safeAddGodd');
+  const safeAdd = get('safeAddGod');
 
   add(get('codeword'), () => matchCodewords(state, get('codeword')));
   add(get('ticks'), () => state.tickCount() === resolveValue(state, get('ticks')));
@@ -219,7 +218,7 @@ export function evaluateCondition(el, state) {
 // comparators/modifiers/structural attributes that legitimately accompany them.
 const KNOWN_IF_ATTRS = new Set([
   'codeword', 'ticks', 'item', 'shards', 'god', 'var', 'blessing', 'title', 'ship',
-  'profession', 'safeAddGod', 'safeAddGodd', 'book', 'dead', 'ability', 'weapon',
+  'profession', 'safeAddGod', 'book', 'dead', 'ability', 'weapon',
   'crew', 'cache', 'resurrection', 'armour', 'name', 'gender', 'docked', 'curse',
   'poison', 'tool', 'disease',
   'not', 'greaterthan', 'equals', 'lessthan', 'tags', 'bonus', 'using', 'dice',

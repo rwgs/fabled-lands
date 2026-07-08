@@ -85,7 +85,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [ ] 34. Finish moving rules out of the view layer
 - [ ] 35. iOS home-screen icons: provide PNG apple-touch-icon
 - [ ] 36. Minor rule divergences (grab-bag)
-- [ ] 37. Fix the `safeAddGodd` typo in the source XML
+- [x] 37. Fix the `safeAddGodd` typo in the source XML
 - [ ] 38. Gate cache widgets on `lock`/`unlock` under the single-pass render (book1/91 gamble)
 - [ ] 39. Defer confiscate-and-return `<transfer … from=>` until a fight resolves (book2/462)
 - [ ] 42. Inner `<difficulty>`/`<random>`/`<rankcheck>` rolls inside a `<group>` are unrun *(the `<rest>` half is done — task 61)*
@@ -1030,13 +1030,17 @@ shell precache.
 
 ---
 
-## 37. Fix the `safeAddGodd` typo in the source XML  — LOW
+## 37. Fix the `safeAddGodd` typo in the source XML  — **done**
 
-One `<if safeAddGodd="…">` exists in `books/` — a misspelling of `safeAddGod`.
-Task 17 made `evaluateCondition` accept `safeAddGodd` as an alias so the section
-works, but the source XML is the true fix: correct the attribute name in the
-offending `books/book*/*.xml`, rebuild the data, and then the engine alias can be
-removed. (Find it with `grep -rl 'safeAddGodd' books`.)
+The single `<if safeAddGodd="Elnir">` in `books/book2/67.xml` (Elnir initiation)
+is corrected to `safeAddGod`; the data was rebuilt so `web/data/book2.json`
+carries the fixed attribute. With the source true, the task-17 engine alias was
+removed: `evaluateCondition` reads only `safeAddGod` and `safeAddGodd` is dropped
+from `KNOWN_IF_ATTRS`, so a future stray `safeAddGodd` now correctly warns as an
+unknown attribute instead of silently working. Verified: 3 new headless
+assertions (safeAddGod true with no god / false when already an initiate; §2.67
+still offers the Elnir initiation group) + full render-every-section scan.
+`RESULT ALL PASS pass=529 fail=0`.
 
 ---
 
