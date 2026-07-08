@@ -11,8 +11,27 @@ review of the rules engine (`engine.js`/`combat.js`/`market.js`/`state.js`) and
 the view/app/infra layer, with every finding verified against both the code and
 the book XML corpus.
 
+Reviewed 2026-07-07: the suite is green at HEAD (`RESULT ALL PASS pass=381
+fail=0`) and every closed MEDIUM task's claims (24–31, 40, 41) were audited
+against the shipped code — no discrepancies. A fresh review of the newest
+subsystems (fight attributes, roll gates, currencies, item effects) plus the
+cross-module seams filed tasks **45–62** (each verified against both the code
+path and the triggering book XML); task **43** moved from LOW to MEDIUM to match
+its own severity rating, and a `useCache` Defence divergence was appended to the
+task-36 grab-bag. Checked clean in the same pass: `sanitizeData` round-trips all
+newer fields (currencies, item effects, abilityFlags, cache locks, afflictions);
+currency wallet routing; ship canonicalisation; tick caps; the roll-payment
+arm/consume/re-arm cycle.
+
 **HIGH**
-- *(all clear — 20, 21, 23 done)*
+- [ ] 45. Multi-fight sections: the fight gate & death-deferral track only the *last* `<fight>`
+- [ ] 46. `<set var … modifier="natural">` discards the value — book-2 rank ceremonies auto-succeed
+- [ ] 47. `<choice item="?" tags=…>` is never enabled — light-gated passages hard-locked
+- [ ] 48. Group fights: Surrender/flee throws a TypeError; no Flee button; no target choice
+- [ ] 49. `special="attack|defence"` grant permanent, save-persisted bonuses
+- [ ] 50. Var-keyed `<success>/<failure>` branches fire on entry (unset/stale vars)
+- [ ] 51. `<difficulty|rankcheck flag=…>` roll gates unimplemented; shared `<success>` binds only the last roll
+- [ ] 52. `removeCodeword` leaves the codeword's *value* behind — bonus counters never reset
 
 **MEDIUM**
 - [x] 5. Implement `<items group … limit="N">` "choose up to N" pickup
@@ -29,6 +48,16 @@ the book XML corpus.
 - [x] 31. `<rest>` with no `stamina=` should restore to full
 - [x] 40. `<market currency="…">` alternate-currency markets
 - [x] 41. Item `<effect>` system (use/aura/wielded/ability) and `<sold>` sell-hooks
+- [ ] 43. price/flag "choose one" purchases over-apply every linked reward *(moved from LOW 2026-07-07; scope grew — see detail)*
+- [ ] 53. `<difficulty modifier="noweapon">` still counts the weapon bonus
+- [ ] 54. Mid-fight escape brackets (tick…lose codeword) collapse — surrender/flee routes unreachable
+- [ ] 55. `<choice item=… pay="t">` doesn't consume the item
+- [ ] 56. `hidden="t"` payments render a phantom "Pay" button instead of arming silently
+- [ ] 57. Adventure Sheet: curses all display as "curse"; diseases/poisons invisible
+- [ ] 58. Market `<sold>` hooks match the shop row's tags, not the sold item's
+- [ ] 59. `<tick god=…>` drops `<effect>` children — Sig initiates never get +1 THIEVERY
+- [ ] 60. Affliction `<effect>` forms `divide`/`target`/`stamina` inert; item `<curse>` children never attach
+- [ ] 61. book6/628: the rerunnable `<set>` clobbers the roll's var — inn rest/dysentery never fires
 
 **LOW**
 - [ ] 9. Centralise tag dispatch into a registry
@@ -45,8 +74,8 @@ the book XML corpus.
 - [ ] 38. Gate cache widgets on `lock`/`unlock` under the single-pass render (book1/91 gamble)
 - [ ] 39. Defer confiscate-and-return `<transfer … from=>` until a fight resolves (book2/462)
 - [ ] 42. `<rest>` (and other roll/action children) inside a `<group>` are ignored
-- [ ] 43. price/flag "choose one" purchases over-apply every linked reward
 - [ ] 44. Fold the ring of ultimate power's `Rank`/`Stamina` auras (book5/564)
+- [ ] 62. Render `<image file=…>` and use-effect images (map of Bazalek, book3/75)
 
 **Done**
 - [x] 1. Gate combat progression / model fight outcomes
@@ -1003,6 +1032,12 @@ Small confirmed divergences to sweep in one pass, each with a test:
   `weaponlock` and `difficultyCurse`/`difficultyRestore` (one-die difficulty
   rolls, book3/91 — pairs with task 19) are unimplemented. (`lock`/`unlock`
   cache locks are now implemented — task 20.)
+- `useCache` fights (combat.js:56–58) add the cached weapon's bonus to the
+  enemy's **Combat only** — `best('armour')` is 0 for a weapon-only cache — but
+  book6/656 says to add the given weapon's COMBAT bonus to the Warrior Maid's
+  COMBAT **and Defence**, and JaFL's `FightNode` adds `combatRaise` to both.
+  With a +2 sword given she should be Combat 10 / Defence 18, not 10/16.
+  *(Found 2026-07-07.)*
 - Anything newly discovered of similar size should be appended here rather
   than left in conversation (per the workflow in `AGENTS.md`).
 
@@ -1170,6 +1205,17 @@ chooser) rather than auto-applying the lot; a single-reward flag (book2/202
 storm) still auto-applies as today. Add tests (§171 grants exactly one chosen
 blessing for 60; §152 lifts exactly one curse per payment).
 
+**Scope grown (2026-07-07, moved LOW → MEDIUM):** also port the *repeatable*
+cycle. In JaFL, activating a `[flag="k"]` reward consumes the flag, which
+**re-enables** the price node, so pay→collect can loop — the books are explicit:
+"for **every** 50 Shards you cross off … you can add one" (book4/93 crew bribe),
+and the book6/117 / book6/731 donation bonuses ("for **each additional** 100
+Shards"). The current `renderOptionalPay` memoises `'pay@'+path` and permanently
+disables the cost after one click (render.js:645–672), capping these at one
+purchase per visit. Depends on task 52 (`removeCodeword` must also clear the
+counter value or the bonus persists across visits). Add: §4.93 two payments →
+bonus 2, third visit starts at 0.
+
 ---
 
 ## 44. Fold the ring of ultimate power's `Rank`/`Stamina` auras (book5/564)  — LOW
@@ -1189,3 +1235,338 @@ aura) and route Defence, `rollRankCheck`, `<adjust ability="rank|stamina">`, the
 `abilityForCheck` natural path and `ui.renderSheet` through them; on removing an
 aura item, re-clamp current Stamina to the new max. Add a §5.564 test (carrying the
 ring raises Rank by 2 and Stamina max by 10; dropping it restores both).
+
+---
+
+## 45. Multi-fight sections: the fight gate & death-deferral track only the *last* `<fight>`  — HIGH
+
+`renderFight` does `this.sectionFight = fight` for **every** fight in document
+order (render.js:1361), so in a sequential multi-fight section the last one
+wins; `applyFightGate` and the death-deferral check read only `sectionFight`.
+Trigger: the ~18 sequential (non-`group`) multi-fight sections — book1/96, 121,
+210, 297, 371, 479, 569; book2/128, 582, 726, 770; book3/73, 587, 675, 685;
+book5/80; book6/116, 186. In book1/121 ("you may fight them one at a time",
+"If you beat all three, goto 213") all three fight widgets are live at once and
+winning **only the third** unlocks §213 — the first two can be skipped. Worse,
+dying to a non-last fight sets `outcome='lose'` on *that* fight object, but the
+death-deferral reads the last fight (outcome still null), so real death fires
+even when the section has an "if you lose…" branch. Expected (JaFL): fights
+resolve sequentially and navigation opens only after **all** are won. Fix: track
+all of a section's fights (win = every one won; lose = any lost), and disable
+fight N+1's widget until fight N is won. Add §1.121 tests (exit gated until all
+three die; a loss on fight 1 defers correctly).
+
+---
+
+## 46. `<set var … modifier="natural">` discards the value — book-2 rank ceremonies auto-succeed  — HIGH
+
+`applySet` (engine.js:696) treats `modifier=` as an *additive amount*:
+`val = state.getVar(name) + resolveValue(state, get('modifier'))` — overwriting
+the already-computed `value=` expression. `resolveValue(state,'natural')` is a
+var lookup → 0, so the var is set to 0. In JaFL (`SetVarNode`,
+`Adventurer.getAbilityModifier`) `modifier="natural"/"affected"/"noweapon"`
+selects **how ability identifiers inside `value=` resolve** (written score vs
+item-boosted), never an addend. 30 occurrences in 29 sections: book2/270, 345,
+362, 529, 536, 563, 584, 614, 637, 683, 752 (`<set var="r" value="rank"
+modifier="natural"/>` then "roll 2d > r to gain a Rank" — with r=0 **every book-2
+rank-up ceremony auto-succeeds**); book3/104, 179, 267, 379, 412, 455, 492, 559,
+583, 696; book6/17, 50, 118, 332, 344, 402, 479, 738 (book6/332's
+`value="12-charisma"` raise is a no-op). Fix: drop the additive branch; pass a
+resolution mode into `evalExpression`'s identifier lookup (route ability idents
+through `abilityForCheck(ab, natural)`). Tests: §2.752 r = natural rank;
+§6.332 c = 12−charisma.
+
+---
+
+## 47. `<choice item="?" tags=…>` is never enabled — light-gated passages hard-locked  — HIGH
+
+`renderChoice` gates on `this.state.hasItem(itemReq)` (render.js:948), but
+`matchItems` (state.js:791) has **no** `"?"` wildcard handling (that special
+case lives only in `evaluateCondition`'s item path, engine.js:167), and `tags=`
+on a `<choice>` is never consulted — so the button is permanently disabled with
+tooltip "needs ?". Nine sections hard-lock: book2/291 (`<choice section="440"
+item="?" tags="light">Enter the castle`), book2/720, book3/11, book3/414,
+book3/471, book4/6, book4/35, book4/405, book6/530. Expected: enabled when any
+possession carries every listed tag (a lantern/candle). Fix: route the choice
+item gate through the same matcher as `<if item="?" tags=…>` (task 18's path).
+Test: §2.291 disabled without a light-tagged item, enabled with one.
+
+---
+
+## 48. Group fights: Surrender/flee throws a TypeError; no Flee button; no target choice  — HIGH
+
+Three gaps in the task-26 group-fight widget:
+1. **Surrender throws.** The group `sectionFight` proxy defines `outcome` as a
+   getter only (render.js:1392–1399), but a `flee="t"` choice's click handler
+   assigns `this.sectionFight.outcome = 'fled'` (render.js:984) — ES modules are
+   strict mode, so the assignment throws a `TypeError` and aborts before
+   `navigate()`. book6/618 (three `group="a"` fights + `<choice flee="t"
+   section="452">Surrender</choice>`): the player cannot surrender.
+2. **No Flee button.** `drawGroupFight` (render.js:1407–1455) renders only
+   Attack; only `drawFight` wires a `<flee>` node. book6/291's "flee back to
+   your ship" (`<flee>…<goto section="745"/></flee>`) is unreachable — win or
+   die against three Shrine Wardens (63 total Stamina).
+3. **No target choice.** `groupFightRound` always strikes the first undefeated
+   member (combat.js:155); JaFL gives each grouped FightNode its own attack, so
+   the player picks a target each round. In book6/192 the Combat-12 Third
+   Spider must be killed last; in book6/618 Jiro (Combat 10) soaks free rounds.
+
+Fix: make the proxy's `outcome` settable (store an override the getter honours),
+wire `fleeNode` into `drawGroupFight`, and add a per-round target picker.
+Tests: §6.618 Surrender applies the flee body and navigates to §452; §6.291
+shows a Flee option; a group round can target member 3 first.
+
+---
+
+## 49. `special="attack|defence"` grant permanent, save-persisted bonuses  — HIGH
+
+`applySpecial` (engine.js:580–581) pushes `{ability:'combat', bonus,
+type:'blessing', uses:1}` into `data.effects` for both kinds — but **nothing
+ever consumes or expires those entries** (`effectBonus`, state.js:150, just sums
+them forever, and `sanitizeData` persists them), and because `defence()` includes
+`ability('combat')` (state.js:232) an attack bonus also raises Defence and vice
+versa. JaFL semantics: `special="attack"` is a one-shot bonus consumed by the
+next attack roll; `special="defence"` is a Defence blessing removed when the
+fight ends. Nine sections: book1/42 (rat poison "+3 to your dice rolls" for that
+one fight → currently +3 COMBAT *and* +3 Defence for the rest of the campaign),
+book1/145, 238, 247, 428; book4/434; book6/183, 490, 624. Fix: consume the
+attack bonus in the player-attack path (decrement `uses`), clear defence
+blessings at fight end, and apply each to the right stat only. Tests: §1.42
+bonus applies to exactly one fight and does not survive a save round-trip.
+
+---
+
+## 50. Var-keyed `<success>/<failure>` branches fire on entry (unset/stale vars)  — HIGH
+
+`renderBranch` skips the "wait until the roll is made" guard whenever the branch
+carries `var=`, and `branchSuccess` reads `state.getVar(...) > 0` immediately
+(render.js:1196–1209). Vars are global, persist in the save, and short names
+(s, x, y, m, c) are reused corpus-wide. Consequences (~18 sections):
+- **First entry (var unset → 0):** every `<failure var=…>` reveals instantly and
+  **applies its effects**, memoised under `fx@` and never undone — book3/437's
+  failure tick fires before either Difficulty-17 roll (contradictory codewords
+  after a success); same shape in book2/419, book3/476, book6/442, book6/691.
+- **Stale success:** a leftover `s > 0` from an earlier section makes
+  book6/691's `<success var="s">…<tick god="Nisoderu"/>` apply on entry — free
+  initiate status with no SANCTITY roll.
+- **book5/24:** `<failure var="hang"><lose stamina="-hang"/></failure>` applies
+  at entry with hang=0, memoising the Hangman's per-round Stamina drain as 0
+  forever. (Related: `pendingRollVar`, render.js:588, querySelects the literal
+  `var="-hang"` and misses it.)
+Expected (JaFL): success/failure activate only after the roll that feeds them
+executes. Fix: defer var-keyed branches until a roll in the section has resolved
+this visit (track which vars a roll wrote in `ctx`), and never apply branch
+effects at entry. Tests: §3.437 no tick before the roll; §5.24 drain equals the
+rolled margin.
+
+---
+
+## 51. `<difficulty|rankcheck flag=…>` roll gates unimplemented; shared `<success>` binds only the last roll  — HIGH
+
+Task 30 built the pay-to-roll gate **only into `renderRandom`**
+(render.js:1077–1094). `isRollGate` (render.js:678–681) *does* match
+`difficulty[flag]`/`rankcheck[flag]`, so the paired cost renders as a
+roll-payment — but `renderDifficulty` (render.js:1006–1044) and
+`renderRankcheck` ignore `flag=` entirely: the payment is decoration and the
+roll is free. Triggers:
+- **book6/731**: `<lose shards="100" price="x"/>` + `<difficulty
+  ability="charisma" level="18" flag="x">` — the CHARISMA boon roll is enabled
+  without donating; the Pay button just burns 100 Shards.
+- **book2/122 / book6/630** ("make a MAGIC roll at Difficulty 15 **or** a
+  SCOUTING roll at 18", shared `flag="x"`, hidden `<tick price="x"/>`): both
+  rolls are always enabled and both can be rolled (JaFL arms exactly one paid
+  attempt, consuming the flag), **and** the shared `<success section=…>` binds
+  to `this.activeRoll`, which is overwritten by each roll element in document
+  order (render.js:208, 1203) — a *successful first-listed* roll is silently
+  ignored. A MAGIC-built character cannot reach §2.376 via MAGIC at all:
+  success-stranding.
+Fix: extend the arm/consume flag gate to `renderDifficulty`/`renderRankcheck`,
+and bind shared success/failure branches to whichever gated roll actually
+resolved (record it as the active roll when it consumes the flag). Interacts
+with task 56 (the hidden price should arm silently). Tests: §6.731 roll disabled
+until paid, one roll per payment; §2.122 a MAGIC success reveals §376.
+
+---
+
+## 52. `removeCodeword` leaves the codeword's *value* behind — bonus counters never reset  — HIGH
+
+`removeCodeword` (state.js:426) deletes `data.codewords[cw]` but not
+`data.codewordValues[cw]`. In JaFL a codeword and its value are one entry, so
+`<lose codeword="X">` zeroes the counter — the books rely on that as a
+counter-reset idiom: book6/117 and book6/731 open with a hidden
+`<lose codeword="CharismaBonus"/>` (and reset inside every outcome) so each
+visit's donation bonus starts at 0; book4/93's crew-bribe counter likewise;
+book6/47 resets SpiderDamage. Actual: `<adjust name="…">` (engine.js reads
+`codewordValue`) still sees the old total, so **every bonus ever bought is a
+permanent, save-persisted roll modifier on all future visits** — and
+`CharismaBonus` even leaks between book 4 and book 6, which share the name.
+Fix: `removeCodeword` also deletes `codewordValues[cw]` (audit callers — no
+corpus idiom relies on the value surviving). Feeds task 43's repeatable-cycle
+semantics. Test: tick value → lose codeword → `codewordValue` is 0.
+
+---
+
+## 53. `<difficulty modifier="noweapon">` still counts the weapon bonus  — MEDIUM
+
+`renderDifficulty` resolves `modifier=` numerically (render.js:1010):
+`resolveValue(state,'noweapon')` → unknown var → 0, and the roll then uses
+`abilityForCheck('combat')`, which **includes** the wielded weapon's bonus. In
+JaFL `noweapon` maps to MODIFIER_NOTOOL — the ability score *without* the
+weapon/tool bonus. Four unarmed-combat sections roll too easily: book3/235,
+book3/271, book3/290, book5/516 (a +2 sword wrongly helps a bare-knuckle pit
+fight). Fix: recognise the modifier keywords (`natural`/`noweapon`/`affected`)
+on `<difficulty>`/`<rankcheck>` and route them into the ability lookup (shares
+plumbing with task 46); keep numeric/var modifiers working. Test: §3.235 roll
+uses COMBAT minus the weapon bonus.
+
+---
+
+## 54. Mid-fight escape brackets (tick…lose codeword) collapse — surrender/flee routes unreachable  — MEDIUM
+
+The JaFL idiom brackets a fight between `<tick codeword="X"/>` (top of section)
+and `<lose codeword="X"/>` (after the fight); a `box="X"`-gated choice is the
+mid-fight escape, valid only *while the fight is unresolved*. The single-pass
+render applies both passives in the same pass, so the box is already un-ticked
+by the time choices render — and `applyFightGate` disables post-fight nav
+anyway. Verified triggers:
+- **book2/582**: "Surrender" (`box="2.582.1"`) permanently disabled; worse, the
+  Flee button ("beg for mercy", no goto) sets `outcome='fled'`, and on `fled`
+  `applyFightGate` (render.js:1335) disables only lose-role buttons — so fleeing
+  **enables the "Defeat them all" §654 win exit**.
+- **book3/211**: "Run back to the ship" (`box="3.211.flee"`) can never be taken.
+- **book2/442**: the escape `<group>` works mid-fight (pays the Paladin title),
+  but the `box="2.442.1"` choice to §118 stays fight-gated — the player pays and
+  still can't leave.
+Fix: defer a post-fight `<lose codeword>` until the fight resolves (same
+machinery as task 39's deferred transfers), let `box=` choices whose codeword is
+currently ticked bypass the fight gate while the fight is live, and on `fled`
+don't enable win-only exits. Tests: §2.582 Surrender live mid-fight + §654
+gated after fleeing; §2.442 paid escape navigates.
+
+---
+
+## 55. `<choice item=… pay="t">` doesn't consume the item  — MEDIUM
+
+`renderChoice` computes `pay` only when `shards=` is present (render.js:935), so
+`pay="t"` on an item-only choice is ignored and the removal branch
+(render.js:988) never runs. Java `ChoiceNode` honours the attribute and removes
+the item. Two sections duplicate items: book2/400 (`<choice item="green gem"
+pay="t" section="288">Give them a green gem`) and book6/740 (`<choice
+item="rope" pay="t" section="513">Give the raven some rope`) — the player keeps
+the given-away item and it still satisfies later `<if item=…>` checks. Fix:
+honour `pay="t"` whenever an `item=` requirement exists. Tests: both sections
+consume the item on click.
+
+---
+
+## 56. `hidden="t"` payments render a phantom "Pay" button instead of arming silently  — MEDIUM
+
+`renderRollPayment` (render.js:688–715) and `renderOptionalPay`
+(render.js:645–672) never check `hidden=` — `renderPassive` honours it only on
+the plain-effect path (render.js:431/437). JaFL executes a hidden price node
+silently on entry (one arming per visit). Seven sections show a bare, unlabelled
+"Pay"/"Confirm" button the player must discover: book1/597, book2/122,
+book3/472, book3/680, book4/127, book5/365, book6/630 — and because the button
+is gated purely on the flag, it can be re-clicked for unlimited re-arms within a
+visit where JaFL grants one. Interacts with task 51 (these hidden prices arm the
+either-or difficulty rolls). Fix: a `hidden="t"` payment auto-fires once per
+visit with no widget; cap re-arms accordingly. Test: §6.630 shows no Pay button
+and the rolls are armed exactly once on entry.
+
+---
+
+## 57. Adventure Sheet: curses all display as "curse"; diseases/poisons invisible  — MEDIUM
+
+`ui.js:183` renders `d.curses.map((c) => c.type)` — the literal word "curse" for
+every entry (afflictions are stored `{name, type, …}`) — and **nothing renders
+`d.diseases` or `d.poisons` at all**. A player afflicted with Ghoulbite
+(book1/196) or Scorpion Poison (book1/532) sees nothing on the sheet while the
+penalty silently depresses their abilities; multiple curses are
+indistinguishable. Fix: chip by `c.name` (fall back to type) and add Diseases /
+Poisons sections beside Curses. Test: renderSheet output lists an inflicted
+disease by name.
+
+---
+
+## 58. Market `<sold>` hooks match the shop row's tags, not the sold item's  — MEDIUM
+
+`soldMatches` (render.js:1659–1664) tests the *row descriptor's* tags (built
+from `buytags=`), not the tags on the possession actually sold. In book3/318 the
+free-goods rows carry `buytags="318.free"` and the hook is `<sold item="?"
+tags="318.free"><tick codeword="3.318.sold"/></sold>` — JaFL matches the sold
+**item instance's** tags, so only goods actually obtained free there are marked.
+Actual: selling *any* bonus-1 armour or bonus-0 weapon through those rows (e.g.
+the leather jerkin many characters start with) fires the hook, and book3/20
+routes to book3/372 — pelted with cobblestones, `<lose stamina="1d">`, and loss
+of the "Saviour of Vervayens Isle" title, as punishment for a legitimate sale.
+(The book3/86 row-level `<sold>` is fine.) Fix: pass the sold possession into
+`runSoldHooks` and match its own tags/name. Tests: §3.318 selling starting
+leather doesn't tick `3.318.sold`; selling the free leather does.
+
+---
+
+## 59. `<tick god=…>` drops `<effect>` children — Sig initiates never get +1 THIEVERY  — MEDIUM
+
+`applyTick`'s `god=` path (engine.js:512–568) never reads `<effect>` children,
+and the group-click path likewise applies only the tick. book1/437 and book2/334
+initiate the player with `<tick god="Sig"><effect ability="thievery"
+bonus="1"/></tick>` — "add 1 to your THIEVERY score, as Sig will watch over your
+pilfering activities". JaFL attaches the effect to the god on initiation and
+removes it on renunciation. Actual: the bonus is never granted. Fix: store
+god-linked effects (e.g. in `data.effects` with a `source: god` marker folded
+into `effectBonus`) and strip them whenever that god is lost (renounce,
+`godless`, `<lose god=…>`). Tests: initiate → THIEVERY +1; renounce → restored.
+
+---
+
+## 60. Affliction `<effect>` forms `divide`/`target`/`stamina` inert; item `<curse>` children never attach  — MEDIUM
+
+`readEffects` (engine.js:716–728) reads only `ability` + `bonus`, and
+`firstAbility` rejects `stamina`, so four book-5 afflictions do nothing:
+- **book5/198** `<curse name="Champion's Curse"><effect ability="combat"
+  divide="2"/></curse>` — "fight the champion at half your COMBAT score" →
+  recorded with zero effect; fought at full COMBAT. (JaFL
+  `AbilityEffect.createAbilityDivider`.)
+- **book5/238** the stone-bracelet trap item carries that curse as an
+  `<item><curse…>` child — `renderItemAward` never reads a `<curse>` child, so
+  taking the bracelet is harmless; the trap doesn't exist.
+- **book5/705** `<effect ability="charisma" target="1"/>` — "CHARISMA falls to 1
+  … until the curse is lifted" → `target=` unsupported, curse inert.
+- **book5/306** `<poison…><effect ability="stamina" bonus="-6"/></poison>` —
+  "lose 6 Stamina permanently … until you find a cure" → dropped.
+Fix: extend the affliction-effect records to `{bonus | divide | target}` +
+`ability="stamina"`, honour them in `afflictionBonus`/`ability()` (divide after
+bonuses; target pins; stamina hits `staminaMax` while afflicted), and attach
+`<curse>` children at item award (curse joins the sheet when the item is taken).
+Tests: one per section above.
+
+---
+
+## 61. book6/628: the rerunnable `<set>` clobbers the roll's var — inn rest/dysentery never fires  — MEDIUM
+
+Task 25 made an absolute `<set value=…>` re-evaluate on every render
+(render.js:510) so roll-derived vars stay correct — but book6/628 uses
+`<set var="y" value="7"/>` as a *sentinel* ("not yet rolled"; JaFL sets it once
+on entry) before a pay-gated `<random dice="1" flag="x" var="y">`, then branches
+`<if var="y" lessthan="6">` (rest +1 Stamina) / `equals="6"` (dysentery).
+After paying and rolling, the rerender re-applies `y=7` **before** the if-chain
+evaluates, so neither branch ever activates: the player pays 1 Shard a day and
+rolls, but never heals (nor risks dysentery). This is the only corpus collision —
+every other `<set>` sharing a var with a roll sits in a mutually exclusive
+branch (book2/138, book3/43/102/149/304/642/653, book6/480). Fix: don't re-run a
+`<set>` whose var a roll has written this visit (track roll-written vars in
+`ctx`, which task 50 needs anyway). Test: §6.628 pay → roll 3 → the rest branch
+heals 1.
+
+---
+
+## 62. Render `<image file=…>` and use-effect images (map of Bazalek, book3/75)  — LOW
+
+`render.js:352–354` reads `src|name` off an `<image>`, but the corpus uses
+`file=` (plus `title=`/`book=`), so the inline image in book3/75 never renders;
+and `applyEffectBody`/`useItemEffect` have no `<image>` handling, so the map of
+Bazalek's `<effect type="use" verb="Read">…<image …/></effect>` Use button is a
+no-op — the item's sole purpose (viewing the island map) is inaccessible. Fix:
+read `file=` (resolve against the owning book's asset folder) and let a use
+effect surface an image (e.g. the existing image modal). Test: §3.75 award
+carries the use effect and Read produces an image element.
