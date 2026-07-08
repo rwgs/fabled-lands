@@ -556,8 +556,27 @@ export class GameState {
 
   // ---- gods / titles ---------------------------------------------------
   hasGod(g) { return this.data.gods.includes(g); }
-  setGod(g) { if (!this.hasGod(g)) { this.data.gods.push(g); this.changed(); } }
-  removeGod(g) { const i = this.data.gods.indexOf(g); if (i >= 0) { this.data.gods.splice(i, 1); this.changed(); } }
+  // Initiating a god may grant ability effects that last until it is renounced —
+  // Sig's "+1 THIEVERY" (book1/437, book2/334). They are tagged `source: "god:<g>"`
+  // so removeGod strips them, and never double-added on re-initiation. (task 59)
+  setGod(g, effects = null) {
+    if (this.hasGod(g)) return;
+    this.data.gods.push(g);
+    const src = 'god:' + g;
+    if (effects && effects.length && !this.data.effects.some((e) => e.source === src)) {
+      effects.forEach((e) => this.data.effects.push({ ...e, source: src }));
+    }
+    this.changed();
+  }
+  removeGod(g) {
+    const i = this.data.gods.indexOf(g);
+    const src = 'god:' + g;
+    const kept = this.data.effects.filter((e) => e.source !== src);
+    const strippedEffects = kept.length !== this.data.effects.length;
+    if (i >= 0) this.data.gods.splice(i, 1);
+    if (strippedEffects) this.data.effects = kept;
+    if (i >= 0 || strippedEffects) this.changed();
+  }
 
   hasTitle(name) { return this.data.titles.some((t) => t.name === name); }
   titleValue(name) { const t = this.data.titles.find((t) => t.name === name); return t ? t.value : 0; }
@@ -761,7 +780,7 @@ export function sanitizeData(raw) {
   out.effects = asArr(d.effects).map((e) => {
     const o = asObj(e);
     if (!o.ability && !o.type) return null;
-    return { ability: typeof o.ability === 'string' ? o.ability : null, bonus: asNum(o.bonus, 0, { int: true }), type: typeof o.type === 'string' ? o.type : null, uses: o.uses == null ? null : asNum(o.uses, 0, { min: 0, int: true }), text: asStr(o.text) };
+    return { ability: typeof o.ability === 'string' ? o.ability : null, bonus: asNum(o.bonus, 0, { int: true }), type: typeof o.type === 'string' ? o.type : null, uses: o.uses == null ? null : asNum(o.uses, 0, { min: 0, int: true }), text: asStr(o.text), source: typeof o.source === 'string' ? o.source : null };
   }).filter(Boolean);
   out.abilityFlags = {};
   for (const [k, v] of Object.entries(asObj(d.abilityFlags))) { const o = asObj(v); const f = {}; if (o.fixed) f.fixed = true; if (o.cursed) f.cursed = true; if (Object.keys(f).length) out.abilityFlags[k] = f; }

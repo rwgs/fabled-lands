@@ -887,6 +887,31 @@ async function run() {
     ok('sheet has a Diseases section listing Ghoulbite', /Diseases/.test(sheetTxt) && /Ghoulbite/.test(sheetTxt), sheetTxt.slice(0, 400));
     ok('sheet has a Poisons section listing Scorpion Poison', /Poisons/.test(sheetTxt) && /Scorpion Poison/.test(sheetTxt), sheetTxt.slice(0, 400));
 
+    // --- task 59: <tick god=…> applies its <effect> children (Sig's +1 THIEVERY) ---
+    const gsig = GameState.create({ name:'Sg', gender:'m', profession:'Rogue', book:1, adv });
+    const thBase = gsig.ability('thievery');
+    eng.applyEffect(parse('<tick god="Sig"><effect ability="thievery" bonus="1"/></tick>'), gsig, {});
+    ok('Sig initiation grants +1 THIEVERY', gsig.hasGod('Sig') && gsig.ability('thievery') === thBase + 1, `th=${gsig.ability('thievery')} base=${thBase}`);
+    eng.applyEffect(parse('<tick god="Sig"><effect ability="thievery" bonus="1"/></tick>'), gsig, {});
+    ok('re-initiating Sig does not stack THIEVERY', gsig.ability('thievery') === thBase + 1, String(gsig.ability('thievery')));
+    eng.applyEffect(parse('<lose god="Sig"/>'), gsig, {});
+    ok('renouncing Sig restores THIEVERY', !gsig.hasGod('Sig') && gsig.ability('thievery') === thBase, `th=${gsig.ability('thievery')}`);
+    // the god effect survives a save round-trip (source= is persisted).
+    eng.applyEffect(parse('<tick god="Sig"><effect ability="thievery" bonus="1"/></tick>'), gsig, {});
+    const gsig2 = new GameState(sanitizeData(JSON.parse(JSON.stringify(gsig.data))));
+    ok('the god THIEVERY effect survives a save round-trip', gsig2.ability('thievery') === thBase + 1, `th=${gsig2.ability('thievery')}`);
+    // §1.437: the initiation group grants Sig + THIEVERY +1 and costs 50 Shards.
+    const gSig437 = GameState.create({ name:'Init', gender:'m', profession:'Rogue', book:1, adv });
+    gSig437.data.shards = 100;
+    const thSig437 = gSig437.ability('thievery');
+    const cSig437 = document.createElement('div');
+    const stSig437 = new Story(cSig437, gSig437, { navigate(){}, onDeath(){}, notify(){} });
+    stSig437.begin(await data.getSection(1, '437'), 1, '437');
+    const grpSig437 = cSig437.querySelector('.group-action');
+    ok('§1.437 shows the Sig initiation group', !!grpSig437);
+    grpSig437 && grpSig437.click();
+    ok('§1.437 initiation grants Sig + THIEVERY +1 and costs 50', gSig437.hasGod('Sig') && gSig437.ability('thievery') === thSig437 + 1 && gSig437.data.shards === 50, `god=${gSig437.hasGod('Sig')} th=${gSig437.ability('thievery')}/${thSig437} sh=${gSig437.data.shards}`);
+
     // --- selling the starting "leather jerkin" at an armourer that lists "leather" --
     // Armour is valued by Defence tier, so the tier-1 jerkin sells at the "leather" row.
     const gsell = GameState.create({ name:'S', gender:'m', profession:'Warrior', book:1, adv });

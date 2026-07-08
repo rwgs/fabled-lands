@@ -70,7 +70,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 56. `hidden="t"` payments render a phantom "Pay" button instead of arming silently
 - [x] 57. Adventure Sheet: curses all display as "curse"; diseases/poisons invisible
 - [x] 58. Market `<sold>` hooks match the shop row's tags, not the sold item's
-- [ ] 59. `<tick god=…>` drops `<effect>` children — Sig initiates never get +1 THIEVERY
+- [x] 59. `<tick god=…>` drops `<effect>` children — Sig initiates never get +1 THIEVERY
 - [ ] 60. Affliction `<effect>` forms `divide`/`target`/`stamina` inert; item `<curse>` children never attach
 - [ ] 61. book6/628: the rerunnable `<set>` clobbers the roll's var — inn rest/dysentery never fires
 
@@ -1720,17 +1720,28 @@ render-every-section scan (4369). `RESULT ALL PASS pass=503 fail=0`.
 
 ---
 
-## 59. `<tick god=…>` drops `<effect>` children — Sig initiates never get +1 THIEVERY  — MEDIUM
+## 59. `<tick god=…>` drops `<effect>` children — Sig initiates never get +1 THIEVERY  — **done**
 
-`applyTick`'s `god=` path (engine.js:512–568) never reads `<effect>` children,
-and the group-click path likewise applies only the tick. book1/437 and book2/334
-initiate the player with `<tick god="Sig"><effect ability="thievery"
-bonus="1"/></tick>` — "add 1 to your THIEVERY score, as Sig will watch over your
-pilfering activities". JaFL attaches the effect to the god on initiation and
-removes it on renunciation. Actual: the bonus is never granted. Fix: store
-god-linked effects (e.g. in `data.effects` with a `source: god` marker folded
-into `effectBonus`) and strip them whenever that god is lost (renounce,
-`godless`, `<lose god=…>`). Tests: initiate → THIEVERY +1; renounce → restored.
+`applyTick`'s `god=` path never read the `<effect>` children, so becoming an
+initiate of Sig (book1/437, book2/334 — `<tick god="Sig"><effect ability="thievery"
+bonus="1"/></tick>`, "add 1 to your THIEVERY score") granted no bonus. The
+previously-unused top-level `data.effects` store is now the home for god-linked
+effects:
+
+- **`state.js`** — `setGod(g, effects)` folds any granted effects into
+  `data.effects` tagged `source: "god:<g>"`, guarded against double-adding (the "no
+  double THIEVERY bonus" rule); `removeGod(g)` strips every `source: "god:<g>"`
+  effect on renunciation. `sanitizeData` now preserves the effect's `source` so the
+  bonus survives a save round-trip. `effectBonus` already folds `data.effects` into
+  `ability()`, so the +1 flows into the score and every check.
+- **`engine.js`** — the `<tick|gain god=…>` path passes `readEffects(el)` to
+  `setGod`. This flows through the `<group>` initiation button too (it applies the
+  `<tick god>` element via `applyEffect`).
+
+Verified: 6 new headless assertions (initiation grants +1 THIEVERY; re-initiating
+doesn't stack; renouncing restores it; the effect survives a save round-trip; the
+§1.437 group initiation grants Sig +1 THIEVERY and costs 50) + full
+render-every-section scan (4369). `RESULT ALL PASS pass=509 fail=0`.
 
 ---
 

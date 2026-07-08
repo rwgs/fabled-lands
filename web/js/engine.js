@@ -516,7 +516,7 @@ function applyTick(el, state, opts) {
   }
   if (get('blessing') != null) { state.addBlessing(get('blessing')); notes.push('blessing'); did = true; }
   if (get('curse') != null) { state.addCurse(get('curse')); did = true; }
-  if (get('god') != null) { state.setGod(get('god')); did = true; }
+  if (get('god') != null) { state.setGod(get('god'), readEffects(el)); did = true; }
   if (get('title') != null) {
     const val = get('titleValue') ? resolveValue(state, get('titleValue')) : (get('amount') ? resolveValue(state, get('amount')) : 0);
     state.addTitle(get('title'), val); did = true;
