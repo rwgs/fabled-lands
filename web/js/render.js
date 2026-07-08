@@ -1155,7 +1155,13 @@ export class Story {
     const spec = (node.getAttribute('ability') || '').trim();
     const multi = spec.includes('|');
     const level = resolveValue(this.state, node.getAttribute('level'));
-    const modifier = node.getAttribute('modifier') ? resolveValue(this.state, node.getAttribute('modifier')) : 0;
+    // modifier= is either a keyword selecting how the ability score resolves
+    // (natural/noweapon/affected — book3/235/271/290, book5/516 unarmed COMBAT) or a
+    // numeric/var addend. Keywords route into the ability lookup (mode); anything
+    // else keeps the historical numeric-modifier behaviour. (task 53)
+    const modRaw = (node.getAttribute('modifier') || '').trim().toLowerCase();
+    const mode = ['natural', 'noweapon', 'notool', 'affected'].includes(modRaw) ? modRaw : null;
+    const modifier = (node.getAttribute('modifier') != null && !mode) ? resolveValue(this.state, node.getAttribute('modifier')) : 0;
 
     // its own descriptive text
     const desc = document.createElement('span');
@@ -1195,7 +1201,7 @@ export class Story {
     const abLabel = (ability || '').split('|')[0].toUpperCase();
     const btn = this.rollButton(`Roll 2 dice + ${abLabel}`, widget, () => {
       if (gated) this.state.setFlag(flag, false); // consume the payment — re-pay to re-attempt
-      const res = rollDifficulty(this.state, ability, level, modifier + childAdjustment(node, this.state));
+      const res = rollDifficulty(this.state, ability, level, modifier + childAdjustment(node, this.state), mode);
       if (node.getAttribute('var')) { this.state.setVar(node.getAttribute('var'), res.margin); this.ctx.wroteVars.add(node.getAttribute('var')); }
       this.ctx.rolls.set(key, res);
       this.rerender();

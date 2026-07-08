@@ -64,7 +64,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 40. `<market currency="…">` alternate-currency markets
 - [x] 41. Item `<effect>` system (use/aura/wielded/ability) and `<sold>` sell-hooks
 - [x] 43. price/flag "choose one" purchases over-apply every linked reward *(moved from LOW 2026-07-07; scope grew — see detail)*
-- [ ] 53. `<difficulty modifier="noweapon">` still counts the weapon bonus
+- [x] 53. `<difficulty modifier="noweapon">` still counts the weapon bonus
 - [ ] 54. Mid-fight escape brackets (tick…lose codeword) collapse — surrender/flee routes unreachable
 - [ ] 55. `<choice item=… pay="t">` doesn't consume the item
 - [ ] 56. `hidden="t"` payments render a phantom "Pay" button instead of arming silently
@@ -1544,18 +1544,37 @@ fail=0`.
 
 ---
 
-## 53. `<difficulty modifier="noweapon">` still counts the weapon bonus  — MEDIUM
+## 53. `<difficulty modifier="noweapon">` still counts the weapon bonus  — **done**
 
-`renderDifficulty` resolves `modifier=` numerically (render.js:1010):
-`resolveValue(state,'noweapon')` → unknown var → 0, and the roll then uses
-`abilityForCheck('combat')`, which **includes** the wielded weapon's bonus. In
-JaFL `noweapon` maps to MODIFIER_NOTOOL — the ability score *without* the
-weapon/tool bonus. Four unarmed-combat sections roll too easily: book3/235,
-book3/271, book3/290, book5/516 (a +2 sword wrongly helps a bare-knuckle pit
-fight). Fix: recognise the modifier keywords (`natural`/`noweapon`/`affected`)
-on `<difficulty>`/`<rankcheck>` and route them into the ability lookup (shares
-plumbing with task 46); keep numeric/var modifiers working. Test: §3.235 roll
-uses COMBAT minus the weapon bonus.
+`renderDifficulty` resolved `modifier=` numerically (`resolveValue(state,'noweapon')`
+→ unknown var → 0) and the roll then used `abilityForCheck('combat')`, which
+**includes** the wielded weapon's bonus — so the four unarmed-combat rolls
+(book3/235/271/290, book5/516) let a wielded weapon help a bare-knuckle fight.
+
+Fix — route the modifier keyword into the ability lookup instead of treating it
+as an addend (shared plumbing with task 46):
+- **`state.js`** — new `abilityForMode(ability, mode)` centralises the check-value
+  logic (cursed/fixed flags + CHARISMA mask first), then dispatches on the JaFL
+  modifier: `natural`→written score, `noweapon`/`notool`→affected score **minus**
+  the weapon/tool bonus (new `abilityNoWeapon`, computed **pre-clamp** so a 1..12
+  ceiling hit doesn't distort it), `affected`/none→full affected score.
+  `abilityForCheck(ability, natural)` now just delegates (`natural?'natural':null`),
+  so every existing caller (the `<if>` path, `evalExpression`, `rollDifficulty`) is
+  unchanged.
+- **`engine.js`** — `rollDifficulty(state, ability, level, modifier, mode)` takes a
+  `mode` and resolves the ability via `abilityForMode`.
+- **`render.js`** — `renderDifficulty` recognises the keywords
+  (`natural`/`noweapon`/`notool`/`affected`) and passes them as `mode`; any
+  non-keyword `modifier=` keeps the historical numeric/var addend behaviour (none
+  occur in the corpus today, but the path is preserved). `<rankcheck>` rolls
+  against Rank with no ability score, so a modifier keyword is inapplicable there
+  (and none appears in the corpus) — left as-is.
+
+Verified: 5 new headless assertions (a +3 weapon lifts affected COMBAT but not the
+noweapon score; `rollDifficulty(..,'noweapon')` uses the bare COMBAT while the
+default counts the weapon; the pre-clamp edge — COMBAT 11 + a +2 weapon reads 12
+affected, 11 bare; the §3.235 rendered+rolled COMBAT excludes the weapon bonus) +
+full render-every-section scan (4369). `RESULT ALL PASS pass=466 fail=0`.
 
 ---
 

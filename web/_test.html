@@ -440,6 +440,31 @@ async function run() {
     await new Promise(r => setTimeout(r, 50));
     ok('§344 shows a roll button after picking an ability', !!container.querySelector('.btn-roll'));
 
+    // --- task 53: <difficulty modifier="noweapon"> excludes the weapon bonus -----
+    // book3/235/271/290, book5/516 are unarmed COMBAT rolls: a wielded weapon must
+    // NOT help. The keyword routes into the ability lookup (abilityForMode).
+    const gnw = GameState.create({ name:'NW', gender:'m', profession:'Warrior', book:3, adv });
+    gnw.data.items = gnw.data.items.filter((i) => i.kind !== 'weapon');
+    gnw.addItem(makeItem('weapon', 'greatsword', 3)); // +3 weapon
+    const combatFull = gnw.ability('combat');
+    const combatBare = gnw.abilityNoWeapon('combat');
+    ok('noweapon: the weapon lifts the affected COMBAT', combatFull === combatBare + 3, `full=${combatFull} bare=${combatBare}`);
+    ok('rollDifficulty noweapon uses the bare COMBAT', eng.rollDifficulty(gnw,'combat',13,0,'noweapon').abilityScore === combatBare);
+    ok('rollDifficulty default still counts the weapon', eng.rollDifficulty(gnw,'combat',13,0).abilityScore === combatFull);
+    // noweapon is computed pre-clamp: COMBAT 11 + a +2 weapon reads 12 affected but 11 bare.
+    const gcap = GameState.create({ name:'Cap', gender:'m', profession:'Warrior', book:3, adv });
+    gcap.data.abilities.combat = 11; gcap.data.items = gcap.data.items.filter((i) => i.kind !== 'weapon');
+    gcap.addItem(makeItem('weapon', 'runeblade', 2));
+    ok('noweapon computed pre-clamp (11, not 12−2)', gcap.ability('combat') === 12 && gcap.abilityNoWeapon('combat') === 11, `aff=${gcap.ability('combat')} bare=${gcap.abilityNoWeapon('combat')}`);
+    // §3.235 rendered roll uses the bare COMBAT, not the weapon-boosted score.
+    const c235 = document.createElement('div');
+    const story235 = new Story(c235, gnw, { navigate(){}, onDeath(){}, notify(){} });
+    const s235 = await data.getSection(3,'235'); story235.begin(s235,3,'235');
+    c235.querySelector('.btn-roll').click();
+    await new Promise(r => setTimeout(r, 1000)); // the roll button animates the dice before storing
+    const roll235 = Array.from(story235.ctx.rolls.values()).find((r) => r && typeof r.abilityScore === 'number');
+    ok('§3.235 rolled COMBAT excludes the weapon bonus', !!roll235 && roll235.abilityScore === combatBare, JSON.stringify(roll235));
+
     // §59: bare <training> ("choose the ability of your choice") offers all six (task 15)
     await renderSec(5,'59');
     ok('§59 bare training offers a six-ability chooser', container.querySelectorAll('.ability-pick').length === 6,

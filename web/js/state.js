@@ -228,17 +228,37 @@ export class GameState {
 
   /** Ability score as seen by a check (difficulty/rank/if): a cursed ability
    *  auto-fails, a fixed one counts as 1. A mask hides a blanked/disfigured face,
-   *  restoring CHARISMA while worn (JaFL's mask exception). */
+   *  restoring CHARISMA while worn (JaFL's mask exception). `natural=true` compares
+   *  the written score (JaFL MODIFIER_NATURAL); the mode-aware form is below. */
   abilityForCheck(ability, natural = false) {
+    return this.abilityForMode(ability, natural ? 'natural' : null);
+  }
+
+  /** Ability score for a roll under a `<difficulty|rankcheck modifier=>` keyword:
+   *   - natural            → the written score, no item/effect bonuses (MODIFIER_NATURAL)
+   *   - noweapon / notool  → the affected score *minus* the weapon/tool bonus (MODIFIER_NOTOOL)
+   *   - affected / (none)  → the full affected score, item bonuses included
+   *  The cursed/fixed check-flags (and the CHARISMA mask exception) apply first,
+   *  exactly as for abilityForCheck. (tasks 46, 53) */
+  abilityForMode(ability, mode) {
     const fx = this.data.abilityFlags && this.data.abilityFlags[ability];
     if (fx && (fx.cursed || fx.fixed) && !(ability === 'charisma' && this.hasMask())) {
       return fx.cursed ? CURSED_ABILITY : 1;
     }
-    // modifier="natural" compares the written score, ignoring item/effect bonuses.
-    return natural ? this.abilityNatural(ability) : this.ability(ability);
+    const m = String(mode || '').toLowerCase();
+    if (m === 'natural') return this.abilityNatural(ability);
+    if (m === 'noweapon' || m === 'notool') return this.abilityNoWeapon(ability);
+    return this.ability(ability);
   }
 
   abilityNatural(ability) { return this.data.abilities[ability] || 0; }
+
+  /** The affected ability score without the weapon/tool (item) bonus — computed
+   *  before the 1..12 clamp so a ceiling hit doesn't distort it (JaFL NOTOOL). */
+  abilityNoWeapon(ability) {
+    const base = this.data.abilities[ability] || 0;
+    return clampAbility(base + this.effectBonus(ability) + this.afflictionBonus(ability) + this.auraBonus(ability) + this.potionBonusFor(ability));
+  }
 
   hasMask() { return this.data.items.some((it) => normalize(it.name).includes('mask')); }
   hasAbilityFlag(ability, flag) { return !!(this.data.abilityFlags && this.data.abilityFlags[ability] && this.data.abilityFlags[ability][flag]); }

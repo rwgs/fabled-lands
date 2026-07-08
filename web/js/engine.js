@@ -926,11 +926,13 @@ function adjustApplies(el, state) {
   return true;
 }
 
-// difficulty: success iff (2d6 + ability + adjust) > level
-export function rollDifficulty(state, ability, level, modifier = 0) {
+// difficulty: success iff (2d6 + ability + adjust) > level. `mode` is the
+// <difficulty modifier=> keyword (natural/noweapon/affected) selecting how the
+// ability score resolves — noweapon drops the wielded weapon's bonus. (task 53)
+export function rollDifficulty(state, ability, level, modifier = 0, mode = null) {
   const ab = firstAbility(ability);
   const r = rollDice(2);
-  const abilityScore = ab ? state.abilityForCheck(ab) : 0;
+  const abilityScore = ab ? state.abilityForMode(ab, mode) : 0;
   const total = r.total + abilityScore + modifier;
   return { dice: r.dice, rollTotal: r.total, abilityScore, ability: ab, total, level, margin: total - level, success: total > level };
 }
