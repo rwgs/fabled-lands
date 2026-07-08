@@ -1089,6 +1089,90 @@ async function run() {
     const fUC = makeFight(parse('<fight name="Warrior Maid" combat="8" defence="16" stamina="12" useCache="maid"/>'), gUC);
     ok('§635 useCache adds the cached weapon bonus to enemy Combat AND Defence', fUC.combat === 10 && fUC.defence === 18, `combat=${fUC.combat} defence=${fUC.defence}`);
 
+    // --- task 42: a roll inside a <group> now renders as a widget and drives the branches ---
+    window.__FL_INSTANT_DICE__ = true;
+    const settle42 = () => new Promise((r) => setTimeout(r, 30));
+
+    // §3.680: the MAGIC-roll group renders a roll (not a swallowing button); the
+    // hidden <gain price="x"> arms the "leave" option on entry; success ticks the box.
+    const g680 = GameState.create({ name:'Wand', gender:'m', profession:'Mage', book:3, adv });
+    g680.data.abilities.magic = 12; g680.data.book = 3; g680.data.section = '680'; // so the bare <tick> keys the right box
+    const c680 = document.createElement('div');
+    const st680 = new Story(c680, g680, { navigate(){}, onDeath(){}, notify(){} });
+    st680.begin(await data.getSection(3, '680'), 3, '680');
+    ok('§680 renders the MAGIC roll as a widget, not a group button', !!c680.querySelector('.btn-roll') && !c680.querySelector('.group-action'));
+    ok('§680 the hidden price arms flag x on entry (the leave option is available)', g680.getFlag('x') === true);
+    const rnd680 = Math.random; Math.random = () => 0.9; // 6+6 = 12; +MAGIC 12 = 24 > 16 → success
+    c680.querySelector('.btn-roll').click(); await settle42();
+    Math.random = rnd680;
+    ok('§680 a successful MAGIC roll ticks the box', g680.tickCount(3, '680') === 1, `ticks=${g680.tickCount(3, '680')}`);
+    ok('§680 success reveals the goto to 644', Array.from(c680.querySelectorAll('.goto')).some((a) => /644/.test(a.textContent)));
+
+    // §2.438: the group's <rest stamina="x"> heals the roll's own var — only after the roll.
+    const g438 = GameState.create({ name:'Rest', gender:'m', profession:'Warrior', book:2, adv });
+    g438.data.stamina = 1;
+    const c438 = document.createElement('div');
+    const st438 = new Story(c438, g438, { navigate(){}, onDeath(){}, notify(){} });
+    st438.begin(await data.getSection(2, '438'), 2, '438');
+    ok('§438 renders the recovery roll as a widget and heals nothing before it', !!c438.querySelector('.btn-roll') && g438.data.stamina === 1);
+    const rnd438 = Math.random; Math.random = () => 0; // 2 dice → 1+1 = 2 → heal 2
+    c438.querySelector('.btn-roll').click(); await settle42();
+    Math.random = rnd438;
+    ok('§438 the rest heals the rolled amount (var x) on the roll', g438.data.stamina === 3, `stam=${g438.data.stamina}`);
+
+    // §3.273: the force="t" group loses the rolled number of possessions — on the roll, not entry.
+    const g273 = GameState.create({ name:'Amn', gender:'m', profession:'Warrior', book:3, adv });
+    g273.data.items = []; ['a', 'b', 'c', 'd'].forEach((nm) => g273.addItem(makeItem('item', nm)));
+    const c273 = document.createElement('div');
+    const st273 = new Story(c273, g273, { navigate(){}, onDeath(){}, notify(){} });
+    st273.begin(await data.getSection(3, '273'), 3, '273');
+    ok('§273 loses no possessions before the roll', g273.itemCount() === 4, `count=${g273.itemCount()}`);
+    const rnd273 = Math.random; Math.random = () => 0; // 1 die → 1 → lose 1 possession
+    c273.querySelector('.btn-roll').click(); await settle42();
+    Math.random = rnd273;
+    ok('§273 loses the rolled number of possessions on the roll', g273.itemCount() === 3, `count=${g273.itemCount()}`);
+
+    // §6.215: the blessing group's 35-Shard cost is paid on the roll (not on entry).
+    const g215 = GameState.create({ name:'Bless', gender:'m', profession:'Warrior', book:6, adv });
+    g215.data.shards = 100; g215.data.abilities.charisma = 6;
+    const c215 = document.createElement('div');
+    const st215 = new Story(c215, g215, { navigate(){}, onDeath(){}, notify(){} });
+    st215.begin(await data.getSection(6, '215'), 6, '215');
+    const roll215 = Array.from(c215.querySelectorAll('.btn-roll')).find((b) => /CHARISMA/i.test(b.textContent));
+    ok('§215 the blessing group renders a CHARISMA roll and has not charged 35 on entry', !!roll215 && g215.data.shards === 100, `sh=${g215.data.shards}`);
+    const rnd215 = Math.random; Math.random = () => 0.9; // 12 + CHA 6 = 18 > 15 → success
+    roll215.click(); await settle42();
+    Math.random = rnd215;
+    ok('§215 the roll deducts 35 Shards and grants the storm blessing on success', g215.data.shards === 65 && g215.hasBlessing('storm'), `sh=${g215.data.shards} bless=${g215.hasBlessing('storm')}`);
+
+    // §1.91: the gamble renders a roll widget and its <outcomes> resolve against the roll.
+    const g91 = GameState.create({ name:'Gamble', gender:'m', profession:'Warrior', book:1, adv });
+    const c91 = document.createElement('div');
+    const st91 = new Story(c91, g91, { navigate(){}, onDeath(){}, notify(){} });
+    st91.begin(await data.getSection(1, '91'), 1, '91');
+    ok('§91 the gamble renders a roll widget, not a swallowing button', !!c91.querySelector('.btn-roll') && !c91.querySelector('.group-action'));
+    g91.adjustCacheMoney('1.91', 10); // place a 10-Shard bet
+    st91.rerender();
+    const rnd91 = Math.random; Math.random = () => 0.5; // 2 dice → 4+4 = 8 → range 5-9 → lose (×0)
+    c91.querySelector('.btn-roll').click(); await settle42();
+    Math.random = rnd91;
+    ok('§91 rolling resolves the matching outcome (a 5-9 loses the bet)', g91.cacheMoney('1.91') === 0, `bet=${g91.cacheMoney('1.91')}`);
+
+    // §2.53: the swim group's codeword *marker* (a non-hidden <lose codeword>) is
+    // removed on the roll attempt, not on entry — so it can't clobber the entry
+    // codeword the sibling box= choices display before the player rolls.
+    const g53 = GameState.create({ name:'Swim', gender:'m', profession:'Warrior', book:2, adv });
+    g53.data.abilities.scouting = 6; g53.data.book = 2; g53.data.section = '53';
+    const c53 = document.createElement('div');
+    const st53 = new Story(c53, g53, { navigate(){}, onDeath(){}, notify(){} });
+    st53.begin(await data.getSection(2, '53'), 2, '53');
+    ok('§53 renders the SCOUTING roll as a widget, not a group button', !!c53.querySelector('.btn-roll') && !c53.querySelector('.group-action'));
+    ok('§53 the entry codeword marker is still held before the roll', g53.hasCodeword('2.53.1'));
+    const rnd53 = Math.random; Math.random = () => 0.9;
+    c53.querySelector('.btn-roll').click(); await settle42();
+    Math.random = rnd53;
+    ok('§53 the group codeword marker is cleared on the roll attempt (not on entry)', !g53.hasCodeword('2.53.1'));
+
     // --- selling the starting "leather jerkin" at an armourer that lists "leather" --
     // Armour is valued by Defence tier, so the tier-1 jerkin sells at the "leather" row.
     const gsell = GameState.create({ name:'S', gender:'m', profession:'Warrior', book:1, adv });

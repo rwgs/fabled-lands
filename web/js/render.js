@@ -432,6 +432,13 @@ export class Story {
   // initiate, purchase a blessing, accept a mission…) inside a <group> with a
   // <text> label. These must NOT auto-apply — the player opts in by clicking.
   renderGroup(container, node, path) {
+    // A <group> that bundles a roll (difficulty/random/rankcheck) can't collapse
+    // into a single button — the roll must render as its own widget so the
+    // section's <success>/<failure>/<outcomes> resolve. Render it inline and apply
+    // the group's non-roll effects on the roll event. (task 42)
+    const rollNode = node.querySelector('difficulty, random, rankcheck');
+    if (rollNode) return this.renderGroupWithRoll(container, node, path, rollNode);
+
     const label = (node.textContent || '').replace(/\s+/g, ' ').trim();
     // <adjust> is excluded: inside a group it is a modifier for a nested roll
     // (e.g. "Difficulty 15 if you have climbing gear"), not a group effect.
@@ -478,6 +485,67 @@ export class Story {
     }
     container.appendChild(btn);
     return btn;
+  }
+
+  // A <group> that bundles a roll with its effects (task 42). Renders the label and
+  // the roll widget inline; the roll then drives the section's success/failure/
+  // outcomes. The group's non-roll effects apply exactly once the roll resolves
+  // (JaFL treats the roll as the group's action), so a bundled cost/consequence —
+  // lose shards/item/god (book6/94/215/293, book3/273/629, book6/691), a codeword
+  // marker (book2/53…), or a rest that heals the roll's own var (book2/438) — fires
+  // on the attempt, never on entry. Hidden book-keeping (an armed price flag /
+  // cache lock — book3/680, book1/91, book2/138) still applies on entry.
+  renderGroupWithRoll(container, node, path, rollNode) {
+    const span = document.createElement('span');
+    span.className = 'group-roll';
+    const kids = Array.from(node.childNodes);
+    const rollKey = 'roll@' + path + '.' + kids.indexOf(rollNode);
+    const rollResolved = this.ctx.rolls.has(rollKey);
+    const deferred = [];
+    kids.forEach((k, i) => {
+      const kp = path + '.' + i;
+      if (k.nodeType === Node.TEXT_NODE) { this.appendText(span, k.nodeValue); return; }
+      if (k.nodeType !== Node.ELEMENT_NODE) return;
+      const tag = k.tagName.toLowerCase();
+      if (k === rollNode) {
+        this.renderElement(span, k, kp);
+        // Bind the section's shared <success>/<failure>/<outcomes> to this roll —
+        // appendChildren does this for top-level rolls; a group-nested one needs it here.
+        if (!this.inactive) {
+          const curResolved = this.activeRoll && this.ctx.rolls.has('roll@' + this.activeRoll.path);
+          if (this.ctx.rolls.has(rollKey) || !curResolved) this.activeRoll = { node: k, path: kp };
+        }
+        return;
+      }
+      if (tag === 'text') { this.appendChildren(span, k, kp); return; }
+      if (PASSIVE_TAGS.has(tag) || tag === 'rest') {
+        if (boolAttr(k.getAttribute('hidden'))) {
+          this.renderElement(span, k, kp); // hidden book-keeping arms on entry (renderPassive)
+        } else {
+          deferred.push(k); // visible cost/consequence — apply on the roll
+          const desc = (k.textContent || '').trim();
+          if (desc) this.appendText(span, desc);
+        }
+        return;
+      }
+      this.renderElement(span, k, kp);
+    });
+    // Apply the deferred (visible) effects exactly once, after the roll resolves.
+    if (rollResolved && deferred.length && !this.ctx.applied.has('grp@' + path)) {
+      this.ctx.applied.add('grp@' + path);
+      deferred.forEach((fx) => {
+        if (fx.tagName.toLowerCase() === 'rest') {
+          const perUse = fx.hasAttribute('stamina') ? fx.getAttribute('stamina') : null;
+          const cost = fx.getAttribute('shards') ? resolveValue(this.state, fx.getAttribute('shards')) : 0;
+          applyRest(this.state, perUse, cost);
+        } else {
+          const note = applyEffect(fx, this.state, {});
+          if (note) this.notify(note);
+        }
+      });
+    }
+    container.appendChild(span);
+    return span;
   }
 
   // ---- passive effects -----------------------------------------------------

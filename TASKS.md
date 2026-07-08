@@ -88,7 +88,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 37. Fix the `safeAddGodd` typo in the source XML
 - [ ] 38. Gate cache widgets on `lock`/`unlock` under the single-pass render (book1/91 gamble)
 - [ ] 39. Defer confiscate-and-return `<transfer … from=>` until a fight resolves (book2/462)
-- [ ] 42. Inner `<difficulty>`/`<random>`/`<rankcheck>` rolls inside a `<group>` are unrun *(the `<rest>` half is done — task 61)*
+- [x] 42. Inner `<difficulty>`/`<random>`/`<rankcheck>` rolls inside a `<group>` are unrun
 - [x] 44. Fold the ring of ultimate power's `Rank`/`Stamina` auras (book5/564)
 - [x] 62. Render `<image file=…>` and use-effect images (map of Bazalek, book3/75)
 - [x] 63. Heterogeneous "choose one" rewards (item / Shards / resurrection) over-apply (book1/597)
@@ -1087,12 +1087,14 @@ deposits, withdrawals, banking, investments and villa stashes all work, and §91
 renders clean. To do it properly, pre-scan the section for its net lock state (or
 make lock/unlock re-render-aware) and gate the widget on that. Add a §91 test.
 
-**Blocked on task 42 (found 2026-07-08).** §91's `<random dice="2">` sits inside
-the same `force="t"` group as the `<tick special="lock">`, so — like the other 24
-button-groups in task 42 — the roll is currently *swallowed* (the group renders as
-a button and the `<outcomes>` never resolve). The gamble can't actually be rolled
-until task 42 lifts the inner roll out, so the lock/unlock widget-gating nicety is
-downstream of that. Do task 42 first, then gate the widget.
+**Was blocked on task 42; now unblocked (2026-07-08).** §91's `<random dice="2">`
+sat inside the same `force="t"` group as the `<tick special="lock">`, so the roll
+was swallowed. Task 42 fixed that — the gamble now rolls and its `<outcomes>`
+resolve (a §91 test covers it). What remains for THIS task is only the widget
+nicety: while the cache is locked, the money-cache widget's deposit/withdraw should
+disable so the bet can't change after rolling. (With the hidden lock+unlock both
+applying on entry the cache nets unlocked, so the bet is still editable — a cosmetic
+gap, not a correctness one.)
 
 ---
 
@@ -1208,39 +1210,47 @@ scan. `RESULT ALL PASS pass=381 fail=0`.
 
 ---
 
-## 42. Inner `<difficulty>`/`<random>`/`<rankcheck>` rolls inside a `<group>` are unrun  — LOW  *(the `<rest>` half is done — task 61)*
+## 42. Inner `<difficulty>`/`<random>`/`<rankcheck>` rolls inside a `<group>` are unrun  — **done**
 
-Found while doing task 30. `renderGroup` (render.js) collects only
-`lose, tick, gain, set, curse` (now also `rest`) as the group's on-click
-effects, so any **roll** child is silently dropped. The `<rest>` half is fixed:
-task 61 made `renderGroup` apply an inner `<rest>` via `engine.applyRest`, so
-book6/628's "regain 1 Stamina point" `<group force="t">` now heals (with a §628
-test). Still open: a `<difficulty>`/`<random>`/`<rankcheck>` inside a group is
-never run — e.g. book3/680's "make a MAGIC roll at Difficulty 16" `<group>` holds
-the `<difficulty>` inline, so clicking it arms the hidden price flag but never
-rolls, and the `<success>`/`<failure>` branches below (goto 644 / 626) never
-resolve — the wand puzzle is unwinnable.
+`renderGroup` collected only `lose, tick, gain, set, curse` (+ `rest`, task 61) as
+a group's on-click effects, so when a group ALSO rendered as a button (label + an
+effect), its `<difficulty>`/`<random>`/`<rankcheck>` child was swallowed into the
+label and never rendered — the section's `<success>`/`<failure>`/`<outcomes>`
+never resolved. This hit **25 built sections**: book1/91, 554; book2/53, 134, 138,
+273, 438; book3/273, 389, 503, 629, 680; book6/24, 48, 94, 215, 239, 293, 320,
+564, 567, 691, 707, 735, 741. (A group with a roll but no effect/goto already fell
+through to the inline path and rendered its roll — untouched.)
 
-**Scoped 2026-07-08 (while doing task 44).** The bug hits **25 built sections**
-whose `<group>` renders as a *button* (label + an effect/goto, so `renderGroup`
-swallows its children) **and** contains a roll: book1/91, 554; book2/53, 134,
-138, 273, 438; book3/273, 389, 503, 629, 680; book6/24, 48, 94, 215, 239, 293,
-320, 564, 567, 691, 707, 735, 741. (A group with a roll but no effect/goto
-already falls through to the inline-wrapper path and renders its roll — not
-broken.) The trap is **effect timing**: the group bundles the roll with a marker
-effect that must apply *when the roll is attempted*, not on entry. e.g. book2/53
-sets codeword `2.53.1` on entry (`<tick codeword hidden>`), the swim group's
-`<lose codeword="2.53.1"/>` clears it on the attempt, and the sibling
-`<choice box="2.53.1">` options are gated on it — a blind lift-out that
-auto-applies the `<lose>` on entry would clear the marker immediately and mis-gate
-those choices. Correct model: render the inner roll as its own widget **and apply
-the group's other non-roll effects on the roll event** (JaFL treats the roll as
-the group's action) — not a naive lift-out. Hidden bundled effects (book3/680
-`<gain price hidden>`, book2/138 `<lose codeword hidden>`, book1/91 `<tick
-special=lock hidden>`) are entry-safe; the non-hidden codeword markers (book2/53,
-book6/24…) need the roll-event timing. Verify each of the 25 individually — the
-render-every-section smoke test only catches throws, not a swallowed roll.
-Test: §3.680 the group produces a MAGIC roll whose success ticks the box → 644.
+Fix (`web/js/render.js`): `renderGroup` now detects a roll child up front and, if
+present, delegates to a new **`renderGroupWithRoll`** which renders the group's
+`<text>` label and the roll widget inline (binding the section's shared
+success/failure/outcomes to that roll via `this.activeRoll`, which `appendChildren`
+does for top-level rolls but a group-nested roll needs done explicitly). The
+group's non-roll effects are applied **exactly once the roll resolves** (memoised
+`grp@<path>`), mirroring JaFL's "the roll is the group's action" — so a bundled
+cost/consequence (lose shards/item/god, a codeword marker, a rest that heals the
+roll's own `var`) fires on the *attempt*, never on entry. **Hidden** bundled
+effects (an armed price flag / cache lock — book3/680, book1/91, book2/138) still
+apply on entry through `renderPassive`, since those are silent book-keeping.
+
+This preserves effect timing so a marker can't clobber sibling gating: book2/53
+sets codeword `2.53.1` on entry and the swim group clears it only when the SCOUTING
+roll is attempted (the `box="2.53.1"` sibling choices show the right ☑/☐). And a
+real cost (book6/215's 35-Shard blessing, book3/273's item loss, book6/691's god
+renunciation) is never charged just by visiting.
+
+Verified: 13 new headless assertions across 6 representative sections — §3.680
+(roll renders as a widget not a button; the hidden price arms the "leave" option on
+entry; a success ticks the box and reveals →644), §2.438 (the rest heals the
+roll's own var, and nothing before the roll), §3.273 (a `force="t"` group loses the
+rolled number of possessions on the roll, none on entry), §6.215 (the 35-Shard cost
+is paid on the roll, not entry, and success grants the blessing), §1.91 (the gamble
+renders a roll and its `<outcomes>` resolve against it), §2.53 (the codeword marker
+clears on the attempt, not entry) — plus the full render-every-section scan.
+`RESULT ALL PASS pass=570 fail=0`.
+
+Follow-on: this unblocks task 38 (the §91 gamble now rolls; the lock/unlock widget
+nicety is still separate).
 
 ---
 
