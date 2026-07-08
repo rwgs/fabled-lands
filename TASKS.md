@@ -63,7 +63,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 31. `<rest>` with no `stamina=` should restore to full
 - [x] 40. `<market currency="…">` alternate-currency markets
 - [x] 41. Item `<effect>` system (use/aura/wielded/ability) and `<sold>` sell-hooks
-- [ ] 43. price/flag "choose one" purchases over-apply every linked reward *(moved from LOW 2026-07-07; scope grew — see detail)*
+- [x] 43. price/flag "choose one" purchases over-apply every linked reward *(moved from LOW 2026-07-07; scope grew — see detail)*
 - [ ] 53. `<difficulty modifier="noweapon">` still counts the weapon bonus
 - [ ] 54. Mid-fight escape brackets (tick…lose codeword) collapse — surrender/flee routes unreachable
 - [ ] 55. `<choice item=… pay="t">` doesn't consume the item
@@ -1201,35 +1201,46 @@ group so they render as their own widgets. Add a §628 heal test.
 
 ---
 
-## 43. price/flag "choose one" purchases over-apply every linked reward  — MEDIUM
+## 43. price/flag "choose one" purchases over-apply every linked reward  — **done**
 
-Found while doing task 30. For a *non*-roll price/flag purchase,
-`renderOptionalPay` applies **every** `[flag="k"]` node on a single payment. When
-the linked rewards are a "choose one" menu this grants them all:
-- **book6/171** (`price="y"`, 60 Shards) — "choose the blessing you want … [one
-  of charisma, combat, magic, sanctity, scouting, thievery]" currently grants
-  *all six* blessings for 60 Shards.
-- **book5/152** (`price="curse1"`) — "for each curse you want lifted, pay …"
-  currently lifts *every* listed curse from one payment (and `price="curse2"`).
+`renderOptionalPay` applied **every** `[flag="k"]` node on a single payment and
+then permanently memoised `'pay@'+path`, so a "choose one" menu granted the whole
+list and a repeatable bonus was capped at one purchase per visit. Both are fixed
+by gating on the engine's existing flag cycle (a `price=` pay sets flag `k`;
+applying a `flag=k` reward clears it — engine.js:404/405/532/533) and splitting
+the reward shapes (`web/js/render.js`):
 
-The Java engine renders each linked reward as its own enabled action that the
-player activates individually once the flag is set (`LoseNode`/`TickNode` flag
-listeners), consuming the flag as it fires. Port that: after a `price=` payment
-sets flag `k`, reveal the `[flag="k"]` rewards as click-to-apply options (or a
-chooser) rather than auto-applying the lot; a single-reward flag (book2/202
-storm) still auto-applies as today. Add tests (§171 grants exactly one chosen
-blessing for 60; §152 lifts exactly one curse per payment).
+- **"Choose one"** — a `price="k"` cost with **two or more** linked *effect*
+  rewards (`tick`/`lose`/`gain`). `isChooseOne(k)` routes the cost to
+  `renderChooseOnePay` (paying only *arms* the choice — deducts the cost, sets
+  flag `k`, no auto-reward) and each reward node to `renderChoosableReward` (an
+  inline pick button, live only while armed; clicking applies **just that one**,
+  which clears the flag). So one payment grants exactly one, and the cost
+  re-enables for another round. A blessing already held, or a curse/disease/poison
+  "lift" for an affliction you don't have, is disabled so a payment is never
+  wasted. Fixes **book6/171** (`price="y"`, 60 Shards → one of six blessings),
+  **book5/152** (`price="curse1"` 200 Shards *or* a +1 item → lift one of seven
+  curses, repeatable), and **book6/690** (35/20 Shards → one of four blessings —
+  was silently granting all four). Barter awards (`<item>`/`<weapon>` `flag=…`,
+  book4/634) are excluded from choose-one so their existing handling is untouched.
+- **Repeatable counter** — a single `<tick name="X" count|amount=…>` reward
+  (`isCounterReward`) is the "add one per payment" idiom, so `renderOptionalPay`
+  no longer memoises it: pay again to add again. Fixes **book4/93** crew bribe,
+  **book6/117**, and **book6/731**'s `price="y"` donation bonus. (Relies on task
+  52's `removeCodeword` clearing the counter value, so re-entering the section
+  resets the bonus to 0.)
+- **Everything else unchanged** — a single non-counter reward stays a one-shot
+  purchase (permanent memo), preserving town-house buys, faith renunciations, and
+  the single-blessing "only one at a time" gate (book2/202 storm, book3/390).
+  Roll-gated payments (`isRollGate`) still route to `renderRollPayment` (tasks
+  30/51), untouched.
 
-**Scope grown (2026-07-07, moved LOW → MEDIUM):** also port the *repeatable*
-cycle. In JaFL, activating a `[flag="k"]` reward consumes the flag, which
-**re-enables** the price node, so pay→collect can loop — the books are explicit:
-"for **every** 50 Shards you cross off … you can add one" (book4/93 crew bribe),
-and the book6/117 / book6/731 donation bonuses ("for **each additional** 100
-Shards"). The current `renderOptionalPay` memoises `'pay@'+path` and permanently
-disables the cost after one click (render.js:645–672), capping these at one
-purchase per visit. Depends on task 52 (`removeCodeword` must also clear the
-counter value or the bonus persists across visits). Add: §4.93 two payments →
-bonus 2, third visit starts at 0.
+Verified: 21 new headless assertions (§171 pays 60 → picks are dead until paid,
+then grants exactly one blessing for no extra Shards; §152 arms on 200, only a
+held curse is pickable, lifts exactly one and repeats for the second, a curse you
+lack stays disabled; §690 one payment → one blessing; §4.93 two payments → bonus
+2 and re-entry resets to 0) + full render-every-section scan (4369).
+`RESULT ALL PASS pass=461 fail=0`.
 
 ---
 

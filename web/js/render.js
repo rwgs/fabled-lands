@@ -132,7 +132,7 @@ export class Story {
     // Dead-end fallback: a fully-resolved section offering no way forward is a
     // narrative death (the original game exposed an "Extra Choice: Death" for this).
     // Controls inside an untaken (grayed) branch don't count — they're disabled.
-    const controls = Array.from(flow.querySelectorAll('.goto, .choice, .btn-roll, .btn-secondary, .btn-mini, .fight, .group-action, .pay-action'))
+    const controls = Array.from(flow.querySelectorAll('.goto, .choice, .btn-roll, .btn-secondary, .btn-mini, .fight, .group-action, .pay-action, .reward-pick'))
       .filter((c) => !c.closest('.cond-inactive'));
     if (!controls.length && !this.state.isDead()) {
       const end = document.createElement('button');
@@ -488,7 +488,12 @@ export class Story {
       // it applies as a normal effect (it only renders once its outcome shows). Only
       // a *non*-roll dependent reward is deferred to the linked cost click below.
       if (!this.isRollGate(flag)) {
-        if (!hidden) { // dependent reward: show its words; effect applies with the linked cost
+        // A "choose one" reward (two or more effect rewards share this cost key):
+        // render it as a pick button, enabled only once the cost is paid, so a
+        // single payment grants exactly the ONE the player clicks — not the whole
+        // menu (book6/171 blessings, book5/152 curses, book6/690 blessings). (task 43)
+        if (this.isChooseOne(flag)) return this.renderChoosableReward(container, node, path, flag);
+        if (!hidden) { // single dependent reward: show its words; effect applies with the linked cost
           const span = document.createElement('span');
           span.className = 'fx';
           this.appendChildren(span, node, path);
@@ -658,10 +663,18 @@ export class Story {
   }
 
   // Optional purchase via the price/flag idiom. The cost node becomes a click-to-apply
-  // button; clicking applies it plus every linked reward (flag == this price key), once.
+  // button; clicking applies it plus its linked reward(s) (flag == this price key).
+  //  - Two-or-more effect rewards → a "choose one" purchase: the cost only *arms* the
+  //    choice, and the reward pick buttons grant exactly one (renderChooseOnePay). (task 43)
+  //  - A single counter reward (<tick name= count|amount=>) is repeatable: pay again
+  //    to add again, so it is never permanently memoised (book4/93, book6/117/731). (task 43)
+  //  - Otherwise a one-shot purchase: apply once and lock the button for this visit.
   renderOptionalPay(container, node, path, key) {
+    if (this.isChooseOne(key)) return this.renderChooseOnePay(container, node, path, key);
+    const rewards = this.linkedRewards(key);
+    const repeatable = rewards.some((r) => this.isCounterReward(r));
     const memo = 'pay@' + path;
-    const done = this.ctx.applied.has(memo);
+    const done = !repeatable && this.ctx.applied.has(memo);
     const cost = node.getAttribute('shards') ? resolveValue(this.state, node.getAttribute('shards')) : 0;
     const label = document.createElement('span');
     this.appendChildren(label, node, path);
@@ -679,13 +692,127 @@ export class Story {
     } else {
       btn.addEventListener('click', () => {
         applyEffect(node, this.state, {});
-        this.sectionEl.querySelectorAll(`[flag="${key}"]`).forEach((r) => applyEffect(r, this.state, {}));
-        this.ctx.applied.add(memo);
+        rewards.forEach((r) => applyEffect(r, this.state, {}));
+        if (!repeatable) this.ctx.applied.add(memo);
         this.rerender();
       });
     }
     container.appendChild(btn);
     return btn;
+  }
+
+  // The reward nodes linked to a price/flag key: [flag="key"] elements in the
+  // section (the cost carries price="key" instead). Empty/roll-gate keys → none.
+  linkedRewards(key) {
+    if (!this.sectionEl || key == null || key === '') return [];
+    return Array.from(this.sectionEl.querySelectorAll(`[flag="${key}"]`));
+  }
+
+  // A repeatable "add one per payment" reward: a counter tick (<tick name="X"
+  // count|amount=…>). The book idiom "for every 50 Shards you can add one" bumps a
+  // named bonus counter, so paying again should add again (book4/93, book6/117/731).
+  isCounterReward(node) {
+    return node.tagName.toLowerCase() === 'tick'
+      && !!node.getAttribute('name')
+      && (node.getAttribute('count') != null || node.getAttribute('amount') != null);
+  }
+
+  // A "choose one" purchase: a price="key" cost with two or more linked *effect*
+  // rewards (tick/lose/gain), so one payment must grant only the picked one — never
+  // the whole list (book6/171, book5/152, book6/690). Barter awards (<item>/<weapon>
+  // flag=…, e.g. book4/634) are deliberately excluded so their handling is untouched.
+  isChooseOne(key) {
+    const rewards = this.linkedRewards(key);
+    if (rewards.length < 2) return false;
+    return rewards.every((n) => ['lose', 'tick', 'gain'].includes(n.tagName.toLowerCase()));
+  }
+
+  // The "choose one" cost button: paying only *arms* the choice (deducts the cost
+  // and sets flag key) — the linked reward pick buttons then grant a single reward
+  // and consume the flag, which re-enables this cost for another round. Gated purely
+  // on the flag (no permanent memo), so the pay→pick cycle repeats. (task 43)
+  renderChooseOnePay(container, node, path, key) {
+    const armed = this.state.getFlag(key);
+    const shards = node.getAttribute('shards');
+    const item = node.getAttribute('item');
+    const cost = shards != null ? resolveValue(this.state, shards) : 0;
+    const label = document.createElement('span');
+    this.appendChildren(label, node, path);
+    const text = label.textContent.trim()
+      || (cost ? `Pay ${cost} Shards`
+        : (item && item !== '?' && item !== '*' ? `Hand over the ${titleCase(item)}` : 'Pay'));
+
+    const btn = document.createElement('button');
+    btn.className = 'btn-mini pay-action' + (armed ? ' done' : '');
+    btn.textContent = (armed ? '☑ ' : '') + text;
+    if (armed) {
+      btn.disabled = true; btn.title = 'Paid — now choose your reward.';
+    } else if (shards != null && this.state.data.shards < cost) {
+      btn.disabled = true; btn.title = 'Not enough Shards';
+    } else if (item != null && !this.state.hasItemMatch(item, node.getAttribute('tags'))) {
+      btn.disabled = true; btn.title = 'You have nothing to give.';
+    } else {
+      btn.addEventListener('click', () => {
+        applyEffect(node, this.state, {}); // deduct the cost + set flag key (arms the choice)
+        this.rerender();
+      });
+    }
+    container.appendChild(btn);
+    return btn;
+  }
+
+  // One option of a "choose one" purchase: an inline pick button, live only while the
+  // linked cost is armed (flag set). Clicking applies just this reward — which clears
+  // the flag (consumes the payment) — so exactly one is granted per payment, and the
+  // cost re-enables for another round. Blessings already held / afflictions not held
+  // are disabled so a payment is never wasted on a no-op. (task 43)
+  renderChoosableReward(container, node, path, key) {
+    const armed = this.state.getFlag(key);
+    const btn = document.createElement('button');
+    btn.className = 'btn-mini reward-pick';
+    btn.textContent = this.rewardLabel(node);
+    const held = this.rewardWasteReason(node);
+    if (!armed) {
+      btn.disabled = true; btn.title = 'Pay first to choose this.';
+    } else if (held) {
+      btn.disabled = true; btn.title = held;
+    } else {
+      btn.addEventListener('click', () => {
+        const note = applyEffect(node, this.state, {}); // grant reward + clear flag key
+        if (note) this.notify(note);
+        this.rerender();
+      });
+    }
+    container.appendChild(btn);
+    return btn;
+  }
+
+  // A short label for a "choose one" reward button: its own words, else the
+  // blessing/curse/disease/poison it grants or lifts.
+  rewardLabel(node) {
+    const txt = (node.textContent || '').trim();
+    if (txt) return txt;
+    const bl = node.getAttribute('blessing');
+    if (bl) return titleCase(bl);
+    const af = node.getAttribute('curse') || node.getAttribute('disease') || node.getAttribute('poison');
+    if (af) return af;
+    return 'Choose';
+  }
+
+  // Why picking this reward would waste the payment (so the option is disabled): a
+  // blessing you already hold, or a curse/disease/poison "lift" you aren't suffering.
+  rewardWasteReason(node) {
+    const bl = node.getAttribute('blessing');
+    if (bl && this.state.hasBlessing(bl)) return 'You already have this blessing.';
+    if (node.tagName.toLowerCase() === 'lose') {
+      const c = node.getAttribute('curse');
+      if (c != null && !this.state.hasCurse(c)) return "You don't have that curse.";
+      const d = node.getAttribute('disease');
+      if (d != null && !this.state.hasDisease(d)) return "You don't have that affliction.";
+      const p = node.getAttribute('poison');
+      if (p != null && !this.state.hasPoison(p)) return "You don't have that affliction.";
+    }
+    return null;
   }
 
   // True when a die roll in this section is gated behind the payment keyed `k`:

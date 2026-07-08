@@ -615,6 +615,73 @@ async function run() {
     const pay690 = cm.querySelector('.pay-action');
     ok('§690 multi-blessing buy stays enabled', !!pay690 && pay690.disabled === false, pay690 ? `disabled=${pay690.disabled}` : 'no button');
 
+    // --- task 43: price/flag "choose one" grants only the picked reward ----------
+    // §6.171: 60 Shards buys ONE of six blessings (not all six). Paying only arms the
+    // choice; clicking a blessing pick grants exactly that one and consumes the pay.
+    const g171 = GameState.create({ name:'P171', gender:'m', profession:'Warrior', book:6, adv });
+    g171.data.shards = 300;
+    const c171 = document.createElement('div');
+    const story171 = new Story(c171, g171, { navigate(){}, onDeath(){}, notify(){} });
+    const s171 = await data.getSection(6,'171'); story171.begin(s171,6,'171');
+    ok('§171 nothing granted on entry', g171.data.blessings.length === 0 && g171.data.shards === 300);
+    const pay171 = Array.from(c171.querySelectorAll('.pay-action')).find((b) => /60/.test(b.textContent));
+    ok('§171 shows the 60-Shard choose-one pay', !!pay171 && pay171.disabled === false);
+    ok('§171 picks are disabled before paying', Array.from(c171.querySelectorAll('.reward-pick')).length === 6 && Array.from(c171.querySelectorAll('.reward-pick')).every((b) => b.disabled));
+    pay171.click();
+    ok('§171 paying 60 arms but grants nothing yet', g171.data.shards === 240 && g171.data.blessings.length === 0, `sh=${g171.data.shards} bl=${g171.data.blessings.length}`);
+    const pick171 = Array.from(c171.querySelectorAll('.reward-pick')).find((b) => /combat/i.test(b.textContent) && !b.disabled);
+    ok('§171 picks go live once paid', !!pick171);
+    pick171.click();
+    ok('§171 grants exactly the one chosen blessing', g171.data.blessings.length === 1 && g171.hasBlessing('combat'), JSON.stringify(g171.data.blessings));
+    ok('§171 the pick costs no extra Shards', g171.data.shards === 240, String(g171.data.shards));
+
+    // §5.152: each 200-Shard payment lifts exactly ONE curse (was lifting all seven);
+    // curses you aren't suffering are disabled, and the pay repeats for the next.
+    const g152 = GameState.create({ name:'P152', gender:'m', profession:'Warrior', book:5, adv });
+    g152.data.shards = 500; g152.addCurse('Curse of Ugliness'); g152.addCurse('Curse of Ebron');
+    const c152 = document.createElement('div');
+    const story152 = new Story(c152, g152, { navigate(){}, onDeath(){}, notify(){} });
+    const s152 = await data.getSection(5,'152'); story152.begin(s152,5,'152');
+    const pay152 = () => Array.from(c152.querySelectorAll('.pay-action')).find((b) => /200/.test(b.textContent));
+    const pickCurse = (re) => Array.from(c152.querySelectorAll('.reward-pick')).find((b) => re.test(b.textContent));
+    ok('§152 shows the 200-Shard pay', !!pay152() && pay152().disabled === false);
+    ok('§152 curse picks disabled before paying', pickCurse(/ugliness/i).disabled === true);
+    pay152().click();
+    ok('§152 paying 200 arms the choice', g152.data.shards === 300, String(g152.data.shards));
+    ok('§152 a held curse is now pickable', pickCurse(/ugliness/i).disabled === false);
+    ok('§152 a curse you lack stays disabled', pickCurse(/vulnerability/i).disabled === true);
+    pickCurse(/ugliness/i).click();
+    ok('§152 lifts exactly one curse for 200', g152.data.curses.length === 1 && !g152.hasCurse('Curse of Ugliness') && g152.hasCurse('Curse of Ebron'), JSON.stringify(g152.data.curses.map((c)=>c.name)));
+    ok('§152 pay re-enabled after collecting', !!pay152() && pay152().disabled === false);
+    pay152().click(); pickCurse(/ebron/i).click();
+    ok('§152 a second payment lifts the second curse', g152.data.curses.length === 0 && g152.data.shards === 100, `curses=${g152.data.curses.length} sh=${g152.data.shards}`);
+
+    // §6.690: four blessings on one flag — one payment grants only one.
+    const g690 = GameState.create({ name:'P690', gender:'m', profession:'Warrior', book:6, adv });
+    g690.data.shards = 100;
+    const c690 = document.createElement('div');
+    const story690b = new Story(c690, g690, { navigate(){}, onDeath(){}, notify(){} });
+    const s690b = await data.getSection(6,'690'); story690b.begin(s690b,6,'690');
+    c690.querySelector('.pay-action').click();
+    ok('§690 paying grants nothing until a pick', g690.data.blessings.length === 0);
+    Array.from(c690.querySelectorAll('.reward-pick')).find((b) => /scouting/i.test(b.textContent) && !b.disabled).click();
+    ok('§690 one payment grants exactly one blessing', g690.data.blessings.length === 1 && g690.hasBlessing('scouting'), JSON.stringify(g690.data.blessings));
+
+    // §4.93: the "add 1 per 50 Shards" bribe is repeatable — two payments give a
+    // bonus of 2 (not capped at one), and re-entering the section resets it to 0.
+    const g93 = GameState.create({ name:'P93', gender:'m', profession:'Warrior', book:4, adv });
+    g93.data.shards = 200;
+    const c93 = document.createElement('div');
+    const story93 = new Story(c93, g93, { navigate(){}, onDeath(){}, notify(){} });
+    const s93 = await data.getSection(4,'93'); story93.begin(s93,4,'93');
+    ok('§93 bonus starts at 0', g93.codewordValue('CharismaBonus') === 0);
+    const pay93 = () => Array.from(c93.querySelectorAll('.pay-action')).find((b) => /50/.test(b.textContent) && !b.disabled);
+    pay93().click(); pay93().click();
+    ok('§93 two payments → bonus 2', g93.codewordValue('CharismaBonus') === 2, String(g93.codewordValue('CharismaBonus')));
+    ok('§93 two payments cost 100 Shards', g93.data.shards === 100, String(g93.data.shards));
+    const s93b = await data.getSection(4,'93'); story93.begin(s93b,4,'93');
+    ok('§93 re-entry resets the bonus to 0', g93.codewordValue('CharismaBonus') === 0, String(g93.codewordValue('CharismaBonus')));
+
     // --- §521: possession theft — item="?" wildcard + defer until the die rolls --
     // The thief steals 1-6 possessions; the count comes from a <random var="x"> that
     // must be rolled first. Before the fix, item="?" matched nothing AND the loss
