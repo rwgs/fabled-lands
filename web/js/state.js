@@ -81,6 +81,11 @@ export class GameState {
     this.lastSaveError = null;
     this._listeners = new Set();
     this._undo = []; // in-memory stack of pre-section-effects state snapshots
+    // A <tick special="attack|defence" bonus="N"> grants a per-fight modifier to
+    // the player's attack rolls (COMBAT) or Defence, lasting only the current
+    // fight (JaFL FightNode.attackBonus / a Defence blessing). Kept OFF data so it
+    // never survives a save; cleared on entering a section (Story.begin). (task 49)
+    this._fightBonus = { attack: 0, defence: 0 };
   }
 
   // ---- undo (session-only) --------------------------------------------
@@ -192,6 +197,25 @@ export class GameState {
   }
   clearPotionBonuses() {
     if (this.data.potionBonus && Object.keys(this.data.potionBonus).length) { this.data.potionBonus = {}; this.changed(); }
+  }
+
+  /** Per-fight attack (COMBAT) / Defence modifier from <tick special="attack|defence">.
+   *  Transient (never saved) and section-scoped, so it applies to the current
+   *  fight only and never leaks between attack and Defence or across a save. (task 49) */
+  fightAttackBonus() { return (this._fightBonus && this._fightBonus.attack) || 0; }
+  fightDefenceBonus() { return (this._fightBonus && this._fightBonus.defence) || 0; }
+  addFightBonus(kind, n = 0) {
+    if (!this._fightBonus) this._fightBonus = { attack: 0, defence: 0 };
+    if (kind === 'attack') this._fightBonus.attack += n;
+    else if (kind === 'defence') this._fightBonus.defence += n;
+    else return;
+    this.changed();
+  }
+  clearFightBonuses() {
+    if (this._fightBonus && (this._fightBonus.attack || this._fightBonus.defence)) {
+      this._fightBonus = { attack: 0, defence: 0 };
+      this.changed();
+    }
   }
 
   /** Affected ability score, including item/effect/affliction bonuses, clamped
@@ -428,7 +452,12 @@ export class GameState {
   // ---- codewords -------------------------------------------------------
   hasCodeword(cw) { return !!this.data.codewords[cw]; }
   addCodeword(cw) { this.data.codewords[cw] = true; this.changed(); }
-  removeCodeword(cw) { delete this.data.codewords[cw]; this.changed(); }
+  // A codeword and its counter value are one entry in JaFL, so <lose codeword="X">
+  // zeroes the counter too — the books use this as a counter-reset idiom (book6/117,
+  // book6/731 donation bonuses; book4/93 crew bribe; book6/47 SpiderDamage). Leaving
+  // the value behind made every bonus ever bought a permanent, save-persisted roll
+  // modifier (and CharismaBonus even leaked between books 4 and 6). (task 52)
+  removeCodeword(cw) { delete this.data.codewords[cw]; delete this.data.codewordValues[cw]; this.changed(); }
   codewordValue(name) { return this.data.codewordValues[name] || 0; }
   adjustCodewordValue(name, delta) {
     this.data.codewordValues[name] = (this.data.codewordValues[name] || 0) + delta;

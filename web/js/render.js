@@ -47,7 +47,10 @@ export class Story {
     // A drunk-potion boost lasts only for the section it was used in (task 41):
     // clear it on entering a new section so it can't be carried forward.
     this.state.clearPotionBonuses();
-    this.ctx = { applied: new Set(), rolls: new Map(), fights: new Map(), buys: new Map(), groupLimits: new Map(), groupPicks: new Map() };
+    // Likewise a per-fight attack/Defence bonus from <tick special="attack|defence">
+    // (task 49) applies only to the current section's fight — clear it on entry.
+    this.state.clearFightBonuses();
+    this.ctx = { applied: new Set(), rolls: new Map(), fights: new Map(), buys: new Map(), groupLimits: new Map(), groupPicks: new Map(), wroteVars: new Set() };
     // Pre-scan grouped-award controllers (<items group="X" limit="N"/>) so the
     // individual award rows know their "choose up to N" cap no matter whether the
     // controller sits before or after them in the section (both orders occur).
@@ -205,8 +208,15 @@ export class Story {
         return;
       }
       this.renderElement(container, node, path);
-      // An inactive branch's roll must not become the section's active roll.
-      if (ROLL_TAGS.has(tag) && !this.inactive) this.activeRoll = { node, path };
+      // Track the roll a shared <success>/<failure> binds to. An inactive branch's
+      // roll never counts. When two rolls feed ONE shared branch ("make a MAGIC roll
+      // …or a SCOUTING roll", book2/122/book6/630), bind to whichever ACTUALLY
+      // resolved — only fall back to the last-listed roll when none has resolved
+      // yet — so a successful first-listed roll isn't ignored (task 51).
+      if (ROLL_TAGS.has(tag) && !this.inactive) {
+        const curResolved = this.activeRoll && this.ctx.rolls.has('roll@' + this.activeRoll.path);
+        if (this.ctx.rolls.has('roll@' + path) || !curResolved) this.activeRoll = { node, path };
+      }
     });
   }
 
@@ -512,6 +522,11 @@ export class Story {
     if (rerunnable || !this.ctx.applied.has(key)) {
       if (!rerunnable) this.ctx.applied.add(key);
       const note = applyEffect(node, this.state, { chooser: null });
+      // Record a <set var>'s write so a var-keyed <success>/<failure>/<outcome>
+      // knows the var holds a real value this visit — the set-sentinel idiom
+      // (book2/138 key holder, book3/43 Chill) resolves the branch with no roll,
+      // while an unwritten/stale var keeps the branch pending (task 50).
+      if (tag === 'set' && node.getAttribute('var')) this.ctx.wroteVars.add(node.getAttribute('var'));
       if (note && !hidden) this.notify(note);
     }
     // Render its descriptive text (the words the author wrote around the effect).
@@ -585,8 +600,9 @@ export class Story {
       if (v == null) continue;
       const s = String(v).trim();
       if (/^-?\d/.test(s) || isDiceExpr(s)) continue; // numeric literal or dice expr
-      if (this.state.hasVar(s)) continue;             // already set (e.g. by an earlier <set>)
-      if (this.sectionEl && this.sectionEl.querySelector(`random[var="${s}"], rankcheck[var="${s}"], difficulty[var="${s}"]`)) return s;
+      const bare = s.replace(/^[+-]/, '');            // a signed var ref ("-hang") → "hang" (task 50)
+      if (this.state.hasVar(bare)) continue;          // already set (e.g. by an earlier <set>/roll)
+      if (this.sectionEl && this.sectionEl.querySelector(`random[var="${bare}"], rankcheck[var="${bare}"], difficulty[var="${bare}"]`)) return bare;
     }
     return null;
   }
@@ -1024,10 +1040,22 @@ export class Story {
     widget.className = 'roll';
     container.appendChild(widget);
 
-    const stored = this.ctx.rolls.get(key);
+    // Pay-to-roll gate (task 51): a flag= roll paired with a [price=] cost is
+    // disabled until the payment sets the flag; rolling consumes it, and a fresh
+    // payment re-arms (dropping any stale result). Extends task 30's <random> gate
+    // to <difficulty> — book6/731 CHARISMA boon, book2/122/book6/630 "MAGIC or …".
+    const { flag, gated, armed } = this.rollGateState(node, key);
+    let stored = this.ctx.rolls.get(key);
+    if (gated && armed && stored) { this.ctx.rolls.delete(key); stored = null; }
     if (stored) {
       const abLabel = (stored.ability || spec.split('|')[0] || '').toUpperCase();
       this.showDiceResult(widget, stored.dice, `${abLabel} ${stored.abilityScore >= 0 ? '+' : ''}${stored.abilityScore} = ${stored.total} vs ${level}`, stored.success ? 'Success' : 'Failure', stored.success);
+      return widget;
+    }
+    if (gated && !armed) {
+      const btn = this.rollButton(`Roll 2 dice + ${spec.split('|')[0].toUpperCase()}`, widget, () => {});
+      btn.disabled = true; btn.title = 'Pay first to make this roll.';
+      widget.appendChild(btn);
       return widget;
     }
     // "combat|magic": let the player pick which ability to roll before rolling.
@@ -1039,13 +1067,24 @@ export class Story {
     }
     const abLabel = (ability || '').split('|')[0].toUpperCase();
     const btn = this.rollButton(`Roll 2 dice + ${abLabel}`, widget, () => {
+      if (gated) this.state.setFlag(flag, false); // consume the payment — re-pay to re-attempt
       const res = rollDifficulty(this.state, ability, level, modifier + childAdjustment(node, this.state));
-      if (node.getAttribute('var')) this.state.setVar(node.getAttribute('var'), res.margin);
+      if (node.getAttribute('var')) { this.state.setVar(node.getAttribute('var'), res.margin); this.ctx.wroteVars.add(node.getAttribute('var')); }
       this.ctx.rolls.set(key, res);
       this.rerender();
     });
     widget.appendChild(btn);
     return widget;
+  }
+
+  // Pay-to-roll gate state shared by the roll renderers (tasks 30, 51): a flag= roll
+  // paired with a [price="k"] cost is armed only while flag k is set. Returns the
+  // flag name and whether the roll is gated / currently armed.
+  rollGateState(node, key) {
+    const flag = node.getAttribute('flag');
+    const gated = flag != null && this.isRollGate(flag);
+    const armed = gated ? this.state.getFlag(flag) : true;
+    return { flag, gated, armed };
   }
 
   // Infer die count from the outcome table this random feeds: if every range
@@ -1100,7 +1139,7 @@ export class Story {
         const r = rollDice(dice);
         const total = r.total + childAdjustment(node, this.state);
         const res = { kind: 'random', dice: r.dice, total };
-        if (varName) this.state.setVar(varName, total);
+        if (varName) { this.state.setVar(varName, total); this.ctx.wroteVars.add(varName); }
         this.ctx.rolls.set(key, res);
         this.rerender();
       }));
@@ -1115,13 +1154,21 @@ export class Story {
     const widget = document.createElement('div');
     widget.className = 'roll';
     container.appendChild(widget);
-    const stored = this.ctx.rolls.get(key);
+    // Pay-to-roll gate (task 51), as for <difficulty>/<random>.
+    const { flag, gated, armed } = this.rollGateState(node, key);
+    let stored = this.ctx.rolls.get(key);
+    if (gated && armed && stored) { this.ctx.rolls.delete(key); stored = null; }
     if (stored) {
       this.showDiceResult(widget, stored.dice, `Rolled ${stored.total} vs Rank ${this.state.data.rank}`, stored.success ? 'Success' : 'Failure', stored.success);
+    } else if (gated && !armed) {
+      const btn = this.rollButton(`Rank check (roll ${diceWord(dice)})`, widget, () => {});
+      btn.disabled = true; btn.title = 'Pay first to make this roll.';
+      widget.appendChild(btn);
     } else {
       widget.appendChild(this.rollButton(`Rank check (roll ${diceWord(dice)})`, widget, () => {
+        if (gated) this.state.setFlag(flag, false); // consume the payment
         const res = rollRankCheck(this.state, dice, add, childAdjustment(node, this.state));
-        if (node.getAttribute('var')) this.state.setVar(node.getAttribute('var'), res.margin);
+        if (node.getAttribute('var')) { this.state.setVar(node.getAttribute('var'), res.margin); this.ctx.wroteVars.add(node.getAttribute('var')); }
         this.ctx.rolls.set(key, res);
         this.rerender();
       }));
@@ -1203,12 +1250,21 @@ export class Story {
     return roll ? !!roll.success : false;
   }
 
+  // Is a branch ready to activate? A var-keyed branch waits until that var has been
+  // WRITTEN this visit — by a roll or an active <set> (ctx.wroteVars) — never on a
+  // stale/unset global (task 50). A plain (roll-fed) branch waits for its roll. This
+  // stops a `<failure var="s">` firing on entry with s=0 (or a leftover s>0).
+  branchResolved(node, roll) {
+    if (node.hasAttribute('var')) return this.ctx.wroteVars.has(node.getAttribute('var'));
+    return !!roll;
+  }
+
   renderBranch(container, node, path, activeRoll) {
     const tag = node.tagName.toLowerCase();
     const roll = activeRoll ? this.ctx.rolls.get('roll@' + activeRoll.path) : null;
 
     if (tag === 'success' || tag === 'failure') {
-      if (!roll && !node.hasAttribute('var')) return; // wait until the roll is made
+      if (!this.branchResolved(node, roll)) return; // wait until the feeding roll / var write
       const want = tag === 'success';
       if (this.branchSuccess(node, roll) === want) this.revealBranch(container, node, path);
       return;
@@ -1216,12 +1272,12 @@ export class Story {
 
     // A lone <outcome> (e.g. inside a <choices> table): reveal it when its
     // flag/range/var/codeword condition matches. flag= needs no roll (it's set by
-    // a paid offering — book4/456); range/var need the roll to have resolved.
+    // a paid offering — book4/456); range/var need the roll (or var write) first.
     if (tag === 'outcome') {
       const flag = node.getAttribute('flag');
       let match;
       if (flag != null) match = this.state.getFlag(flag);
-      else if (!roll && !node.hasAttribute('var')) return; // wait for the roll
+      else if (!this.branchResolved(node, roll)) return; // wait for the roll / var write
       else if (node.getAttribute('range') != null) match = matchRange(node.getAttribute('range'), node.getAttribute('var') ? this.state.getVar(node.getAttribute('var')) : roll.total);
       else if (node.getAttribute('codeword')) match = node.getAttribute('codeword').split(/[|,]/).some((w) => this.state.hasCodeword(w.trim()));
       else if (node.hasAttribute('var')) match = this.branchSuccess(node, roll);
@@ -1235,24 +1291,26 @@ export class Story {
       const branches = kids.filter((c) => /^(outcome|success|failure)$/.test(c.tagName.toLowerCase()));
       const choiceKids = kids.filter((c) => c.tagName.toLowerCase() === 'choice');
 
-      // Reveal the single matching outcome once the roll is resolved.
-      if (roll) {
-        for (let i = 0; i < branches.length; i++) {
-          const c = branches[i];
-          const ctag = c.tagName.toLowerCase();
-          let match = false;
-          if (ctag === 'success') match = this.branchSuccess(c, roll) === true;
-          else if (ctag === 'failure') match = this.branchSuccess(c, roll) === false;
-          else {
-            const range = c.getAttribute('range');
-            const cw = c.getAttribute('codeword');
-            const val = c.getAttribute('var') ? this.state.getVar(c.getAttribute('var')) : roll.total;
-            if (range != null) match = matchRange(range, val);
-            else if (cw) match = cw.split(/[|,]/).some((w) => this.state.hasCodeword(w.trim()));
-            else match = true; // default
-          }
-          if (match) { this.revealBranch(container, c, path + '.o' + i); break; }
+      // Reveal the single matching branch once it is resolved — a roll for plain/
+      // range branches, or a written var (roll OR active <set>) for var-keyed ones,
+      // so a set-sentinel outcome (book3/43 Chill → success) resolves with no roll
+      // while an unwritten var stays pending (task 50).
+      for (let i = 0; i < branches.length; i++) {
+        const c = branches[i];
+        if (!this.branchResolved(c, roll)) continue;
+        const ctag = c.tagName.toLowerCase();
+        let match = false;
+        if (ctag === 'success') match = this.branchSuccess(c, roll) === true;
+        else if (ctag === 'failure') match = this.branchSuccess(c, roll) === false;
+        else {
+          const range = c.getAttribute('range');
+          const cw = c.getAttribute('codeword');
+          const val = c.getAttribute('var') ? this.state.getVar(c.getAttribute('var')) : (roll ? roll.total : 0);
+          if (range != null) match = matchRange(range, val);
+          else if (cw) match = cw.split(/[|,]/).some((w) => this.state.hasCodeword(w.trim()));
+          else match = true; // default
         }
+        if (match) { this.revealBranch(container, c, path + '.o' + i); break; }
       }
       // Always-available alternatives inside the table (e.g. "or don't try").
       if (choiceKids.length) this.renderChoices(container, node, path, null, choiceKids);

@@ -79,10 +79,14 @@ function startFight(fight, node, state) {
  *  value/variable — §Chimerical Beast "s", §Talanexor "d") wins; otherwise the
  *  sheet Defence, minus the armour bonus when modifiers="noarmour" (Water Drake). */
 function playerDefenceFor(state, fight) {
-  if (fight.playerDefence != null && fight.playerDefence !== '') return resolveValue(state, fight.playerDefence);
+  // A <tick special="defence"> blessing raises Defence for this fight only (§4.434
+  // ring of defence, §6.183 Thunder Beast). It applies even over a playerDefence=
+  // override so a granted Defence boon isn't lost to a fixed-Defence fight.
+  const defBonus = state.fightDefenceBonus ? state.fightDefenceBonus() : 0;
+  if (fight.playerDefence != null && fight.playerDefence !== '') return resolveValue(state, fight.playerDefence) + defBonus;
   let def = state.defence();
   if (fight.noArmour) def = Math.max(0, def - state.armourBonus());
-  return def;
+  return def + defBonus;
 }
 
 /** Route an enemy hit to the player: normally lost Stamina, but abilityDamaged=
@@ -99,7 +103,10 @@ function applyEnemyDamage(state, fight, dmg) {
  *  accumulating damage into staminaLost and flagging a win at the threshold. */
 function playerStrike(state, fight) {
   const r = rollDice(fight.attackDice || 2); // default 2 dice (also guards a bare fight literal)
-  const combat = state.ability('combat');
+  // A <tick special="attack"> bonus/penalty modifies the player's attack rolls
+  // for this fight only (§1.42 rat poison +3, §6.624 dark −2). It hits COMBAT here,
+  // NOT via state.ability('combat') — so it never leaks into the player's Defence.
+  const combat = state.ability('combat') + (state.fightAttackBonus ? state.fightAttackBonus() : 0);
   const total = r.total + combat;
   let dmg = Math.max(0, total - fight.defence);
   if (dmg > 0) {

@@ -23,15 +23,30 @@ newer fields (currencies, item effects, abilityFlags, cache locks, afflictions);
 currency wallet routing; ship canonicalisation; tick caps; the roll-payment
 arm/consume/re-arm cycle.
 
+Worked 2026-07-08: all eight HIGH items (45–52) implemented, each with focused
+headless tests and the full render-every-section scan green after every step
+(suite grew 381 → 440 assertions, `RESULT ALL PASS fail=0`). Notable shared
+plumbing added this pass: an aggregate multi-fight proxy + sequential locking
+(45); an ability/stamina resolution mode threaded through `evalExpression` (46,
+reused by the coming task 53); a shared `matchItemQuery`/`hasItemMatch` item
+matcher (47); a settable group-fight proxy + per-foe targeting (48); a transient
+per-fight attack/Defence bonus store (49); `ctx.wroteVars` roll/`<set>` write
+tracking that gates var-keyed branches (50, also needed by tasks 61/43); a shared
+`rollGateState` pay-to-roll gate on `<difficulty>`/`<rankcheck>` + resolved-roll
+branch binding (51); and `removeCodeword` clearing the counter value (52, feeds
+task 43). Left for their own tasks: `<fightround>` per-round rolls (32), the
+hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
+"choose one" cycle (43).
+
 **HIGH**
 - [x] 45. Multi-fight sections: the fight gate & death-deferral track only the *last* `<fight>`
 - [x] 46. `<set var … modifier="natural">` discards the value — book-2 rank ceremonies auto-succeed
 - [x] 47. `<choice item="?" tags=…>` is never enabled — light-gated passages hard-locked
 - [x] 48. Group fights: Surrender/flee throws a TypeError; no Flee button; no target choice
-- [ ] 49. `special="attack|defence"` grant permanent, save-persisted bonuses
-- [ ] 50. Var-keyed `<success>/<failure>` branches fire on entry (unset/stale vars)
-- [ ] 51. `<difficulty|rankcheck flag=…>` roll gates unimplemented; shared `<success>` binds only the last roll
-- [ ] 52. `removeCodeword` leaves the codeword's *value* behind — bonus counters never reset
+- [x] 49. `special="attack|defence"` grant permanent, save-persisted bonuses
+- [x] 50. Var-keyed `<success>/<failure>` branches fire on entry (unset/stale vars)
+- [x] 51. `<difficulty|rankcheck flag=…>` roll gates unimplemented; shared `<success>` binds only the last roll
+- [x] 52. `removeCodeword` leaves the codeword's *value* behind — bonus counters never reset
 
 **MEDIUM**
 - [x] 5. Implement `<items group … limit="N">` "choose up to N" pickup
@@ -1380,91 +1395,141 @@ render-every-section scan (4369). `RESULT ALL PASS pass=410 fail=0`.
 
 ---
 
-## 49. `special="attack|defence"` grant permanent, save-persisted bonuses  — HIGH
+## 49. `special="attack|defence"` grant permanent, save-persisted bonuses  — **done**
 
-`applySpecial` (engine.js:580–581) pushes `{ability:'combat', bonus,
-type:'blessing', uses:1}` into `data.effects` for both kinds — but **nothing
-ever consumes or expires those entries** (`effectBonus`, state.js:150, just sums
-them forever, and `sanitizeData` persists them), and because `defence()` includes
-`ability('combat')` (state.js:232) an attack bonus also raises Defence and vice
-versa. JaFL semantics: `special="attack"` is a one-shot bonus consumed by the
-next attack roll; `special="defence"` is a Defence blessing removed when the
-fight ends. Nine sections: book1/42 (rat poison "+3 to your dice rolls" for that
-one fight → currently +3 COMBAT *and* +3 Defence for the rest of the campaign),
-book1/145, 238, 247, 428; book4/434; book6/183, 490, 624. Fix: consume the
-attack bonus in the player-attack path (decrement `uses`), clear defence
-blessings at fight end, and apply each to the right stat only. Tests: §1.42
-bonus applies to exactly one fight and does not survive a save round-trip.
+`applySpecial` pushed `{ability:'combat', bonus, type:'blessing', uses:1}` into
+`data.effects` for both kinds — but **nothing ever consumed or expired those
+entries** (`effectBonus` just summed them forever, and `sanitizeData` persisted
+them), and because `defence()` includes `ability('combat')` an attack bonus also
+raised Defence and vice versa. The books are explicit that every case is a
+**per-fight** modifier: "add 3 to your dice rolls *for this fight*" (rat poison,
+book1/42/145/247/428), "subtract 2 *for this fight*" (book1/238, book6/624
+"−2 to COMBAT"), book6/490 (−1 for a weaponless fight), and `special="defence"`
+"add 4 to your Defence *for the duration of that combat only*" (book4/434 ring)
+/ book6/183 (Thunder Beast).
 
----
+Fix:
+- **`GameState`** gains a **transient** `_fightBonus = {attack, defence}` (state.js)
+  — deliberately kept OFF `data`, so it is never serialised and cannot survive a
+  save. `fightAttackBonus()`/`fightDefenceBonus()`, `addFightBonus(kind, n)` and
+  `clearFightBonuses()` manage it. It is section-scoped: `Story.begin` clears it
+  on entering a section (beside `clearPotionBonuses`), matching the "for this
+  fight" wording (a section holds one fight).
+- **`applySpecial`** (engine.js) now routes `attack`→`addFightBonus('attack',…)`
+  and `defence`→`addFightBonus('defence',…)` instead of a permanent `data.effects`
+  blessing, and **resolves a variable bonus** (`bonus="s"` → `resolveValue`, was
+  NaN→0 — the book6/183 gap noted under task 36).
+- **`combat.js`** applies each to the right stat only: `playerStrike` adds
+  `fightAttackBonus()` to the attack roll's COMBAT (never via `ability('combat')`,
+  so it can't leak into Defence); `playerDefenceFor` adds `fightDefenceBonus()` to
+  the player's Defence (over a `playerDefence=` override too).
 
-## 50. Var-keyed `<success>/<failure>` branches fire on entry (unset/stale vars)  — HIGH
-
-`renderBranch` skips the "wait until the roll is made" guard whenever the branch
-carries `var=`, and `branchSuccess` reads `state.getVar(...) > 0` immediately
-(render.js:1196–1209). Vars are global, persist in the save, and short names
-(s, x, y, m, c) are reused corpus-wide. Consequences (~18 sections):
-- **First entry (var unset → 0):** every `<failure var=…>` reveals instantly and
-  **applies its effects**, memoised under `fx@` and never undone — book3/437's
-  failure tick fires before either Difficulty-17 roll (contradictory codewords
-  after a success); same shape in book2/419, book3/476, book6/442, book6/691.
-- **Stale success:** a leftover `s > 0` from an earlier section makes
-  book6/691's `<success var="s">…<tick god="Nisoderu"/>` apply on entry — free
-  initiate status with no SANCTITY roll.
-- **book5/24:** `<failure var="hang"><lose stamina="-hang"/></failure>` applies
-  at entry with hang=0, memoising the Hangman's per-round Stamina drain as 0
-  forever. (Related: `pendingRollVar`, render.js:588, querySelects the literal
-  `var="-hang"` and misses it.)
-Expected (JaFL): success/failure activate only after the roll that feeds them
-executes. Fix: defer var-keyed branches until a roll in the section has resolved
-this visit (track which vars a roll wrote in `ctx`), and never apply branch
-effects at entry. Tests: §3.437 no tick before the roll; §5.24 drain equals the
-rolled margin.
+Verified: 15 new headless assertions (attack bonus set / no Defence leak / not in
+persisted data / dropped on a save round-trip; defence bonus set / no COMBAT leak;
+`clearFightBonuses` resets; §6.183 `bonus="s"` variable resolves; a would-always-
+miss wall is scratched only once a +10 attack bonus is added; §1.42 rat poison
+grants +3 for the fight, consumes the poison, leaves Defence untouched, and the
+bonus clears on entering §423) + full render-every-section scan (4369).
+`RESULT ALL PASS pass=425 fail=0`.
 
 ---
 
-## 51. `<difficulty|rankcheck flag=…>` roll gates unimplemented; shared `<success>` binds only the last roll  — HIGH
+## 50. Var-keyed `<success>/<failure>` branches fire on entry (unset/stale vars)  — **done**
 
-Task 30 built the pay-to-roll gate **only into `renderRandom`**
-(render.js:1077–1094). `isRollGate` (render.js:678–681) *does* match
-`difficulty[flag]`/`rankcheck[flag]`, so the paired cost renders as a
-roll-payment — but `renderDifficulty` (render.js:1006–1044) and
-`renderRankcheck` ignore `flag=` entirely: the payment is decoration and the
-roll is free. Triggers:
-- **book6/731**: `<lose shards="100" price="x"/>` + `<difficulty
-  ability="charisma" level="18" flag="x">` — the CHARISMA boon roll is enabled
-  without donating; the Pay button just burns 100 Shards.
-- **book2/122 / book6/630** ("make a MAGIC roll at Difficulty 15 **or** a
-  SCOUTING roll at 18", shared `flag="x"`, hidden `<tick price="x"/>`): both
-  rolls are always enabled and both can be rolled (JaFL arms exactly one paid
-  attempt, consuming the flag), **and** the shared `<success section=…>` binds
-  to `this.activeRoll`, which is overwritten by each roll element in document
-  order (render.js:208, 1203) — a *successful first-listed* roll is silently
-  ignored. A MAGIC-built character cannot reach §2.376 via MAGIC at all:
-  success-stranding.
-Fix: extend the arm/consume flag gate to `renderDifficulty`/`renderRankcheck`,
-and bind shared success/failure branches to whichever gated roll actually
-resolved (record it as the active roll when it consumes the flag). Interacts
-with task 56 (the hidden price should arm silently). Tests: §6.731 roll disabled
-until paid, one roll per payment; §2.122 a MAGIC success reveals §376.
+`renderBranch` skipped the "wait until the roll is made" guard whenever the
+branch carried `var=`, and `branchSuccess` read `state.getVar(...) > 0`
+immediately. Vars are global and persist in the save, so on **first entry** (var
+unset → 0) every `<failure var=…>` revealed and **applied its effects** (memoised
+under `fx@`, never undone) — book3/437's failure tick fired before either
+Difficulty-17 roll; same in book2/419, book3/476, book6/442, book6/691 — and a
+**stale** `s>0` from an earlier section made book6/691's `<success var="s">`
+apply for free. book5/24's `<failure var="hang"><lose stamina="-hang"/>` drained
+0 on entry and memoised it forever.
+
+Fix (`web/js/render.js`): a var-keyed branch now waits until that var has actually
+been **written this visit**, tracked in a new `ctx.wroteVars` set:
+- Both **roll** handlers (`renderDifficulty`/`renderRandom`/`renderRankcheck`) and
+  an active **`<set var>`** application add the var to `ctx.wroteVars`.
+- A new `branchResolved(node, roll)` gates `<success>`/`<failure>`/`<outcome>` and
+  the `<outcomes>` loop: a var-keyed branch is ready only when `wroteVars` holds
+  its var; a plain (roll-fed) branch still waits for its roll. `branchSuccess`
+  (var sign) is only consulted once resolved.
+- This preserves the **set-sentinel** idiom (book2/138 key-of-stars, book3/43
+  Chill → a `<set var="X" value="1"/>` resolves the branch with no roll) while a
+  stale/unset var keeps the branch pending — so a `<success>/<failure>` never
+  fires or applies effects on entry.
+- Also hardened `pendingRollVar` to strip a leading sign (`"-hang"` → the `hang`
+  roll var) so a signed-var quantity above its roll defers correctly.
+
+Full `<fightround>` per-round rolls (book5/24's drain magnitude) remain task 32;
+this task stops the spurious entry-fire.
+
+Verified: 7 new headless assertions (§3.437 no codeword ticked before the rolls,
+the inner SANCTITY branch stays pending after only the MAGIC roll, exactly one
+outcome codeword after both rolls; §2.138 the key set-sentinel resolves "Open the
+door"→69 with no roll, and without the key neither outcome shows on entry; §5.24
+the per-round Hangman drain does not fire on entry) + full render-every-section
+scan (4369). `RESULT ALL PASS pass=432 fail=0`.
 
 ---
 
-## 52. `removeCodeword` leaves the codeword's *value* behind — bonus counters never reset  — HIGH
+## 51. `<difficulty|rankcheck flag=…>` roll gates unimplemented; shared `<success>` binds only the last roll  — **done**
 
-`removeCodeword` (state.js:426) deletes `data.codewords[cw]` but not
-`data.codewordValues[cw]`. In JaFL a codeword and its value are one entry, so
-`<lose codeword="X">` zeroes the counter — the books rely on that as a
-counter-reset idiom: book6/117 and book6/731 open with a hidden
-`<lose codeword="CharismaBonus"/>` (and reset inside every outcome) so each
-visit's donation bonus starts at 0; book4/93's crew-bribe counter likewise;
-book6/47 resets SpiderDamage. Actual: `<adjust name="…">` (engine.js reads
-`codewordValue`) still sees the old total, so **every bonus ever bought is a
-permanent, save-persisted roll modifier on all future visits** — and
-`CharismaBonus` even leaks between book 4 and book 6, which share the name.
-Fix: `removeCodeword` also deletes `codewordValues[cw]` (audit callers — no
-corpus idiom relies on the value surviving). Feeds task 43's repeatable-cycle
-semantics. Test: tick value → lose codeword → `codewordValue` is 0.
+Task 30 built the pay-to-roll gate **only into `renderRandom`**. `isRollGate`
+matches `difficulty[flag]`/`rankcheck[flag]`, so the paired cost rendered as a
+roll-payment — but `renderDifficulty`/`renderRankcheck` ignored `flag=`: the
+payment was decoration and the roll was free (book6/731 CHARISMA boon). And when
+two rolls shared one flag+`<success>` ("make a MAGIC roll…or a SCOUTING roll",
+book2/122/book6/630), the shared `<success>` bound to `this.activeRoll` — the
+document-order **last** roll — so a successful *first-listed* roll was silently
+ignored (a MAGIC-built character couldn't reach §2.376 via MAGIC).
+
+Fix (`web/js/render.js`):
+- **Flag gate in `renderDifficulty`/`renderRankcheck`** via a shared
+  `rollGateState(node, key)`: a `flag=` roll paired with a `[price=]` cost is
+  disabled ("Pay first…") until the payment sets the flag; rolling **consumes**
+  the flag (`setFlag(k,false)`), and a fresh payment re-arms it (dropping a stale
+  result) — one paid attempt per payment, matching the `<random>` gate.
+- **Shared-branch binding**: `appendChildren` now binds `this.activeRoll` to
+  whichever roll has actually **resolved** (has a stored result), only falling
+  back to the last-listed roll when none has resolved yet. So a shared
+  `<success>`/`<failure>` fed by two rolls reads the one the player rolled. (Var-
+  keyed branches are unaffected — they bind by var via task 50.)
+
+The hidden `<tick price>` that arms book2/122/630's rolls still renders a phantom
+Pay button until **task 56** makes it arm silently; task 51 makes the gate and
+binding correct once armed.
+
+Verified: 6 new headless assertions (§6.731 the CHARISMA roll is disabled until
+the 100-Shard donation is paid; a synthetic two-roll section — both rolls
+disabled before payment, a pay button arms them, payment deducts the cost and
+enables them, a first-listed MAGIC success reveals the shared `<success>`→376,
+and the second roll is disarmed after the one paid attempt) + full
+render-every-section scan (4369). `RESULT ALL PASS pass=438 fail=0`.
+
+---
+
+## 52. `removeCodeword` leaves the codeword's *value* behind — bonus counters never reset  — **done**
+
+`removeCodeword` deleted `data.codewords[cw]` but not `data.codewordValues[cw]`.
+In JaFL a codeword and its value are one entry, so `<lose codeword="X">` zeroes
+the counter — the books rely on that as a counter-reset idiom: book6/117 and
+book6/731 open with a hidden `<lose codeword="CharismaBonus"/>` (and reset inside
+every outcome) so each visit's donation bonus starts at 0; book4/93's crew-bribe
+counter likewise; book6/47 resets SpiderDamage. Before the fix, `<adjust
+name="…">` (which reads `codewordValue`) still saw the old total, so **every
+bonus ever bought was a permanent, save-persisted roll modifier** — and
+`CharismaBonus` even leaked between books 4 and 6 (shared name).
+
+Fix (`web/js/state.js`): `removeCodeword(cw)` now also deletes
+`codewordValues[cw]`. The sole caller is `<lose codeword>` (`applyLose`) — the
+JaFL "zero the counter" path — so nothing relies on the value surviving. Feeds
+task 43's repeatable-cycle semantics.
+
+Verified: 2 new headless assertions (a codeword's counter value accumulates via
+`adjustCodewordValue`, then `<lose codeword>` clears both the codeword and its
+value to 0) + full render-every-section scan (4369). `RESULT ALL PASS pass=440
+fail=0`.
 
 ---
 

@@ -561,7 +561,10 @@ function applyTick(el, state, opts) {
 
 function applySpecial(el, state) {
   const kind = el.getAttribute('special');
-  const bonus = el.getAttribute('bonus') ? parseInt(el.getAttribute('bonus'), 10) : 3;
+  // bonus may be a variable (§6.183 special="defence" bonus="s"), so resolve it;
+  // default to 3 when absent (JaFL's default). resolveValue handles ints and vars.
+  const bonusAttr = el.getAttribute('bonus');
+  const bonus = bonusAttr != null ? resolveValue(state, bonusAttr) : 3;
   // lock/unlock a named cache: the books bracket a gamble/theft resolution
   // between <tick special="lock"> and <tick special="unlock"> so the stashed
   // sum can't be altered mid-event (cache= names the stash).
@@ -569,8 +572,13 @@ function applySpecial(el, state) {
     const cacheN = el.getAttribute('cache');
     if (cacheN != null) { state.lockCache(cacheN, kind === 'lock'); return; }
   }
-  if (kind === 'defence') state.data.effects.push({ ability: 'combat', bonus, type: 'blessing', text: 'Defence blessing', uses: 1 });
-  else if (kind === 'attack') state.data.effects.push({ ability: 'combat', bonus, type: 'blessing', text: 'Attack blessing', uses: 1 });
+  // special="attack" adds bonus to the player's attack rolls for the current fight
+  // only; special="defence" adds it to the player's Defence for that fight only.
+  // Stored as a transient, per-fight bonus (NOT a permanent data.effects entry) so
+  // it applies to the right stat, expires with the section/fight, and never
+  // survives a save — book1/42 rat poison, book4/434 ring, book6/183/490/624 (task 49).
+  if (kind === 'defence') state.addFightBonus('defence', bonus);
+  else if (kind === 'attack') state.addFightBonus('attack', bonus);
   else if (kind === 'godless') state.data.godless = true;
   state.changed();
 }
