@@ -1202,9 +1202,28 @@ test). Still open: a `<difficulty>`/`<random>`/`<rankcheck>` inside a group is
 never run — e.g. book3/680's "make a MAGIC roll at Difficulty 16" `<group>` holds
 the `<difficulty>` inline, so clicking it arms the hidden price flag but never
 rolls, and the `<success>`/`<failure>` branches below (goto 644 / 626) never
-resolve — the wand puzzle is unwinnable. Fix: run an inner roll on the group
-click (or lift it out to render as its own roll widget). Test: §3.680 the group
-produces a MAGIC roll whose success ticks the box and routes to 644.
+resolve — the wand puzzle is unwinnable.
+
+**Scoped 2026-07-08 (while doing task 44).** The bug hits **25 built sections**
+whose `<group>` renders as a *button* (label + an effect/goto, so `renderGroup`
+swallows its children) **and** contains a roll: book1/91, 554; book2/53, 134,
+138, 273, 438; book3/273, 389, 503, 629, 680; book6/24, 48, 94, 215, 239, 293,
+320, 564, 567, 691, 707, 735, 741. (A group with a roll but no effect/goto
+already falls through to the inline-wrapper path and renders its roll — not
+broken.) The trap is **effect timing**: the group bundles the roll with a marker
+effect that must apply *when the roll is attempted*, not on entry. e.g. book2/53
+sets codeword `2.53.1` on entry (`<tick codeword hidden>`), the swim group's
+`<lose codeword="2.53.1"/>` clears it on the attempt, and the sibling
+`<choice box="2.53.1">` options are gated on it — a blind lift-out that
+auto-applies the `<lose>` on entry would clear the marker immediately and mis-gate
+those choices. Correct model: render the inner roll as its own widget **and apply
+the group's other non-roll effects on the roll event** (JaFL treats the roll as
+the group's action) — not a naive lift-out. Hidden bundled effects (book3/680
+`<gain price hidden>`, book2/138 `<lose codeword hidden>`, book1/91 `<tick
+special=lock hidden>`) are entry-safe; the non-hidden codeword markers (book2/53,
+book6/24…) need the roll-event timing. Verify each of the 25 individually — the
+render-every-section smoke test only catches throws, not a swallowed roll.
+Test: §3.680 the group produces a MAGIC roll whose success ticks the box → 644.
 
 ---
 
