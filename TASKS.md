@@ -1087,6 +1087,13 @@ deposits, withdrawals, banking, investments and villa stashes all work, and §91
 renders clean. To do it properly, pre-scan the section for its net lock state (or
 make lock/unlock re-render-aware) and gate the widget on that. Add a §91 test.
 
+**Blocked on task 42 (found 2026-07-08).** §91's `<random dice="2">` sits inside
+the same `force="t"` group as the `<tick special="lock">`, so — like the other 24
+button-groups in task 42 — the roll is currently *swallowed* (the group renders as
+a button and the `<outcomes>` never resolve). The gamble can't actually be rolled
+until task 42 lifts the inner roll out, so the lock/unlock widget-gating nicety is
+downstream of that. Do task 42 first, then gate the widget.
+
 ---
 
 ## 39. Defer confiscate-and-return `<transfer … from=>` until a fight resolves  — LOW
