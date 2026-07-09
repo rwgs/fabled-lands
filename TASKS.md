@@ -76,7 +76,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 
 **LOW**
 - [x] 9. Centralise tag dispatch into a registry
-- [ ] 10. Dice RNG quality / reproducibility
+- [x] 10. Dice RNG quality / reproducibility
 - [ ] 11. Harden the per-visit memoization assumption
 - [ ] 12. Add headless unit tests for the extracted rules
 - [ ] 13. Optional: build-time XML validation
@@ -352,13 +352,35 @@ sections, every tag exercised). `RESULT ALL PASS pass=570 fail=0`.
 
 ---
 
-## 10. Dice RNG quality / reproducibility  — LOW
+## 10. Dice RNG quality / reproducibility  — **done**
 
-`engine.js` rolls with `Math.random()` — uniform and unbiased for 1–6 (no modulo
-bias), statistically fine for play, but **not seedable**. A small seedable PRNG
-(and a `?seed=` hook) would enable reproducible replays and deterministic tests;
-`crypto.getRandomValues` would raise entropy quality if ever wanted. Not required
-for correctness.
+`engine.js` rolled with `Math.random()` — unbiased for 1–6 but **not seedable**.
+Added a central, optionally-seedable RNG so runs can be made reproducible:
+
+- **`engine.js`** — a module-level `_rng` now backs all *game* randomness. `rng()`
+  returns its float in [0,1); `rollD6`, `rollDiceExpr` and the probabilistic
+  `chance="x/y"` item loss all call it. Unseeded, `_rng` defers to the **live**
+  `Math.random` (`() => Math.random()`, evaluated per call — so a test that stubs
+  the global still steers the dice, and there's no bias). `seedRng(seed)` installs
+  a deterministic **mulberry32** PRNG (a string seed is hashed to 32 bits via
+  **xmur3**; a finite number is used directly), returning the numeric seed; pass
+  `null`/`''` to revert to `Math.random`. Both helpers are exported.
+- **`app.js`** — a `?seed=<value>` boot hook seeds the RNG for that page load and
+  toasts the applied seed; unset ⇒ random as before. Documented in `README.md`
+  beside `?demo=`.
+- Deliberately **not** seeded: the dice-spin animation (`ui.js`) and DOM id
+  suffixes (`state.js`) — cosmetic/structural, kept on `Math.random` so they can't
+  perturb the outcome stream.
+
+`crypto.getRandomValues` (higher entropy) was considered unnecessary — mulberry32
+is ample for dice and, unlike crypto, is seedable, which is the point here.
+
+Verified: 8 new headless assertions (same numeric seed reproduces the sequence;
+seeded rolls in 1..6; different seeds diverge; string seed deterministic; string
+vs numeric differ; `seedRng` returns the applied seed / null on revert;
+`rollDiceExpr` reproduces with its modifier) + the full render-every-section scan
+(the existing `Math.random`-stub roll tests still steer the dice, confirming the
+live-deferral). `RESULT ALL PASS pass=578 fail=0`.
 
 ---
 

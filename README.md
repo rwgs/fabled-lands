@@ -94,6 +94,10 @@ games live in that browser.
 `?demo=<book>.<section>` starts a default Warrior at that section — handy for testing or
 sharing a spot, e.g. `…/index.html?demo=1.10`.
 
+`?seed=<value>` makes every dice roll deterministic for that page load (any string or
+number works), so a run is reproducible and manual testing is repeatable — e.g.
+`…/index.html?seed=42&demo=1.10`. Omit it for normal random play.
+
 ---
 
 ## Regenerating the data

@@ -1275,6 +1275,26 @@ async function run() {
     eng.applyEffect(parse('<lose crew="-1"/>'), gcma, {});
     ok('crew upgrade average → good', gcma.ships[0].crew === 'good', gcma.ships[0].crew);
 
+    // --- task 10: seedable RNG / reproducible dice ------------------------
+    // Same seed ⇒ identical roll sequence; different seeds ⇒ (almost surely)
+    // different ones; string seeds hash deterministically; null reverts to
+    // Math.random. All game dice route through rng(), so seeding is enough.
+    const seq = (seed, n = 12) => { eng.seedRng(seed); const a = []; for (let i = 0; i < n; i++) a.push(eng.rollD6()); return a; };
+    const s1 = seq(1234), s1b = seq(1234);
+    ok('seedRng: same numeric seed reproduces the roll sequence', JSON.stringify(s1) === JSON.stringify(s1b));
+    ok('seeded rolls stay in 1..6', s1.every((d) => d >= 1 && d <= 6));
+    ok('seedRng: a different seed gives a different sequence', JSON.stringify(s1) !== JSON.stringify(seq(9999)));
+    const strA = seq('fabled'), strB = seq('fabled');
+    ok('seedRng: string seed is deterministic', JSON.stringify(strA) === JSON.stringify(strB));
+    ok('seedRng: string vs numeric seeds differ', JSON.stringify(strA) !== JSON.stringify(s1));
+    ok('seedRng returns the applied numeric seed', eng.seedRng(1234) === 1234);
+    ok('seedRng(null) reverts (returns null)', eng.seedRng(null) === null);
+    // rollDiceExpr rides the same seeded stream and still honours the modifier.
+    eng.seedRng(7); const rdA = eng.rollDiceExpr('2d6+1');
+    eng.seedRng(7); const rdB = eng.rollDiceExpr('2d6+1');
+    ok('rollDiceExpr reproduces on the same seed (+mod)', rdA.total === rdB.total && rdA.total >= 3 && rdA.total <= 13, String(rdA.total));
+    eng.seedRng(null); // revert so the remaining tests use Math.random as before
+
     // --- task 25: value/expression parsing (vars containing "d", unary minus, division) ---
     // isDiceExpr must match real NdM dice only — not identifiers that merely contain a 'd'.
     ok('isDiceExpr "3d" true', eng.isDiceExpr('3d') === true);

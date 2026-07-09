@@ -5,8 +5,59 @@ import { ABILITIES, canonShipType, CREW_LEVELS } from './rules.js';
 import { makeItem, normalize, matchItems, matchItemQuery, isShardsCurrency } from './state.js';
 import { availableBooks } from './data.js';
 
-// ---- dice ------------------------------------------------------------------
-export function rollD6() { return 1 + Math.floor(Math.random() * 6); }
+// ---- dice / RNG ------------------------------------------------------------
+// All game-affecting randomness flows through rng() so play can be made
+// reproducible. Unseeded, it delegates to Math.random() (uniform and unbiased
+// for 1..6 — no modulo bias). seedRng(seed) installs a small deterministic PRNG
+// (mulberry32) for replayable runs and deterministic tests; a string seed is
+// hashed to 32 bits first. Cosmetic randomness — the dice-spin animation and DOM
+// id suffixes — deliberately stays on Math.random so it can't perturb the seeded
+// stream that decides outcomes. Unseeded, rng() defers to the *live* Math.random
+// (called each time, not captured) so a test that stubs the global still steers
+// the dice.
+let _rng = () => Math.random();
+
+// xmur3 string-hash → a 32-bit seed generator (public-domain algorithm).
+function xmur3(str) {
+  let h = 1779033703 ^ str.length;
+  for (let i = 0; i < str.length; i++) {
+    h = Math.imul(h ^ str.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  return () => {
+    h = Math.imul(h ^ (h >>> 16), 2246822507);
+    h = Math.imul(h ^ (h >>> 13), 3266489909);
+    h ^= h >>> 16;
+    return h >>> 0;
+  };
+}
+
+// mulberry32 — a compact 32-bit PRNG with a full period, good enough for dice.
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Install a deterministic PRNG so dice become reproducible. A string seed is
+ *  hashed to a 32-bit integer; a finite numeric seed is used directly. Pass
+ *  null/'' to revert to Math.random(). Returns the numeric seed applied (or null). */
+export function seedRng(seed) {
+  if (seed == null || seed === '') { _rng = () => Math.random(); return null; }
+  const n = (typeof seed === 'number' && Number.isFinite(seed))
+    ? (seed >>> 0)
+    : xmur3(String(seed))();
+  _rng = mulberry32(n);
+  return n;
+}
+
+/** Current RNG float in [0,1). Game randomness only — see the note above. */
+export function rng() { return _rng(); }
+
+export function rollD6() { return 1 + Math.floor(rng() * 6); }
 
 export function rollDice(n) {
   const dice = [];
@@ -26,7 +77,7 @@ export function rollDiceExpr(str) {
   const faces = m[2] ? parseInt(m[2], 10) : 6;
   const mod = m[3] ? parseInt(m[3].replace(/\s/g, ''), 10) : 0;
   const dice = [];
-  for (let i = 0; i < n; i++) dice.push(1 + Math.floor(Math.random() * faces));
+  for (let i = 0; i < n; i++) dice.push(1 + Math.floor(rng() * faces));
   return { dice, total: dice.reduce((a, b) => a + b, 0) + mod, mod };
 }
 
@@ -421,7 +472,7 @@ function applyLose(el, state, opts) {
       let removed = 0;
       for (const it of pool().slice()) {
         if ((it.tags || []).map(normalize).includes('keep')) continue;
-        const lose = !chance || (den > 0 && Math.random() < num / den);
+        const lose = !chance || (den > 0 && rng() < num / den);
         if (lose) { removeById(it.id); removed++; }
       }
       if (removed) notes.push(cacheN != null ? 'stash emptied' : 'lost all possessions');

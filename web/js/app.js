@@ -4,7 +4,7 @@ import * as data from './data.js';
 import { GameState, loadSlotMeta, deleteSlot, nextFreeSlot, readSlotData, importSave } from './state.js';
 import { ABILITIES, ABILITY_LABEL, ABILITY_BLURB, PROFESSIONS, rankTitle, ordinal } from './rules.js';
 import { Story } from './render.js';
-import { useItemEffect } from './engine.js';
+import { useItemEffect, seedRng } from './engine.js';
 import { renderSheet, modal, toast, escapeHtml } from './ui.js';
 import { VERSION } from './version.js';
 import { Narrator } from './tts.js'; // [TTS] optional narration — remove this + the [TTS] hooks below to drop the feature
@@ -23,9 +23,17 @@ async function boot() {
   try { await data.loadMeta(); }
   catch (e) { $('#app').innerHTML = `<div class="fatal">Could not load game data.<br><small>${escapeHtml(String(e))}</small></div>`; return; }
   registerSW();
+  const params = new URLSearchParams(location.search);
+  // Reproducibility hook: ?seed=<value> makes all dice deterministic for this
+  // page load (replayable runs, deterministic manual testing). Any string or
+  // number works; unset ⇒ Math.random() as before.
+  if (params.has('seed')) {
+    const applied = seedRng(params.get('seed'));
+    if (applied != null) toast(`Dice seeded (${applied}) — rolls are reproducible this session.`);
+  }
   // Deep-link / preview hook: ?demo=<book>.<section> starts a default Warrior at
   // that section (handy for testing and shareable previews).
-  const demo = new URLSearchParams(location.search).get('demo');
+  const demo = params.get('demo');
   if (demo) { startDemo(demo); return; }
   showTitle();
 }
