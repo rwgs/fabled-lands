@@ -23,6 +23,18 @@ newer fields (currencies, item effects, abilityFlags, cache locks, afflictions);
 currency wallet routing; ship canonicalisation; tick caps; the roll-payment
 arm/consume/re-arm cycle.
 
+Reviewed 2026-07-09: the external review in `REVIEW.md` was verified against the
+code — its two new findings were already filed as tasks **64**/**65** (both
+premises re-confirmed: the stamp hashes js/css/json/html/manifest but not
+`web/assets/`; `renderStatic`'s `<th>` branch at `app.js:781` is shadowed by the
+identical heading test at `:775`), and its confirmed-backlog items all map to
+the open tasks 33/34/35/38/39. Its two unrecorded recommendations are now filed
+as tasks **66** (CI smoke-suite workflow — no `.github/` exists) and **67**
+(README says section illustrations are absent, but the build ships the three
+bespoke ones). The suite is green at HEAD: `RESULT ALL PASS pass=597 fail=0`
+(the reviewer's environment couldn't launch Chrome, so no result was claimed
+there).
+
 Worked 2026-07-08: all eight HIGH items (45–52) implemented, each with focused
 headless tests and the full render-every-section scan green after every step
 (suite grew 381 → 440 assertions, `RESULT ALL PASS fail=0`). Notable shared
@@ -90,6 +102,8 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [ ] 38. Gate cache widgets on `lock`/`unlock` under the single-pass render (book1/91 gamble)
 - [ ] 39. Defer confiscate-and-return `<transfer … from=>` until a fight resolves (book2/462)
 - [ ] 65. Rules modal emits invalid table heading markup
+- [ ] 66. Add a CI workflow that runs the headless smoke suite
+- [ ] 67. README: align the illustration docs with the shipped build
 - [x] 42. Inner `<difficulty>`/`<random>`/`<rankcheck>` rolls inside a `<group>` are unrun
 - [x] 44. Fold the ring of ultimate power's `Rank`/`Stamina` auras (book5/564)
 - [x] 62. Render `<image file=…>` and use-effect images (map of Bazalek, book3/75)
@@ -2105,6 +2119,12 @@ from the build) and cover an asset-only update with a service-worker cache test.
 Avoid hashing the generated `sw.js` itself, which would make the cache version
 circular.
 
+Related (same fix pass, noted 2026-07-09): the three `web/assets/illus/` files
+are not in the service-worker precache at all — not even `OPTIONAL` — so an
+installed player who goes offline before viewing them (e.g. book3/75's map of
+Bazalek) never gets them. Add `assets/illus/*` to the `OPTIONAL` precache list
+while touching the stamp.
+
 ---
 
 ## 65. Rules modal emits invalid table heading markup  — LOW
@@ -2118,3 +2138,43 @@ That is invalid table structure and loses the expected table semantics/styling.
 Fix: make the static renderer context-aware: render a heading nested in a row as
 a `<th>` (with an appropriate `colspan`), and retain heading elements only
 outside tables. Add a focused DOM assertion for `QuickRules.xml`.
+
+---
+
+## 66. Add a CI workflow that runs the headless smoke suite  — LOW (infra)
+
+*(From the 2026-07-09 external review's recommendations.)* The repository has no
+`.github/workflows/` at all, so the comprehensive `web/_test.html` suite (597
+assertions + render-every-section over all 4,369 sections) only runs when someone
+remembers to run it locally. A regression pushed without the local loop would
+ship silently.
+
+Add a GitHub Actions workflow that, on push/PR:
+1. Serves the repo root (`python -m http.server 8848 &`).
+2. Runs headless Chrome against `http://localhost:8848/web/_test.html` with
+   `--headless=new --dump-dom --virtual-time-budget=90000` and a fresh
+   `--user-data-dir` (Chrome is preinstalled on `ubuntu-latest` runners).
+3. Fails unless the dumped `#results` starts with `RESULT ALL PASS`.
+
+Optionally also run the `build-data.ps1` XML validation pre-pass (`pwsh` is on
+the runners) and fail if the regenerated JSON differs from the committed bundle
+(catches hand-edited `web/data/*.json`). Keep it to one small workflow file —
+no build toolchain is to be introduced.
+
+---
+
+## 67. README: align the illustration docs with the shipped build  — LOW (docs)
+
+`README.md` ("What's included & known limits") says *"Section illustrations are
+not part of this repository, so inline art is skipped gracefully."* That is now
+half-wrong: since task 62, three bespoke illustration files live in `books/`
+(book1 "Forest of the Forsaken", book3 "Map of Bazalek Isle", book5
+"TheBlackDiptych") and `build/build-data.ps1` copies every non-map, non-cover
+book-folder image into `web/assets/illus/`, where `render.js` displays them.
+The general per-section art (e.g. `142.jpg`) is indeed still absent.
+
+Fix: reword the bullet to say the three `<image>`-referenced illustrations are
+included and shipped by the build, while the remaining per-section art is not
+(the drop-in instructions for `web/assets/illus/` stay). Doc-only change — but
+still run `stamp-version.ps1`? **No:** README is not hashed by the stamp and not
+served by the app, so no stamp/test loop is needed beyond a sanity read.
