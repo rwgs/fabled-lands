@@ -286,22 +286,27 @@ export function boolAttr(v, def = false) {
 // Applies a state-changing node. Returns a short human note (or '') describing
 // what changed, for optional UI feedback. `opts.chooser` may be provided to
 // resolve item-loss choices; otherwise the first matches are used.
+// Effect-applier registry: tag → (el, state, opts) => note. This is the rules
+// half of the tag-dispatch table (task 9), mirroring the Java Node factory but
+// kept in the DOM-free layer — the view layer has its own render registry in
+// render.js. Adding a passive-effect tag is a one-line change here.
+const EFFECT_APPLIERS = {
+  lose:        (el, state, opts) => applyLose(el, state, opts),
+  tick:        (el, state, opts) => applyTick(el, state, opts),
+  gain:        (el, state, opts) => applyTick(el, state, opts),
+  adjust:      (el, state, opts) => applyAdjust(el, state, opts),
+  set:         (el, state, opts) => applySet(el, state, opts),
+  curse:       (el, state)       => applyAffliction(el, state, 'curse'),
+  disease:     (el, state)       => applyAffliction(el, state, 'disease'),
+  poison:      (el, state)       => applyAffliction(el, state, 'poison'),
+  adjustmoney: (el, state)       => applyAdjustMoney(el, state),
+  transfer:    (el, state, opts) => applyTransfer(el, state, opts),
+  effect:      (el, state, opts) => applyItemEffect(el, state, opts),
+};
+
 export function applyEffect(el, state, opts = {}) {
-  const tag = el.tagName.toLowerCase();
-  switch (tag) {
-    case 'lose': return applyLose(el, state, opts);
-    case 'tick':
-    case 'gain': return applyTick(el, state, opts);
-    case 'adjust': return applyAdjust(el, state, opts);
-    case 'set': return applySet(el, state, opts);
-    case 'curse': return applyAffliction(el, state, 'curse');
-    case 'disease': return applyAffliction(el, state, 'disease');
-    case 'poison': return applyAffliction(el, state, 'poison');
-    case 'adjustmoney': return applyAdjustMoney(el, state);
-    case 'transfer': return applyTransfer(el, state, opts);
-    case 'effect': return applyItemEffect(el, state, opts);
-    default: return '';
-  }
+  const applier = EFFECT_APPLIERS[el.tagName.toLowerCase()];
+  return applier ? applier(el, state, opts) : '';
 }
 
 // Tags applyEffectBody applies directly; anything else it recurses into.

@@ -75,7 +75,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 61. book6/628: the rerunnable `<set>` clobbers the roll's var — inn rest/dysentery never fires
 
 **LOW**
-- [ ] 9. Centralise tag dispatch into a registry
+- [x] 9. Centralise tag dispatch into a registry
 - [ ] 10. Dice RNG quality / reproducibility
 - [ ] 11. Harden the per-visit memoization assumption
 - [ ] 12. Add headless unit tests for the extracted rules
@@ -319,13 +319,36 @@ rewrite still matches. Verified: `sw.js` compiles cleanly in headless Chrome
 
 ---
 
-## 9. Centralise tag dispatch into a registry  — LOW (maintainability)
+## 9. Centralise tag dispatch into a registry  — **done**
 
-Tag handling is spread across two hand-rolled switches (`render.js`
-`renderElement`, `engine.js` `applyEffect`). For ~40 tags this is fine, but a
-single table `tag → { render, applyEffect, condition }` would make adding a tag a
-one-place change and mirror the Java `Node.createChild` factory (minus the
-UI coupling).
+Tag handling was spread across two hand-rolled switches (`render.js`
+`renderElement`, `engine.js` `applyEffect`). Both are now table-driven:
+
+- **`engine.js`** — an `EFFECT_APPLIERS` map (`tag → (el, state, opts) => note`)
+  replaces the `applyEffect` switch; `applyEffect` is now a one-line lookup
+  (unknown tag → `''`, as before). This is the DOM-free "factory" half.
+- **`render.js`** — a module-level `TAG_RENDERERS` map (`tag → Story method
+  name`, all methods sharing the `(container, node, path)` signature) replaces the
+  `renderElement` switch; the four cases that had inline bodies were extracted
+  into methods (`renderParagraph`, `renderTextWrapper` for `<text>`/`<desc>`,
+  `renderChoiceElement` for a bare `<choice>`, `renderReroll`) so every tag maps
+  to a named handler. The `INLINE_STYLE` pre-check and the `PASSIVE_TAGS` / prose
+  fallback in the default path are unchanged.
+
+**Design note (deviation from the original single-table sketch):** the task text
+suggested *one* unified table `{render, applyEffect, condition}`. Kept as **two
+per-module tables** instead, deliberately — a single table holding both a DOM
+renderer and a headless applier would couple the view to the rules and break the
+architecture invariant (rules live in DOM-free modules). The task's own
+parenthetical — "mirror the factory, *minus the UI coupling*" — asks for exactly
+this split. `condition` isn't tag-dispatched at all (it's attribute-based OR
+matching inside `evaluateCondition`, reached via the `if`/`elseif`/`else` render
+entries), so it has no place in a tag table and is left as-is.
+
+Adding a tag is now a one-line change per concern (a `TAG_RENDERERS` entry + its
+method for the view; an `EFFECT_APPLIERS` entry for a passive effect). Pure
+refactor — no behaviour change. Verified: full render-every-section scan (4369
+sections, every tag exercised). `RESULT ALL PASS pass=570 fail=0`.
 
 ---
 

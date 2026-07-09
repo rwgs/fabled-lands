@@ -31,6 +31,53 @@ const PASSIVE_TAGS = new Set(['lose', 'tick', 'gain', 'set', 'curse', 'disease',
 const ITEM_FAMILY_TAGS = new Set(['item', 'weapon', 'armour', 'tool']);
 const CHOOSE_ONE_TAGS = new Set(['lose', 'tick', 'gain', 'item', 'weapon', 'armour', 'tool', 'resurrection']);
 
+// Tag-dispatch table for renderElement (task 9): tag → Story method name. Every
+// method has the signature (container, node, path); tags that share a handler are
+// listed under each alias. This is the view half of the tag registry; the DOM-free
+// effect half lives in engine.js (EFFECT_APPLIERS). Adding a renderable tag is a
+// one-line change here plus its method — no switch to hunt through. (Kept separate
+// from the engine table on purpose: render is DOM, the rules layer is DOM-free.)
+const TAG_RENDERERS = {
+  p:               'renderParagraph',
+  group:           'renderGroup',
+  text:            'renderTextWrapper',
+  desc:            'renderTextWrapper',
+  if:              'renderIfChain',
+  elseif:          'renderIfChain',
+  else:            'renderIfChain',
+  goto:            'renderGoto',
+  return:          'renderReturn',
+  items:           'renderItemsController',
+  item:            'renderItemAward',
+  weapon:          'renderItemAward',
+  armour:          'renderItemAward',
+  tool:            'renderItemAward',
+  choices:         'renderChoices',
+  choice:          'renderChoiceElement',
+  difficulty:      'renderDifficulty',
+  random:          'renderRandom',
+  rankcheck:       'renderRankcheck',
+  training:        'renderTraining',
+  fight:           'renderFight',
+  // <flee>/<fightdamage> describe a consequence that fires on an EVENT (the player
+  // fleeing, or the enemy landing a blow), never on render. Show their prose but
+  // render them inert — combat.js / the Flee button apply the effects.
+  flee:            'renderInert',
+  fightdamage:     'renderInert',
+  market:          'renderMarket',
+  buy:             'renderInlineBuy',
+  sell:            'renderInlineSell',
+  rest:            'renderRest',
+  moneycache:      'renderMoneyCache',
+  itemcache:       'renderItemCache',
+  transfer:        'renderTransfer',
+  resurrection:    'renderResurrection',
+  reroll:          'renderReroll',
+  image:           'renderImage',
+  table:           'renderTable',
+  'choices-table': 'renderTable',
+};
+
 export class Story {
   constructor(rootEl, state, opts) {
     this.root = rootEl;
@@ -316,98 +363,47 @@ export class Story {
       return e;
     }
 
-    switch (tag) {
-      case 'p': {
-        const p = document.createElement('p');
-        this.appendChildren(p, node, path);
-        container.appendChild(p);
-        return p;
-      }
-      case 'group':
-        return this.renderGroup(container, node, path);
-      case 'text':
-      case 'desc': {
-        // inline grouping wrapper
-        const span = document.createElement('span');
-        this.appendChildren(span, node, path);
-        container.appendChild(span);
-        return span;
-      }
-      case 'if':
-      case 'elseif':
-      case 'else':
-        return this.renderIfChain(container, node, path);
+    const method = TAG_RENDERERS[tag];
+    if (method) return this[method](container, node, path);
 
-      case 'goto':
-        return this.renderGoto(container, node, path);
-      case 'return':
-        return this.renderReturn(container, node, path);
-      case 'items':
-        return this.renderItemsController(container, node, path);
-      case 'item':
-      case 'weapon':
-      case 'armour':
-      case 'tool':
-        return this.renderItemAward(container, node, path);
-      case 'choices':
-        return this.renderChoices(container, node, path);
-      case 'choice':
-        return this.renderChoices(container, node.parentNode, path, node);
-      case 'difficulty':
-        return this.renderDifficulty(container, node, path);
-      case 'random':
-        return this.renderRandom(container, node, path);
-      case 'rankcheck':
-        return this.renderRankcheck(container, node, path);
-      case 'training':
-        return this.renderTraining(container, node, path);
-      case 'fight':
-        return this.renderFight(container, node, path);
-      // <flee>/<fightdamage> describe a consequence that fires on an EVENT (the
-      // player fleeing, or the enemy landing a blow), never on render. Show their
-      // prose but render them inert — combat.js/the Flee button apply the effects.
-      case 'flee':
-      case 'fightdamage':
-        return this.renderInert(container, node, path);
-      case 'market':
-        return this.renderMarket(container, node, path);
-      case 'buy':
-        return this.renderInlineBuy(container, node, path);
-      case 'sell':
-        return this.renderInlineSell(container, node, path);
-      case 'rest':
-        return this.renderRest(container, node, path);
-      case 'moneycache':
-        return this.renderMoneyCache(container, node, path);
-      case 'itemcache':
-        return this.renderItemCache(container, node, path);
-      case 'transfer':
-        return this.renderTransfer(container, node, path);
-      case 'resurrection':
-        return this.renderResurrection(container, node, path);
-      case 'reroll': {
-        const btn = document.createElement('button');
-        btn.className = 'btn-secondary';
-        const inner = document.createElement('span');
-        this.appendChildren(inner, node, path);
-        btn.textContent = inner.textContent.trim() || 'Roll again';
-        const roll = this.activeRoll;
-        btn.addEventListener('click', () => { if (roll) this.ctx.rolls.delete('roll@' + roll.path); this.rerender(); });
-        container.appendChild(btn);
-        return btn;
-      }
-      case 'image':
-        return this.renderImage(container, node, path);
-      case 'table':
-      case 'choices-table':
-        return this.renderTable(container, node, path);
+    if (PASSIVE_TAGS.has(tag)) return this.renderPassive(container, node, path);
+    // Unknown element: render children so we don't lose prose.
+    this.appendChildren(container, node, path);
+    return null;
+  }
 
-      default:
-        if (PASSIVE_TAGS.has(tag)) return this.renderPassive(container, node, path);
-        // Unknown element: render children so we don't lose prose.
-        this.appendChildren(container, node, path);
-        return null;
-    }
+  // ---- small element renderers dispatched from TAG_RENDERERS ---------------
+  renderParagraph(container, node, path) {
+    const p = document.createElement('p');
+    this.appendChildren(p, node, path);
+    container.appendChild(p);
+    return p;
+  }
+
+  // <text>/<desc>: an inline grouping wrapper.
+  renderTextWrapper(container, node, path) {
+    const span = document.createElement('span');
+    this.appendChildren(span, node, path);
+    container.appendChild(span);
+    return span;
+  }
+
+  // A <choice> reached directly (not via its <choices> parent) renders the whole
+  // choices table, flagging which row is this node.
+  renderChoiceElement(container, node, path) {
+    return this.renderChoices(container, node.parentNode, path, node);
+  }
+
+  renderReroll(container, node, path) {
+    const btn = document.createElement('button');
+    btn.className = 'btn-secondary';
+    const inner = document.createElement('span');
+    this.appendChildren(inner, node, path);
+    btn.textContent = inner.textContent.trim() || 'Roll again';
+    const roll = this.activeRoll;
+    btn.addEventListener('click', () => { if (roll) this.ctx.rolls.delete('roll@' + roll.path); this.rerender(); });
+    container.appendChild(btn);
+    return btn;
   }
 
   // ---- conditionals --------------------------------------------------------
