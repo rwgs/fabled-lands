@@ -3,7 +3,7 @@
 // once loaded/installed. Progress lives in localStorage (per-origin), so it
 // survives offline and reloads.
 
-const VERSION = 'fl-26.07.09.1d5efe4';
+const VERSION = 'fl-26.07.09.a6d86f8';
 
 // REQUIRED = the app shell + all book data. Without every one of these the game
 // can't run offline, so the install must FAIL (and the previous complete cache
@@ -47,6 +47,13 @@ const OPTIONAL = [
   './assets/maps/book4.jpg',
   './assets/maps/book5.jpg',
   './assets/maps/book6.jpg',
+  // Section illustrations (task 62/64): a few sections show these via <image>.
+  // render.js requests them as 'assets/illus/' + encodeURIComponent(name), so the
+  // URLs are pre-encoded here to match the runtime request (and thus the cache
+  // key). OPTIONAL so an offline miss can't abort the upgrade.
+  './assets/illus/Forest%20of%20the%20Forsaken.JPG',
+  './assets/illus/Map%20of%20Bazalek%20Isle.JPG',
+  './assets/illus/TheBlackDiptych.jpg',
 ];
 
 self.addEventListener('install', (event) => {

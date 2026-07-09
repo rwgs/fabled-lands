@@ -36,6 +36,14 @@ foreach ($f in 'index.html', 'manifest.webmanifest') {
     $p = Join-Path $web $f
     if (Test-Path $p) { $files += Get-Item $p }
 }
+# Deployable assets (icons, world/regional maps, section illustrations) -- task
+# 64. Recurse web/assets so replacing only an icon, map, or illustration still
+# moves the stamp (and thus the service-worker cache key), reaching installed
+# players instead of leaving them on the stale cached asset forever. sw.js lives
+# in web/ (not web/assets/), so it is still excluded -- hashing it would make the
+# cache version circular.
+$assetsDir = Join-Path $web 'assets'
+if (Test-Path $assetsDir) { $files += Get-ChildItem -Path $assetsDir -File -Recurse }
 
 $joined = ($files | Sort-Object FullName | ForEach-Object { (Get-FileHash -Algorithm SHA1 -LiteralPath $_.FullName).Hash }) -join ''
 $stream = [System.IO.MemoryStream]::new([System.Text.Encoding]::UTF8.GetBytes($joined))

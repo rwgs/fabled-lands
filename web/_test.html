@@ -2363,6 +2363,37 @@ async function run() {
       ok('task32: it does NOT surface at a non-temple section', !c32t.querySelector('.extra-choice'));
     }
 
+    // --- task 64: asset-only releases invalidate the PWA cache + illus precache ---
+    { // block-scoped
+      const swSrc = await (await fetch('./sw.js')).text();
+      // The cache name is 'fl-<build stamp>'. Since the stamp now hashes
+      // web/assets/, an asset-only change moves this key and installs refresh.
+      ok('task64: sw.js declares a versioned cache key',
+         /const VERSION = 'fl-\d\d\.\d\d\.\d\d\.[0-9a-f]+';/.test(swSrc),
+         (swSrc.match(/const VERSION = '[^']*'/) || [])[0]);
+
+      // The three section illustrations must be in the precache list, encoded the
+      // same way render.js requests them (encodeURIComponent) so the cache key
+      // matches — otherwise an offline player never gets them.
+      const illusNames = ['Forest of the Forsaken.JPG', 'Map of Bazalek Isle.JPG', 'TheBlackDiptych.jpg'];
+      const illusUrls = illusNames.map((n) => 'assets/illus/' + encodeURIComponent(n));
+      ok('task64: sw precache lists all three illustrations (render.js-encoded)',
+         illusUrls.every((u) => swSrc.includes(u)),
+         illusUrls.filter((u) => !swSrc.includes(u)).join(', '));
+
+      // Every precached ./ URL must resolve to a real file: a misnamed or wrongly
+      // encoded entry would silently miss and never match the runtime request.
+      const precache = [...swSrc.matchAll(/'\.\/([^']+)'/g)]
+        .map((m) => m[1])
+        .filter((u) => /^(assets|data|css|js)\//.test(u) || u.endsWith('.html') || u.endsWith('.webmanifest'));
+      const missing = [];
+      for (const u of precache) {
+        const r = await fetch('./' + u, { method: 'HEAD' });
+        if (!r.ok) missing.push(u);
+      }
+      ok('task64: every precached asset URL is fetchable', missing.length === 0, 'missing: ' + missing.join(', '));
+    }
+
   } catch (e) {
     out.push('FATAL ' + (e.stack || e.message));
     fail++;

@@ -85,7 +85,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 59. `<tick god=…>` drops `<effect>` children — Sig initiates never get +1 THIEVERY
 - [x] 60. Affliction `<effect>` forms `divide`/`target`/`stamina` inert; item `<curse>` children never attach
 - [x] 61. book6/628: the rerunnable `<set>` clobbers the roll's var — inn rest/dysentery never fires
-- [ ] 64. Asset-only releases do not invalidate the PWA cache
+- [x] 64. Asset-only releases do not invalidate the PWA cache
 
 **LOW**
 - [x] 9. Centralise tag dispatch into a registry
@@ -2104,26 +2104,41 @@ fail=0`.
 
 ---
 
-## 64. Asset-only releases do not invalidate the PWA cache  — MEDIUM
+## 64. Asset-only releases do not invalidate the PWA cache  — **done**
 
-`build/stamp-version.ps1` hashes JavaScript, CSS, generated JSON, `index.html`,
-and the manifest, but not any files beneath `web/assets/`. Meanwhile,
-`build-data.ps1` copies the world map, regional maps, and supplied illustrations
-into that directory. The service worker is cache-first and keeps those responses
-under a cache name derived from the stamp. Consequently, replacing only an icon,
-map, or illustration leaves the stamp and cache name unchanged, so existing
-installs keep serving the old asset indefinitely.
+`build/stamp-version.ps1` hashed JavaScript, CSS, generated JSON, `index.html`,
+and the manifest, but not any files beneath `web/assets/`. Because the
+service-worker cache name is `fl-<stamp>`, replacing only an icon, map, or
+illustration left the stamp — and therefore the cache name — unchanged, so
+existing installs kept serving the old asset indefinitely. Separately, the three
+`web/assets/illus/` files were in *no* precache list, so an installed player who
+went offline before viewing them (e.g. book3/75's map of Bazalek) never got them.
 
-Fix: include deployable assets in the stamp input (or emit revisioned asset URLs
-from the build) and cover an asset-only update with a service-worker cache test.
-Avoid hashing the generated `sw.js` itself, which would make the cache version
-circular.
+Fix:
+- **`build/stamp-version.ps1`** now folds `web/assets/**` (recursive, `-File`)
+  into the content-hash input alongside js/css/json/html/manifest. Any change to
+  an icon, map, or illustration moves the stamp (and thus the SW cache key), so
+  the change reaches installed players instead of stranding them on the stale
+  cached asset. `sw.js` stays excluded — it lives in `web/`, not `web/assets/`,
+  and hashing the file whose cache key we rewrite would be circular (the note's
+  explicit warning). Verified with a reversible probe: adding one file under
+  `web/assets/` moved the stamp (`a6d86f8`→`2b5542c`) and removing it restored it.
+- **`web/sw.js`** adds the three section illustrations to the `OPTIONAL` precache
+  list (best-effort, so an offline miss can't abort the upgrade). They are stored
+  **URL-encoded** (`Forest%20of%20the%20Forsaken.JPG`, …) to match render.js's
+  runtime request (`'assets/illus/' + encodeURIComponent(name)`) so the precached
+  response actually matches the fetch cache key.
 
-Related (same fix pass, noted 2026-07-09): the three `web/assets/illus/` files
-are not in the service-worker precache at all — not even `OPTIONAL` — so an
-installed player who goes offline before viewing them (e.g. book3/75's map of
-Bazalek) never gets them. Add `assets/illus/*` to the `OPTIONAL` precache list
-while touching the stamp.
+Chose stamp-input hashing over emitting revisioned asset URLs (the alternative
+the task floated): it needs no rewriting of `<img src>`/`manifest` references and
+keeps the single-stamp cache-busting model already in place.
+
+Verified: 3 new headless assertions (sw.js declares a `fl-yy.MM.dd.<hash>` cache
+key; the precache lists all three illustrations built with the *same*
+`encodeURIComponent` render.js uses; every precached `./` asset/data/css/js/html
+URL is HEAD-fetchable — catching a misnamed or mis-encoded entry) + the reversible
+stamp probe above + full render-every-section scan. `RESULT ALL PASS pass=600
+fail=0`.
 
 ---
 
