@@ -2274,6 +2274,51 @@ async function run() {
     ok('keep() persists the game', !!readSlotData(keptSlot) && readSlotData(keptSlot).shards === 4242);
     deleteSlot(keptSlot); // cleanup
 
+    // --- task 12: focused unit tests for the extracted rules --------------
+    // The every-section scan catches throws; these assert combat/economy/rest
+    // OUTCOMES on the DOM-free modules. Scoped to the gaps not already covered
+    // (over-Defence miss, fightdamage add/replace, cargo cap and fixed rest are
+    // tested elsewhere): a decisive win, a decisive death, the 12-item buy cap,
+    // and a dice-amount rest.
+
+    // A fight the player must WIN: a defenceless, near-dead enemy that can't hurt
+    // a high-Stamina hero. Ends with outcome='win', enemy down, hero alive.
+    const g12w = GameState.create({ name:'W12', gender:'m', profession:'Warrior', book:1, adv });
+    g12w.data.stamina = 500; g12w.data.staminaMax = 500;
+    const fWin = { name:'Straw', combat:0, defence:0, stamina:5, maxStamina:5, winThreshold:0, playerFirst:true, outcome:null, log:[] };
+    let gw12 = 0; while (!fWin.outcome && !g12w.isDead() && gw12++ < 200) fightRound(g12w, fWin, null);
+    ok('task12: a decisive fight ends in a win (enemy down, hero alive)', fWin.outcome === 'win' && fWin.stamina <= 0 && !g12w.isDead(), `outcome=${fWin.outcome} enemy=${fWin.stamina} dead=${g12w.isDead()}`);
+
+    // A fight the player must LOSE: an enemy that strikes first for lethal damage
+    // and whose Defence the hero can never beat. Ends with the hero dead, not a win.
+    const g12d = GameState.create({ name:'D12', gender:'m', profession:'Warrior', book:1, adv });
+    g12d.data.stamina = 12; g12d.data.staminaMax = 12;
+    const fDie = { name:'Titan', combat:100, defence:100, stamina:100, maxStamina:100, winThreshold:0, playerFirst:false, outcome:null, log:[] };
+    let gd = 0; while (!fDie.outcome && !g12d.isDead() && gd++ < 200) fightRound(g12d, fDie, null);
+    ok('task12: an unwinnable fight kills the hero (not a win)', g12d.isDead() && fDie.outcome !== 'win', `dead=${g12d.isDead()} outcome=${fDie.outcome} stam=${g12d.data.stamina}`);
+
+    // 12-item carry cap: a buy is refused when the sheet is full, with no Shards
+    // spent (the cap check precedes payment in buyTrade); freeing a slot lets it
+    // through and charges.
+    const g12c = GameState.create({ name:'C12', gender:'m', profession:'Warrior', book:1, adv });
+    g12c.data.items = []; for (let i = 0; i < 12; i++) g12c.addItem(makeItem('item', 'trinket ' + i));
+    g12c.data.shards = 100;
+    ok('task12: the sheet is full at 12 items (no free slots)', g12c.freeSlots() === 0 && g12c.itemCount() === 12);
+    const rFull = buyTrade(g12c, goodsFrom(parse('<item name="ruby"/>'), 'item', 'ruby', 0), 10);
+    ok('task12: buy refused at the 12-item cap, no Shards spent', rFull.ok === false && /12 items/.test(rFull.note || '') && g12c.data.shards === 100 && g12c.itemCount() === 12, `ok=${rFull.ok} note=${rFull.note} sh=${g12c.data.shards} n=${g12c.itemCount()}`);
+    g12c.removeItemById(g12c.data.items[0].id);
+    const rOk = buyTrade(g12c, goodsFrom(parse('<item name="ruby"/>'), 'item', 'ruby', 0), 10);
+    ok('task12: with a free slot the buy succeeds and charges', rOk.ok === true && g12c.data.shards === 90 && g12c.hasItem('ruby'), `ok=${rOk.ok} sh=${g12c.data.shards}`);
+
+    // Dice rest: applyRest with a "2d" amount heals the rolled total (clamped to
+    // max). Forcing Math.random ⇒ 0 makes each d6 read 1, so 2d = 2 (deterministic).
+    const g12rest = GameState.create({ name:'RR12', gender:'m', profession:'Warrior', book:1, adv });
+    g12rest.data.staminaMax = 20; g12rest.data.stamina = 5;
+    const _rr12 = Math.random; Math.random = () => 0;
+    const healed2d = eng.applyRest(g12rest, '2d', 0);
+    Math.random = _rr12;
+    ok('task12: a dice rest ("2d") heals the rolled total', healed2d === 2 && g12rest.data.stamina === 7, `healed=${healed2d} st=${g12rest.data.stamina}`);
+
   } catch (e) {
     out.push('FATAL ' + (e.stack || e.message));
     fail++;

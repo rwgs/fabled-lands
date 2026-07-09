@@ -78,7 +78,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 9. Centralise tag dispatch into a registry
 - [x] 10. Dice RNG quality / reproducibility
 - [x] 11. Harden the per-visit memoization assumption
-- [ ] 12. Add headless unit tests for the extracted rules
+- [x] 12. Add headless unit tests for the extracted rules
 - [ ] 13. Optional: build-time XML validation
 - [ ] 32. Implement or explicitly stub the remaining unhandled tags
 - [ ] 33. Narrate sections without `<p>` wrappers (TTS)
@@ -410,15 +410,26 @@ render-every-section scan raising no reorder warning across all 4369 sections.
 
 ---
 
-## 12. Add headless unit tests for the extracted rules  — LOW
+## 12. Add headless unit tests for the extracted rules  — **done**
 
-`web/_test.html` renders every section (catches throws) but doesn't assert
-combat/economy outcomes. Now that `combat.js` / `market.js` / `engine.applyRest`
-are DOM-free, add focused tests: a fight to the death, an over-Defence miss,
-a `<fightdamage>` application, buy/sell with the 12-item cap and cargo capacity,
-and rest healing (fixed + dice). (Partial coverage already exists — the suite
-has ~94 assertions incl. a fight-termination loop, a market sell round-trip and
-blessing purchases — so scope this to the listed gaps.)
+Audited the listed cases against the current suite first — most were already
+covered, so this filled only the genuine gaps:
+- **Already covered** (left as-is): over-Defence miss (a Def=COMBAT+12 wall never
+  scratched, §task-49 block), `<fightdamage type="add">` + `type="replace">`
+  (§105/hangman), cargo capacity (galleon 3-unit cap, 4th refused), and fixed /
+  full / blank rest with cost charging (task-31 block).
+- **New assertions** (6, at the end of `run()` in `web/_test.html`): a **decisive
+  win** (a defenceless enemy falls, hero survives, `outcome==='win'`); a
+  **decisive death** (an enemy that strikes first for lethal damage and can't be
+  beaten kills the hero — `isDead()`, not a win); the **12-item carry cap on a
+  buy** (`buyTrade` refused with the "carry only 12" note and *no* Shards spent,
+  then succeeds and charges once a slot is freed); and a **dice rest** (`applyRest`
+  with `"2d"`, `Math.random`-forced deterministic, heals the rolled total).
+
+Note: the new block initially collided with an existing `let gw` in the same
+`run()` scope — a duplicate declaration is a parse-time `SyntaxError`, which
+silently aborts the whole module (page stuck at "running…", not a test failure).
+Renamed to `gw12`. Verified: `RESULT ALL PASS pass=587 fail=0`.
 
 ---
 
