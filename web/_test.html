@@ -1295,6 +1295,39 @@ async function run() {
     ok('rollDiceExpr reproduces on the same seed (+mod)', rdA.total === rdB.total && rdA.total >= 3 && rdA.total <= 13, String(rdA.total));
     eng.seedRng(null); // revert so the remaining tests use Math.random as before
 
+    // --- task 11: per-visit memoization path invariant --------------------
+    // Memo keys derive from a positional path (parent.idx); it is stable only
+    // because the parsed tree isn't mutated during a visit. Re-rendering a real,
+    // mixed section must keep every path mapped to the same node (no tripwire),
+    // and the tripwire must actually fire if a path's node ever changes.
+    {
+      const warns = [];
+      const _warn = console.warn; console.warn = (...a) => { warns.push(a.join(' ')); };
+      let nPaths = 0;
+      try {
+        const g11 = GameState.create({ name:'M11', gender:'m', profession:'Warrior', book:1, adv });
+        const story11 = new Story(document.createElement('div'), g11, { navigate(){}, onDeath(){}, notify(){} });
+        story11.begin(parse('<section name="t"><p>Intro text.</p><item name="sword"/><difficulty ability="COMBAT" level="8"/><success><goto section="10"/></success></section>'), 1, 't');
+        nPaths = story11.ctx.pathNodes.size;
+        story11.rerender(); story11.rerender();
+      } finally { console.warn = _warn; }
+      ok('task11: pathNodes populated on first render', nPaths > 0, String(nPaths));
+      ok('task11: re-renders trip no reorder warning', warns.filter((w) => w.includes('effect-dedup')).length === 0, warns.join(' | '));
+    }
+    { // positive check: the tripwire fires when a path is made to map to a new node
+      const warns2 = [];
+      const _warn2 = console.warn; console.warn = (...a) => { warns2.push(a.join(' ')); };
+      try {
+        const g11b = GameState.create({ name:'M11b', gender:'m', profession:'Warrior', book:1, adv });
+        const story11b = new Story(document.createElement('div'), g11b, { navigate(){}, onDeath(){}, notify(){} });
+        story11b.begin(parse('<section name="t"><p>Intro.</p><item name="sword"/></section>'), 1, 't');
+        const somePath = story11b.ctx.pathNodes.keys().next().value;
+        story11b.ctx.pathNodes.set(somePath, document.createElement('goto')); // simulate a reorder
+        story11b.rerender();
+      } finally { console.warn = _warn2; }
+      ok('task11: tripwire fires when a path maps to a new node', warns2.some((w) => w.includes('effect-dedup')), warns2.join(' | '));
+    }
+
     // --- task 25: value/expression parsing (vars containing "d", unary minus, division) ---
     // isDiceExpr must match real NdM dice only — not identifiers that merely contain a 'd'.
     ok('isDiceExpr "3d" true', eng.isDiceExpr('3d') === true);

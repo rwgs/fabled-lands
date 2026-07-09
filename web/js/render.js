@@ -101,7 +101,7 @@ export class Story {
     // Likewise a per-fight attack/Defence bonus from <tick special="attack|defence">
     // (task 49) applies only to the current section's fight — clear it on entry.
     this.state.clearFightBonuses();
-    this.ctx = { applied: new Set(), rolls: new Map(), fights: new Map(), buys: new Map(), groupLimits: new Map(), groupPicks: new Map(), wroteVars: new Set(), rolledVars: new Set() };
+    this.ctx = { applied: new Set(), rolls: new Map(), fights: new Map(), buys: new Map(), groupLimits: new Map(), groupPicks: new Map(), wroteVars: new Set(), rolledVars: new Set(), pathNodes: new Map() };
     // Pre-scan grouped-award controllers (<items group="X" limit="N"/>) so the
     // individual award rows know their "choose up to N" cap no matter whether the
     // controller sits before or after them in the section (both orders occur).
@@ -257,6 +257,22 @@ export class Story {
       // the payment (e.g. "turn back to 142") costs nothing.
       if (this.blocked) return;
       const path = basePath + '.' + idx;
+      // Per-visit memoization invariant (task 11): every memo key — fx@/roll@/
+      // grp@/pay@/chain@ — is derived from this positional `path` (parent path +
+      // child index). That is stable ONLY because the parsed section tree is never
+      // mutated during a visit, so a given node keeps the same sibling index across
+      // re-renders. If a future feature ever *conditionally reorders, inserts, or
+      // removes* siblings between renders, a node's path would slide onto another
+      // node's memo slot — an already-applied effect could re-fire, or a resolved
+      // roll be lost. This tripwire catches exactly that: a path seen mapped to a
+      // different node than before means the assumption is broken. It never fires
+      // under the current static-tree model (a dev aid, not a hot-path cost).
+      const prevNode = this.ctx.pathNodes.get(path);
+      if (prevNode && prevNode !== node) {
+        console.warn(`[render] memoization path "${path}" reused for a different node — conditionally reordering siblings breaks effect-dedup (see appendChildren, task 11).`);
+      } else if (!prevNode) {
+        this.ctx.pathNodes.set(path, node);
+      }
       if (node.nodeType === Node.TEXT_NODE) {
         this.appendText(container, node.nodeValue);
         if (/\S/.test(node.nodeValue || '')) { chainActive = false; chainDone = false; }

@@ -77,7 +77,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 **LOW**
 - [x] 9. Centralise tag dispatch into a registry
 - [x] 10. Dice RNG quality / reproducibility
-- [ ] 11. Harden the per-visit memoization assumption
+- [x] 11. Harden the per-visit memoization assumption
 - [ ] 12. Add headless unit tests for the extracted rules
 - [ ] 13. Optional: build-time XML validation
 - [ ] 32. Implement or explicitly stub the remaining unhandled tags
@@ -384,12 +384,29 @@ live-deferral). `RESULT ALL PASS pass=578 fail=0`.
 
 ---
 
-## 11. Harden the per-visit memoization assumption  — LOW
+## 11. Harden the per-visit memoization assumption  — **done**
 
-`render.js` memoises applied effects / rolls by a node path (`basePath + '.' +
-idx`). This is safe today because the XML tree shape is static per visit. Add a
-comment (and ideally an assertion) noting that any future feature which
-conditionally reorders siblings would break effect-dedup.
+`render.js` memoises applied effects / rolls by a positional node path
+(`basePath + '.' + idx`). This is safe today because the parsed section tree is
+static per visit, so a node keeps the same sibling index across re-renders. The
+assumption is now both **documented** and **guarded**:
+
+- **Comment** — `appendChildren` (`render.js`) carries a block comment spelling
+  out the invariant: every memo key (`fx@`/`roll@`/`grp@`/`pay@`/`chain@`) is
+  derived from the positional path, so *conditionally reordering, inserting, or
+  removing* siblings between renders would slide a node's path onto another node's
+  memo slot — re-firing an applied effect or losing a resolved roll.
+- **Tripwire** — a per-visit `ctx.pathNodes` map (`path → node`, reset each visit
+  in `begin`) records the node first seen at each path; if a later re-render sees
+  a *different* node at the same path, it `console.warn`s pointing at this task.
+  It never fires under the static-tree model (a dev aid, ~1 map op/node, not a
+  hot-path cost).
+
+Verified: 3 new headless assertions (a real mixed section re-rendered twice trips
+no warning; `pathNodes` populates on first render; the tripwire *does* fire when a
+path is forced to map to a new node — proving it's live) + the full
+render-every-section scan raising no reorder warning across all 4369 sections.
+`RESULT ALL PASS pass=581 fail=0`.
 
 ---
 
