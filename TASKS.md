@@ -73,6 +73,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 59. `<tick god=…>` drops `<effect>` children — Sig initiates never get +1 THIEVERY
 - [x] 60. Affliction `<effect>` forms `divide`/`target`/`stamina` inert; item `<curse>` children never attach
 - [x] 61. book6/628: the rerunnable `<set>` clobbers the roll's var — inn rest/dysentery never fires
+- [ ] 64. Asset-only releases do not invalidate the PWA cache
 
 **LOW**
 - [x] 9. Centralise tag dispatch into a registry
@@ -88,6 +89,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 37. Fix the `safeAddGodd` typo in the source XML
 - [ ] 38. Gate cache widgets on `lock`/`unlock` under the single-pass render (book1/91 gamble)
 - [ ] 39. Defer confiscate-and-return `<transfer … from=>` until a fight resolves (book2/462)
+- [ ] 65. Rules modal emits invalid table heading markup
 - [x] 42. Inner `<difficulty>`/`<random>`/`<rankcheck>` rolls inside a `<group>` are unrun
 - [x] 44. Fold the ring of ultimate power's `Rank`/`Stamina` auras (book5/564)
 - [x] 62. Render `<image file=…>` and use-effect images (map of Bazalek, book3/75)
@@ -2085,3 +2087,34 @@ taking the wand grants it and blocks the Shards + resurrection; taking
 resurrection blocks the wand + Shards; §634 barter still renders Take buttons,
 not reward picks) + full render-every-section scan. `RESULT ALL PASS pass=541
 fail=0`.
+
+---
+
+## 64. Asset-only releases do not invalidate the PWA cache  — MEDIUM
+
+`build/stamp-version.ps1` hashes JavaScript, CSS, generated JSON, `index.html`,
+and the manifest, but not any files beneath `web/assets/`. Meanwhile,
+`build-data.ps1` copies the world map, regional maps, and supplied illustrations
+into that directory. The service worker is cache-first and keeps those responses
+under a cache name derived from the stamp. Consequently, replacing only an icon,
+map, or illustration leaves the stamp and cache name unchanged, so existing
+installs keep serving the old asset indefinitely.
+
+Fix: include deployable assets in the stamp input (or emit revisioned asset URLs
+from the build) and cover an asset-only update with a service-worker cache test.
+Avoid hashing the generated `sw.js` itself, which would make the cache version
+circular.
+
+---
+
+## 65. Rules modal emits invalid table heading markup  — LOW
+
+`renderStatic()` handles every `h1`–`h6` element before its later, identical
+condition that creates a `<th>`. The latter branch is unreachable. In
+`rules/QuickRules.xml`, `<h3>Quick Rules</h3>` is a direct child of `<tr>`, so
+the modal produces an `<h3>` inside a table row rather than a table header cell.
+That is invalid table structure and loses the expected table semantics/styling.
+
+Fix: make the static renderer context-aware: render a heading nested in a row as
+a `<th>` (with an appropriate `colspan`), and retain heading elements only
+outside tables. Add a focused DOM assertion for `QuickRules.xml`.
