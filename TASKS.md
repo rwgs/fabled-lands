@@ -79,7 +79,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 10. Dice RNG quality / reproducibility
 - [x] 11. Harden the per-visit memoization assumption
 - [x] 12. Add headless unit tests for the extracted rules
-- [ ] 13. Optional: build-time XML validation
+- [x] 13. Optional: build-time XML validation
 - [ ] 32. Implement or explicitly stub the remaining unhandled tags
 - [ ] 33. Narrate sections without `<p>` wrappers (TTS)
 - [ ] 34. Finish moving rules out of the view layer
@@ -433,11 +433,32 @@ Renamed to `gw12`. Verified: `RESULT ALL PASS pass=587 fail=0`.
 
 ---
 
-## 13. Optional: build-time XML validation  — LOW
+## 13. Optional: build-time XML validation  — **done**
 
-`build/build-data.ps1` bundles section XML unchecked. A lightweight schema/lint
-pass (or wiring the render-every-section smoke test into the build) would catch
-malformed sections before deploy. The smoke test already covers most of this.
+`build/build-data.ps1` bundled section XML unchecked, so a malformed file only
+surfaced as a render throw in the browser (caught late, by the smoke test). Added
+a **validation pre-pass** (`build/build-data.ps1`) that runs before anything is
+written:
+
+- A `Test-XmlDoc($xml, $label, $expectRoot)` helper parses a fragment with
+  `System.Xml.XmlDocument.LoadXml` (strict XML — stricter than the runtime
+  `DOMParser`) and, when `$expectRoot` is given, checks the root element. (Uses
+  `.get_Name()` — PowerShell's XML type adapter overrides plain `.Name` to return
+  the `name` *attribute*, a gotcha that made an early root check misreport.)
+- The pre-pass validates **every section** (well-formed **and** rooted at
+  `<section>`), plus each book's `Adventurers.xml` and the two rules files. Any
+  failure prints the offending file(s) and **throws** (`$ErrorActionPreference =
+  'Stop'`), aborting *before* JSON is written — so broken data never ships.
+- Chosen over wiring the whole render-every-section smoke test into the build: it
+  needs no browser/server, runs in-process, and pinpoints the bad file by name.
+
+Confirmed the corpus is strict-XML clean first (4369 sections + 6
+`Adventurers.xml` + 2 rules = **4377 files, 0 malformed**), so the gate never
+fires spuriously; the failure path was unit-checked against an unclosed tag, a
+stray `&`, and a wrong root. Full build runs clean (`XML OK: 4377 files
+well-formed.`), the six book JSONs are byte-identical (no reformat), and the
+headless suite is green (`RESULT ALL PASS pass=587 fail=0`). README's
+"Regenerating the data" section documents the new gate.
 
 ---
 

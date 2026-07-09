@@ -33,6 +33,26 @@ function Read-Xml([string]$path) {
     return ($raw -replace '(?s)^\s*<\?xml.*?\?>\s*', '').Trim()
 }
 
+# ---- XML validation (task 13) ----------------------------------------------
+# Parse a bundled fragment as strict XML so a malformed file is caught at build
+# time rather than throwing at render time in the browser. Returns $null when
+# valid, or an error string. `$expectRoot` (e.g. 'section') also checks the root
+# element. NOTE: use .get_Name() — PowerShell's XML type adapter overrides plain
+# .Name to return the `name` ATTRIBUTE, not the element's tag name.
+function Test-XmlDoc([string]$xml, [string]$label, [string]$expectRoot) {
+    if (-not $xml) { return $null }   # an absent optional file is not an error
+    try {
+        $doc = New-Object System.Xml.XmlDocument
+        $doc.LoadXml($xml)
+    } catch {
+        return "$label : not well-formed XML — $($_.Exception.Message)"
+    }
+    if ($expectRoot -and $doc.DocumentElement.get_Name() -ne $expectRoot) {
+        return "$label : root is <$($doc.DocumentElement.get_Name())>, expected <$expectRoot>"
+    }
+    return $null
+}
+
 # ---- Pregen starting characters --------------------------------------------
 # Each book's Adventurers.xml <starting> block lists the six pre-made characters
 # (name, profession, gender). Their bios live either inline in that element
@@ -87,6 +107,48 @@ if (Test-Path $iniPath) {
         }
     }
 }
+
+# ---- Validate the source XML before bundling (task 13) ----------------------
+# Every section is parsed as strict XML (well-formed + rooted at <section>), plus
+# each book's Adventurers.xml and the rules files, BEFORE anything is written. A
+# malformed file aborts the build here — with the file named — instead of shipping
+# broken JSON that only throws when the browser renders that section. The runtime
+# DOMParser is more lenient, so this is a deliberately stricter gate; the corpus
+# is clean, so it never fires spuriously.
+Write-Host 'Validating source XML...'
+$xmlErrors = @()
+$xmlChecked = 0
+for ($b = 1; $b -le 6; $b++) {
+    $dir = Join-Path $books ("book{0}" -f $b)
+    if (-not (Test-Path $dir)) { continue }
+    Get-ChildItem -Path $dir -Filter '*.xml' |
+        Where-Object { $_.BaseName -match '^\d+[a-z]?$' } |
+        ForEach-Object {
+            $xmlChecked++
+            $e = Test-XmlDoc (Read-Xml $_.FullName) ("book{0}/{1}" -f $b, $_.Name) 'section'
+            if ($e) { $xmlErrors += $e }
+        }
+    $advPath = Join-Path $dir 'Adventurers.xml'
+    if (Test-Path $advPath) {
+        $xmlChecked++
+        $e = Test-XmlDoc (Read-Xml $advPath) ("book{0}/Adventurers.xml" -f $b) $null
+        if ($e) { $xmlErrors += $e }
+    }
+}
+foreach ($rf in @('Rules.xml', 'QuickRules.xml')) {
+    $rp = Join-Path $rules $rf
+    if (Test-Path $rp) {
+        $xmlChecked++
+        $e = Test-XmlDoc (Read-Xml $rp) "rules/$rf" $null
+        if ($e) { $xmlErrors += $e }
+    }
+}
+if ($xmlErrors.Count -gt 0) {
+    Write-Host ("XML validation FAILED — {0} of {1} file(s) malformed:" -f $xmlErrors.Count, $xmlChecked)
+    $xmlErrors | ForEach-Object { Write-Host "  $_" }
+    throw "Build aborted: fix the source XML above and re-run."
+}
+Write-Host ("XML OK: {0} files well-formed." -f $xmlChecked)
 
 # ---- Bundle each book -------------------------------------------------------
 $bookMeta = @()

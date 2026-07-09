@@ -115,6 +115,11 @@ This reads every numeric `books/book<n>/<section>.xml`, each book's `Adventurers
 skipped. Book text is left untouched; the JSON simply bundles it so the app can load a
 whole book in a single request and cache it for offline play.
 
+Before bundling, the build **validates the source XML**: every section is parsed as
+strict XML (well-formed and rooted at `<section>`), along with each `Adventurers.xml`
+and the rules files. A malformed file **aborts the build** — naming the file — instead
+of shipping broken JSON that would only throw when the browser renders that section.
+
 ### Build stamp / version
 
 A build version in the form `yy.MM.dd.HH.<sha>` (hourly date + the HEAD commit's short
