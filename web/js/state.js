@@ -54,6 +54,7 @@ function freshData() {
     caches: {},           // name -> {items:[], money:0}         (task 20 populates)
     currencies: {},       // name -> amount (alternate-currency markets, e.g. Mithral — task 40)
     potionBonus: {},      // ability -> +N temporary boost from a drunk potion (task 41)
+    extraChoices: [],     // {key, atBook, atSection, tag, book, section, text} persistent <extrachoice> menu (task 32)
     book: 1,
     section: null,
     startBook: 1,
@@ -532,6 +533,32 @@ export class GameState {
   }
   setCodewordValue(name, v) { this.data.codewordValues[name] = v; this.changed(); }
 
+  // ---- extra choices (<extrachoice>, task 32) -------------------------
+  // A persistent, keyed navigation option the books "note on your Adventure
+  // Sheet": available either at a specific book+section (atBook/atSection) or at
+  // any section carrying a tag (e.g. tag="temple" — Targdaz's Recall, curse
+  // removal), and jumping to book/section when taken. A key lets a later choice
+  // replace it or a <extrachoice remove=key> lift it.
+  addExtraChoice(choice) {
+    if (!choice || !choice.section) return;
+    if (choice.key) this.data.extraChoices = this.data.extraChoices.filter((c) => c.key !== choice.key);
+    this.data.extraChoices.push(choice);
+    this.changed();
+  }
+  removeExtraChoice(key) {
+    if (!key) return;
+    const before = this.data.extraChoices.length;
+    this.data.extraChoices = this.data.extraChoices.filter((c) => c.key !== key);
+    if (this.data.extraChoices.length !== before) this.changed();
+  }
+  /** The extra choices active at (book, section) — matched by an exact
+   *  atBook/atSection target, or by the section's tag= (e.g. "temple"). */
+  extraChoicesFor(book, section, sectionTag) {
+    return this.data.extraChoices.filter((c) =>
+      (c.atSection != null && String(c.atSection) === String(section) && (c.atBook == null || Number(c.atBook) === Number(book)))
+      || (c.tag && sectionTag && c.tag === sectionTag));
+  }
+
   // ---- boxes / visit ticks --------------------------------------------
   boxKey(book, section) { return `${book ?? this.data.book}.${section ?? this.data.section}`; }
   tickCount(book, section) { return this.data.boxes[this.boxKey(book, section)] || 0; }
@@ -854,6 +881,20 @@ export function sanitizeData(raw) {
   for (const [k, v] of Object.entries(asObj(d.currencies))) { const n = asNum(v, 0, { min: 0, int: true }); if (n > 0) out.currencies[k] = n; }
   out.potionBonus = {};
   for (const [k, v] of Object.entries(asObj(d.potionBonus))) { const n = asNum(v, 0, { int: true }); if (n && ABILITIES.includes(k)) out.potionBonus[k] = n; }
+  out.extraChoices = asArr(d.extraChoices).map((c) => {
+    const o = asObj(c);
+    const section = asStr(o.section).trim();
+    if (!section) return null; // a choice with no jump target is meaningless
+    return {
+      key: asStr(o.key).trim() || null,
+      atBook: o.atBook == null ? null : asNum(o.atBook, null, { min: 1, int: true }),
+      atSection: o.atSection == null ? null : asStr(o.atSection).trim(),
+      tag: asStr(o.tag).trim() || null,
+      book: asNum(o.book, out.book, { min: 1, int: true }),
+      section,
+      text: asStr(o.text).trim(),
+    };
+  }).filter(Boolean);
 
   out.book = asNum(d.book, base.book, { min: 1, int: true });
   out.section = d.section == null ? null : asStr(d.section);

@@ -80,7 +80,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 11. Harden the per-visit memoization assumption
 - [x] 12. Add headless unit tests for the extracted rules
 - [x] 13. Optional: build-time XML validation
-- [ ] 32. Implement or explicitly stub the remaining unhandled tags
+- [x] 32. Implement or explicitly stub the remaining unhandled tags
 - [ ] 33. Narrate sections without `<p>` wrappers (TTS)
 - [ ] 34. Finish moving rules out of the view layer
 - [ ] 35. iOS home-screen icons: provide PNG apple-touch-icon
@@ -1071,15 +1071,48 @@ render-every-section scan (4369). `RESULT ALL PASS pass=345 fail=0`.
 
 ---
 
-## 32. Implement or explicitly stub the remaining unhandled tags  — LOW
+## 32. Implement or explicitly stub the remaining unhandled tags  — **done**
 
-Tags with no handler in either switch that still occur in the corpus:
-`<extrachoice>` (7× — book1/122's "note this option" never surfaces at §1.10),
-`<field>` (6×), `<while>` (2×), `<fightround>` (3×), `<sectionview>` (1×).
-Implement per spec where feasible; otherwise add an explicit, commented no-op
-case per tag (so the default-case recursion of task 21 can become strict) and
-note the gap here. (`<adjustmoney>`/caches → task 20, `<poison>`/`<disease>` →
-task 19, `<sold>` → task 29.)
+Every previously-unhandled tag now has an explicit renderer (`TAG_RENDERERS` in
+`render.js`), so the default recursion no longer silently swallows them. Two are
+implemented per spec; three are explicit passthroughs whose *automation* is
+deferred (their prose still renders, exactly as the default recursion did — no
+behaviour change):
+
+- **`<field name= label=>`** (book4/93, book5/401, book6/117/731) — **implemented.**
+  `renderField` shows a live codeword-counter readout (`label: value`, 0 if unset),
+  re-read each render so it tracks `<tick name=>` (the bribery/offering bonus, the
+  Uttaku court status).
+- **`<extrachoice>`** (book1/122/327, book5/535/625/722, book6/448/448a) —
+  **implemented** end-to-end. A persisted, keyed choice store
+  (`state.extraChoices` + `add/removeExtraChoice`/`extraChoicesFor`, sanitised and
+  save-safe): a section registers a choice available either at a specific
+  `atbook`/`atsection` or at any section with a matching `tag=` (only `"temple"` in
+  the corpus), jumping to `book`/`section` when taken; a same `key=` replaces, and
+  `remove="key"` lifts it. `renderExtraChoice` registers/removes once per visit
+  (silent book-keeping) and shows the note's inline prose; `surfaceExtraChoices`
+  renders the active ones at their target section as `.extra-choice` buttons that
+  navigate like a `<goto>`. Fixes book1/122's "Enter the sewers" surfacing at §1.10
+  and the temple-only Recall/curse-removal options.
+- **`<while var=>`** (book5/218, book6/700), **`<fightround pre=>`** (book5/24/383/689),
+  **`<sectionview>`** (book5/114) — **explicit passthrough** (`renderChildrenOnly`):
+  the inner prose/rolls render as before, but the *automated* mechanic is deferred
+  — a true repeat-until-var loop, per-combat-round rolls, and the random-section
+  "trance" viewer, respectively. These render one pass and progression is
+  unaffected (each section's onward `<goto>` is outside the deferred mechanic).
+  Kept as passthrough rather than inert precisely to avoid regressing the rolls the
+  default recursion already showed.
+
+Verified: 10 new headless assertions (`<field>` value+label; `<extrachoice>`
+register → surface at its target → navigate → key-replace → `remove`; the
+`tag="temple"` mode surfacing only at temple sections; a sanitize round-trip) +
+the full render-every-section scan (all 5 tags exercised, no throw).
+`RESULT ALL PASS pass=597 fail=0`.
+
+Deferred follow-ups (filed mentally against their tags, not new tasks unless they
+bite): true `<while>` looping, `<fightround>` per-round automation, and the
+`<sectionview>` random-paragraph viewer. (`<adjustmoney>`/caches → task 20,
+`<poison>`/`<disease>` → task 19, `<sold>` → task 29 — all already done.)
 
 ---
 

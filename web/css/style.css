@@ -250,6 +250,15 @@ img { max-width: 100%; }
 }
 .goto-primary:hover:not(:disabled) { background: linear-gradient(#dba63a, #b6851f); }
 
+/* <field>: a live codeword-counter readout (bribery/offering bonus, court status) */
+.field { display: inline-block; margin: 0 0.2rem; padding: 0.05rem 0.45rem; border: 1px dashed var(--gold); border-radius: 6px; font-size: 0.85rem; font-weight: 700; font-style: normal; color: var(--gold); }
+
+/* <extrachoice>: persistent "noted on your Adventure Sheet" options, surfaced at
+   their target section as a small labelled block of navigation buttons (task 32) */
+.extra-choices { margin-top: 1rem; padding-top: 0.6rem; border-top: 1px dashed rgba(154,59,42,0.35); }
+.extra-choices-label { font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--gold); margin-bottom: 0.3rem; }
+.extra-choice { display: block; margin: 0.25rem 0; }
+
 /* choices */
 .choices { display: flex; flex-direction: column; gap: 0.55rem; margin: 1.1rem 0 0.4rem; }
 .choice {

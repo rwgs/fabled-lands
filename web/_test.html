@@ -2319,6 +2319,50 @@ async function run() {
     Math.random = _rr12;
     ok('task12: a dice rest ("2d") heals the rolled total', healed2d === 2 && g12rest.data.stamina === 7, `healed=${healed2d} st=${g12rest.data.stamina}`);
 
+    // --- task 32: previously unhandled tags (<field>, <extrachoice>) -------
+    { // block-scoped so its consts can't collide with the rest of run()
+      // <field>: a live codeword-counter readout (label + value, 0 if unset).
+      const g32 = GameState.create({ name:'F32', gender:'m', profession:'Warrior', book:1, adv });
+      g32.setCodewordValue('Bonus', 3);
+      const c32 = document.createElement('div');
+      const st32 = new Story(c32, g32, { navigate(){}, onDeath(){}, notify(){} });
+      st32.begin(parse('<section name="t"><p><field name="Bonus" label="Bribery bonus"/></p></section>'), 1, 't');
+      const fld = c32.querySelector('.field');
+      ok('task32: <field> shows label + codeword value', !!fld && /Bribery bonus:\s*3/.test(fld.textContent), fld && fld.textContent);
+
+      // <extrachoice>: register at §122, surface at target §10, navigate to §460.
+      const g32b = GameState.create({ name:'X32', gender:'m', profession:'Warrior', book:1, adv });
+      let nav32 = null;
+      const c32b = document.createElement('div');
+      const st32b = new Story(c32b, g32b, { navigate:(b,s)=>{ nav32 = { b, s }; }, onDeath(){}, notify(){} });
+      st32b.begin(parse('<section name="122"><p>Note <extrachoice atbook="1" atsection="10" book="1" section="460" text="Enter the sewers" key="YellowportSewers">this option</extrachoice>. <goto section="10"/></p></section>'), 1, '122');
+      ok('task32: <extrachoice> registers the keyed choice', g32b.data.extraChoices.length === 1 && g32b.data.extraChoices[0].key === 'YellowportSewers' && g32b.data.extraChoices[0].section === '460', JSON.stringify(g32b.data.extraChoices));
+      ok('task32: the note text renders inline (no button) at the registering section', !c32b.querySelector('.extra-choice') && /this option/.test(c32b.textContent));
+      st32b.begin(parse('<section name="10"><p>Yellowport. <goto section="1"/></p></section>'), 1, '10');
+      const xcBtn = c32b.querySelector('.extra-choice');
+      ok('task32: the extra choice surfaces at its target section', !!xcBtn && /Enter the sewers/.test(xcBtn.textContent), xcBtn && xcBtn.textContent);
+      xcBtn && xcBtn.click();
+      ok('task32: activating the extra choice navigates to its target', nav32 && nav32.b === 1 && nav32.s === '460', JSON.stringify(nav32));
+
+      // Same key replaces; <extrachoice remove> lifts it.
+      st32b.begin(parse('<section name="327"><extrachoice atbook="1" atsection="10" section="327" key="YellowportSewers" text="Secret cache">note</extrachoice></section>'), 1, '327');
+      ok('task32: a same-key <extrachoice> replaces the earlier one', g32b.data.extraChoices.length === 1 && g32b.data.extraChoices[0].text === 'Secret cache' && g32b.data.extraChoices[0].section === '327');
+      st32b.begin(parse('<section name="t"><extrachoice remove="YellowportSewers"/></section>'), 1, 't');
+      ok('task32: <extrachoice remove> lifts the keyed choice', g32b.data.extraChoices.length === 0);
+
+      // tag="temple" mode + save round-trip.
+      const g32t = GameState.create({ name:'T32', gender:'m', profession:'Warrior', book:5, adv });
+      const c32t = document.createElement('div');
+      const st32t = new Story(c32t, g32t, { navigate(){}, onDeath(){}, notify(){} });
+      st32t.begin(parse('<section name="535"><extrachoice key="TargdazRecall" text="Targdaz Recall" tag="temple" book="5" section="14">note</extrachoice></section>'), 5, '535');
+      const round32 = sanitizeData(JSON.parse(JSON.stringify(g32t.data)));
+      ok('task32: extraChoices survive a sanitize round-trip', round32.extraChoices.length === 1 && round32.extraChoices[0].tag === 'temple' && round32.extraChoices[0].section === '14', JSON.stringify(round32.extraChoices));
+      st32t.begin(parse('<section name="141" tag="temple"><p>A temple. <goto section="1"/></p></section>'), 5, '141');
+      ok('task32: a tag="temple" extra choice surfaces at a temple section', !!c32t.querySelector('.extra-choice') && /Targdaz Recall/.test(c32t.textContent));
+      st32t.begin(parse('<section name="99"><p>Not a temple. <goto section="1"/></p></section>'), 5, '99');
+      ok('task32: it does NOT surface at a non-temple section', !c32t.querySelector('.extra-choice'));
+    }
+
   } catch (e) {
     out.push('FATAL ' + (e.stack || e.message));
     fail++;

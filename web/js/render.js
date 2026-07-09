@@ -76,6 +76,15 @@ const TAG_RENDERERS = {
   image:           'renderImage',
   table:           'renderTable',
   'choices-table': 'renderTable',
+  // task 32: previously unhandled tags. <field>/<extrachoice> are implemented;
+  // <while>/<fightround>/<sectionview> render their inner prose (as the default
+  // recursion already did — no behaviour change) with the automated mechanic
+  // deferred. Explicit entries let the default case become strict later.
+  field:           'renderField',
+  extrachoice:     'renderExtraChoice',
+  while:           'renderChildrenOnly',
+  fightround:      'renderChildrenOnly',
+  sectionview:     'renderChildrenOnly',
 };
 
 export class Story {
@@ -182,6 +191,7 @@ export class Story {
     this.renderedGroups = new Set(); // group= ids already drawn this pass (task 26)
     this.appendChildren(flow, el, 'r');
     this.applyFightGate(flow);
+    this.surfaceExtraChoices(flow); // persistent <extrachoice> options active here (task 32)
     this.root.appendChild(flow);
 
     // Dead-end fallback: a fully-resolved section offering no way forward is a
@@ -420,6 +430,88 @@ export class Story {
     btn.addEventListener('click', () => { if (roll) this.ctx.rolls.delete('roll@' + roll.path); this.rerender(); });
     container.appendChild(btn);
     return btn;
+  }
+
+  // <field name="X" label="L"/> — display the live value of a codeword counter
+  // (0 if unset), e.g. the Uttaku court status or the running bribery/offering
+  // bonus. Re-reads on every render so it tracks <tick name="X">. (task 32)
+  renderField(container, node, path) {
+    const name = node.getAttribute('name') || '';
+    const label = node.getAttribute('label') || node.getAttribute('text') || name;
+    const span = document.createElement('span');
+    span.className = 'field';
+    span.textContent = `${label}: ${this.state.codewordValue(name)}`;
+    container.appendChild(span);
+    return span;
+  }
+
+  // <extrachoice> — register (or remove) a persistent, keyed navigation option
+  // the books "note on your Adventure Sheet": e.g. book1/122 "Enter the sewers"
+  // available back at Yellowport (§10), or Targdaz's Recall usable in any temple.
+  // Registration is silent book-keeping applied once per visit; the descriptive
+  // inner prose (the sheet-note wording) is still shown inline. The choices are
+  // surfaced at their target section by surfaceExtraChoices() in render(). (task 32)
+  renderExtraChoice(container, node, path) {
+    const remove = node.getAttribute('remove');
+    const memo = 'xc@' + path;
+    if (!this.ctx.applied.has(memo)) {
+      this.ctx.applied.add(memo);
+      if (remove) {
+        this.state.removeExtraChoice(remove);
+      } else {
+        const section = node.getAttribute('section');
+        if (section) {
+          this.state.addExtraChoice({
+            key: node.getAttribute('key') || null,
+            atBook: node.hasAttribute('atbook') ? parseInt(node.getAttribute('atbook'), 10) : null,
+            atSection: node.getAttribute('atsection'),
+            tag: node.getAttribute('tag') || null,
+            book: node.hasAttribute('book') ? parseInt(node.getAttribute('book'), 10) : this.book,
+            section,
+            text: node.getAttribute('text') || '',
+          });
+        }
+      }
+    }
+    // Show the note's descriptive text (a <extrachoice remove> is silent).
+    if (!remove) { const span = document.createElement('span'); this.appendChildren(span, node, path); container.appendChild(span); return span; }
+    return null;
+  }
+
+  // An explicit no-op case for a tag whose automated mechanic is deferred: render
+  // the inner prose (exactly what the default recursion did) so no text is lost,
+  // and no more. Used by <while>/<fightround>/<sectionview> (task 32). Making the
+  // dispatch explicit lets the default case tighten to a strict warning later.
+  renderChildrenOnly(container, node, path) {
+    this.appendChildren(container, node, path);
+    return null;
+  }
+
+  // Surface the player's active extra choices (<extrachoice>) at this section: a
+  // labelled row of buttons that navigate like a <goto>. Matched by an exact
+  // atBook/atSection target or by the section's tag= (e.g. "temple"). (task 32)
+  surfaceExtraChoices(flow) {
+    const tag = this.sectionEl ? this.sectionEl.getAttribute('tag') : null;
+    const choices = this.state.extraChoicesFor(this.book, this.section, tag);
+    if (!choices.length) return;
+    const box = document.createElement('div');
+    box.className = 'extra-choices';
+    const h = document.createElement('div');
+    h.className = 'extra-choices-label';
+    h.textContent = 'Extra choices';
+    box.appendChild(h);
+    for (const c of choices) {
+      const btn = document.createElement('button');
+      btn.className = 'goto extra-choice';
+      btn.textContent = c.text || `Turn to ${c.section}`;
+      const targetBook = c.book || this.book;
+      btn.addEventListener('click', () => {
+        if (!availableBooks().includes(targetBook)) { this.notify(`“${bookTitle(targetBook)}” (Book ${targetBook}) isn’t included in this edition.`, 'warn'); return; }
+        this.navigate(targetBook, c.section);
+      });
+      box.appendChild(btn);
+    }
+    flow.appendChild(box);
   }
 
   // ---- conditionals --------------------------------------------------------
