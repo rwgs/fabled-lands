@@ -212,6 +212,18 @@ async function run() {
     ok('ability check uses the boosted score by default', eng.evaluateCondition(parse('<if ability="magic" greaterthan="5"/>'), g17d));
     ok('modifier="natural" compares the written score', eng.evaluateCondition(parse('<if ability="magic" modifier="natural" greaterthan="5"/>'), g17d) === false);
     ok('modifier="natural" lessthan uses the written score', eng.evaluateCondition(parse('<if ability="magic" modifier="natural" lessthan="4"/>'), g17d));
+    // task 68: <if ability="rank|stamina"> must read the real stat, not fall to 0
+    const g17rk = GameState.create({ name:'G17rk', gender:'m', profession:'Warrior', book:1, adv });
+    g17rk.data.rank = 10;
+    ok('§416 Rank gate opens at Rank 10 (greaterthan="3")', eng.evaluateCondition(parse('<if ability="rank" greaterthan="3"/>'), g17rk));
+    ok('Rank gate greaterthan="10" false at Rank 10', eng.evaluateCondition(parse('<if ability="rank" greaterthan="10"/>'), g17rk) === false);
+    ok('§b4/255 lessthan="4" false at Rank 10', eng.evaluateCondition(parse('<if ability="rank" lessthan="4"/>'), g17rk) === false);
+    ok('rank equals="10" true', eng.evaluateCondition(parse('<if ability="rank" equals="10"/>'), g17rk));
+    const g17rk2 = GameState.create({ name:'G17rk2', gender:'m', profession:'Warrior', book:1, adv });
+    g17rk2.data.rank = 2;
+    ok('Rank gate greaterthan="3" stays shut at Rank 2', eng.evaluateCondition(parse('<if ability="rank" greaterthan="3"/>'), g17rk2) === false);
+    ok('§b4/255 lessthan="4" true at Rank 2', eng.evaluateCondition(parse('<if ability="rank" lessthan="4"/>'), g17rk2));
+    ok('stamina condition reads current Stamina, not 0', eng.evaluateCondition(parse('<if ability="stamina" greaterthan="0"/>'), g17rk2));
     // god="" ("worships no god")
     const g17e = GameState.create({ name:'G17e', gender:'m', profession:'Warrior', book:1, adv });
     ok('if god="" true when worshipping no god', eng.evaluateCondition(parse('<if god=""/>'), g17e));

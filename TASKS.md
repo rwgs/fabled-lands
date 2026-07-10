@@ -59,6 +59,8 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 50. Var-keyed `<success>/<failure>` branches fire on entry (unset/stale vars)
 - [x] 51. `<difficulty|rankcheck flag=…>` roll gates unimplemented; shared `<success>` binds only the last roll
 - [x] 52. `removeCodeword` leaves the codeword's *value* behind — bonus counters never reset
+- [x] 68. `<if ability="rank|stamina">` always reads 0 — Rank gates never open (§416 + 11 more)
+- [ ] 69. Bare post-fight `<lose>/<gain>` apply on entry, not on the fight outcome (§570 + 7 more)
 
 **MEDIUM**
 - [x] 5. Implement `<items group … limit="N">` "choose up to N" pickup
@@ -86,6 +88,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 60. Affliction `<effect>` forms `divide`/`target`/`stamina` inert; item `<curse>` children never attach
 - [x] 61. book6/628: the rerunnable `<set>` clobbers the roll's var — inn rest/dysentery never fires
 - [x] 64. Asset-only releases do not invalidate the PWA cache
+- [ ] 70. Visit box renders unticked on the visit it ticks; bare `<tick/>` prints "If not, , and read on" (§496 + widespread)
 
 **LOW**
 - [x] 9. Centralise tag dispatch into a registry
@@ -2332,3 +2335,90 @@ the drop-in instructions stay. Also tightened the repo-tree comment on `images/`
 from "Section illustrations are NOT included" to "General per-section art is NOT
 included," since that folder never held the bespoke illustrations (they come from
 the book folders). Doc-only; no stamp/test loop run, as noted above.
+
+---
+
+## 68. `<if ability="rank|stamina">` conditions always read 0 — Rank gates never open  — HIGH (engine)
+
+*(Filed 2026-07-10 from playtesting §416.)* `evaluateCondition`'s `ability=`
+handler (`engine.js`) resolves the ability through `firstAbility()`, which only
+recognizes the **six core abilities** and returns `null` for `rank`/`stamina`.
+The value therefore falls to `0`, so every `<if ability="rank" …>` comparison is
+against 0 regardless of the character's real Rank. `resolveValue`/`evalExpression`
+and `adjustAmount` already special-case `rank`→`state.rankValue()` and
+`stamina`→ the (effective-max) score; the condition path just never got the same
+routing.
+
+Effect: `greaterthan`/`equals` Rank gates never fire (the branch stays greyed and
+its links disabled — e.g. §416's south-west/south-east ship routes are dead even
+at Rank 10), and `lessthan` Rank gates fire *always* (§b4/255's "Rank less than 4"
+branch shows for everyone). Affects **12 sections**: book1/13, 249, 312, 364, 366,
+416, 502; book2/95, 480; book4/255, 294, 465.
+
+Fix: in the `add(get('ability'), …)` branch, route `rank`→`state.rankValue()` and
+`stamina`→ the effective/written score (per the `modifier`) before falling back to
+`firstAbility`, mirroring `evalExpression`. Add a focused headless assertion (a
+Rank-N character passing/failing a `greaterthan`/`lessthan` Rank gate) and re-run
+the every-section scan.
+
+**Done (2026-07-10).** Routed `rank`→`state.rankValue()` and `stamina`→
+`effectiveStaminaMax()` (with a `modifier`) / current Stamina (without) in the
+`ability=` condition handler, before the `firstAbility` fallback — parity with
+`evalExpression`/`adjustAmount`. Added seven `_test.html` assertions (Rank-10 vs
+Rank-2 characters across `greaterthan`/`lessthan`/`equals`, plus a `stamina`
+read). Suite green: `RESULT ALL PASS pass=641 fail=0`.
+
+---
+
+## 69. Bare post-fight `<lose>/<gain>` apply on entry, not on the fight outcome  — HIGH (render)
+
+*(Filed 2026-07-10 from playtesting §570.)* When a fight's win/lose consequence is
+written as **bare prose** after the `<fight>` (not wrapped in `<if dead=…>` /
+`<success>` / `<failure>`), the inline `<lose>`/`<gain>` effects auto-apply on
+render (`renderPassive`), before the fight is fought. The fight gate only disables
+*navigation* buttons, not effects. §570 sets you to 1 Stamina **and strips all
+your Shards the instant you enter**, then makes you fight the Tree Guard.
+
+An XML-aware scan (see scratchpad) finds **8 player-facing cases** (bare,
+non-`hidden` `<lose>/<gain>` after a `<fight>`, outside any gating wrapper):
+book1/199 (`gain shards="200"` win reward), book1/570 (`lose staminato/shards`
+lose penalty), book2/476 (`lose codeword="Brisket"` on win), book2/601
+(`gain shards="25"` on win), book3/500 (`lose item` on win), book5/162
+(`gain shards="15"` on win), book5/198 (`lose curse="Champion's Curse"`),
+book6/490 (`gain shards="15"` unconditional post-fight). The other matches are
+`hidden="t"` bookkeeping codewords already deferred by task 54's escape-clear
+machinery. **§198 is also silently broken today**: its `<lose curse>` runs as a
+no-op on entry (curse not yet applied), memoizes, and never lifts the Champion's
+Curse the player picks up mid-fight — COMBAT stays halved.
+
+Approach (chosen after scope check — 8 cases over 5 books favours a general engine
+fix over 8 XML edits): defer a bare, **non-`hidden`** `<lose>/<gain>` that sits
+after a `<fight>` (outside any conditional wrapper) until the fight resolves,
+classifying it win/lose/unconditional by the surrounding prose (reuse
+`computeFightGate`'s LOSE/WIN heuristic + `aggregateFightOutcome`), and applying it
+only on the matching branch (win/uncond → on win; lose → on loss). Excluding
+`hidden="t"` keeps task 54 untouched. Add a headless test (enter §570, assert
+Shards/Stamina unchanged pre-fight; lose → 1 Stamina + 0 Shards; §199 win → +200)
+and re-run the every-section scan.
+
+---
+
+## 70. Visit box renders unticked on the visit it ticks; bare `<tick/>` prints a dangling comma  — MEDIUM (render)
+
+*(Filed 2026-07-10 from playtesting §496.)* Two defects in the standard box idiom
+`<if ticks="1">…goto…</if> If not, <tick/>, and read on.` (book1/160, 496, 199, …;
+the `<tick/>, and read on` phrasing appears in **45 sections**):
+
+1. **Box shows empty on the ticking visit.** The section box row is drawn
+   (`render.js` ~L168) from `tickCount()` *before* `appendChildren` (L207) runs the
+   `<tick/>`, so on the first visit the box still renders ☐ even though the tick is
+   applied to state; it only shows ☑ on a later visit. Reads as "the box isn't
+   being ticked." Fix: build/populate the box row *after* `appendChildren` (re-read
+   `tickCount()`), keeping it in the same visual slot (insert before `.flow`).
+2. **Wording.** A bare `<tick/>` renders no text, so `If not, <tick/>, and read on.`
+   comes out as **"If not, , and read on."** (dangling comma). Fix: render a bare
+   section-box `<tick/>` (no codeword / meaningful attrs) as its printed words —
+   "tick the box" — so the sentence reads naturally, matching the gamebooks.
+
+Add a headless assertion (first visit to a `boxes="1"` section shows ☑ after
+render and the prose contains "tick the box", no ", ,") and re-run the scan.

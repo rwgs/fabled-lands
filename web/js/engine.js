@@ -232,9 +232,15 @@ export function evaluateCondition(el, state) {
   add(get('var'), () => { const v = state.getVar(get('var')); const cmp = compare(v); return cmp == null ? v !== 0 : cmp; });
   add(get('name'), () => { const v = state.codewordValue(get('name')); const cmp = compare(v); return cmp == null ? v !== 0 : cmp; });
   add(get('ability'), () => {
-    const ab = firstAbility(get('ability'));
+    // `rank`/`stamina` are stats, not core abilities — firstAbility() ignores them,
+    // so route them the way evalExpression/adjustAmount do (else the comparison ran
+    // against 0: every `<if ability="rank" greaterthan=N>` gate stayed shut). (task 68)
+    const spec = get('ability').split('|')[0].trim().toLowerCase();
     const natural = normalize(get('modifier') || '') === 'natural';
-    const v = ab ? state.abilityForCheck(ab, natural) : 0;
+    let v;
+    if (spec === 'rank') v = state.rankValue();
+    else if (spec === 'stamina') v = get('modifier') ? state.effectiveStaminaMax() : state.data.stamina;
+    else { const ab = firstAbility(get('ability')); v = ab ? state.abilityForCheck(ab, natural) : 0; }
     const cmp = compare(v);
     return cmp == null ? v > 0 : cmp;
   });
