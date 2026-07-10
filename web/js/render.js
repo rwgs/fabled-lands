@@ -162,21 +162,11 @@ export class Story {
     this.root.appendChild(label);
 
     // Tick boxes for this section (the empty boxes printed beside the number in
-    // the books). Filled ones reflect how many times the box has been ticked.
+    // the books). setSectionBoxes must run before appendChildren so an in-section
+    // <tick/> is capped (task 27), but the row is DRAWN after the walk (below) so a
+    // box ticked *this* visit shows ☑ now, not a render later (task 70).
     const nBoxes = parseInt(el.getAttribute('boxes') || '0', 10);
     this.state.setSectionBoxes(nBoxes); // cap this section's box ticks (task 27)
-    if (nBoxes > 0) {
-      const ticked = this.state.tickCount(this.book, this.section);
-      const boxRow = document.createElement('div');
-      boxRow.className = 'section-boxes';
-      for (let i = 0; i < nBoxes; i++) {
-        const b = document.createElement('span');
-        b.className = 'tick-box' + (i < ticked ? ' ticked' : '');
-        b.textContent = i < ticked ? '☑' : '☐';
-        boxRow.appendChild(b);
-      }
-      this.root.appendChild(boxRow);
-    }
 
     const flow = document.createElement('div');
     flow.className = 'flow';
@@ -207,6 +197,20 @@ export class Story {
     this.appendChildren(flow, el, 'r');
     this.applyFightGate(flow);
     this.surfaceExtraChoices(flow); // persistent <extrachoice> options active here (task 32)
+    // Draw the box row now (after the walk) so a <tick/> applied this visit reads
+    // as ☑ immediately; it sits above the prose, beside the section number (task 70).
+    if (nBoxes > 0) {
+      const ticked = this.state.tickCount(this.book, this.section);
+      const boxRow = document.createElement('div');
+      boxRow.className = 'section-boxes';
+      for (let i = 0; i < nBoxes; i++) {
+        const b = document.createElement('span');
+        b.className = 'tick-box' + (i < ticked ? ' ticked' : '');
+        b.textContent = i < ticked ? '☑' : '☐';
+        boxRow.appendChild(b);
+      }
+      this.root.appendChild(boxRow);
+    }
     this.root.appendChild(flow);
 
     // Dead-end fallback: a fully-resolved section offering no way forward is a
@@ -823,9 +827,22 @@ export class Story {
       const span = document.createElement('span');
       span.className = 'fx';
       this.appendChildren(span, node, path);
+      // A bare section-box <tick/> carries no words of its own, so the printed
+      // instruction "…, tick the box, and read on" would collapse to "…, , and
+      // read on"; supply the words so the sentence reads naturally (task 70).
+      if (!span.textContent.trim() && this.isBareBoxTick(node)) span.textContent = 'tick the box';
       if (span.textContent.trim()) container.appendChild(span);
     }
     return null;
+  }
+
+  // A plain visit-box <tick/> — no words of its own and no attribute that would
+  // route it elsewhere (codeword/god/special/price/flag/shards/ability…); only an
+  // optional count= multiplier. These are the "tick the box" instructions (task 70).
+  isBareBoxTick(node) {
+    if (node.tagName.toLowerCase() !== 'tick') return false;
+    if (node.textContent.trim()) return false;
+    return node.getAttributeNames().every((a) => a.toLowerCase() === 'count');
   }
 
   // Does this <gain>/<lose>/<tick> ask the player to choose which ability it

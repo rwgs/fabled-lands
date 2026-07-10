@@ -1746,6 +1746,16 @@ async function run() {
     gtk0.setSectionBoxes(0); gtk0.data.section = '999'; gtk0.addTick(); gtk0.addTick();
     ok('boxless section tick is uncapped', gtk0.tickCount(1, '999') === 2, `t=${gtk0.tickCount(1,'999')}`);
 
+    // --- task 70: box shows ☑ on the visit it ticks; bare <tick/> prints its words ---
+    const g70 = GameState.create({ name:'T70', gender:'m', profession:'Warrior', book:1, adv });
+    const c70 = document.createElement('div');
+    const st70 = new Story(c70, g70, { navigate(){}, onDeath(){}, notify(){} });
+    g70.data.book = 1; g70.data.section = '496';
+    const s496 = await data.getSection(1, '496'); st70.begin(s496, 1, '496');
+    ok('§1.496 first visit ticks the box in state', g70.tickCount(1, '496') === 1, `t=${g70.tickCount(1,'496')}`);
+    ok('§1.496 box renders ☑ on the ticking visit (was ☐ before)', c70.querySelectorAll('.section-boxes .tick-box.ticked').length === 1, `ticked=${c70.querySelectorAll('.section-boxes .tick-box.ticked').length}`);
+    ok('§1.496 bare <tick/> renders "tick the box, and read on"', /tick the box, and read on/.test(c70.textContent) && !/,\s*,/.test(c70.textContent), c70.textContent.replace(/\s+/g,' ').slice(0,140));
+
     // --- task 28: honour dead="t" on <goto>/<choice> ---
     // §4.16: a living survivor must NOT be able to click the dead="t" link into §7.
     const gAlive = GameState.create({ name:'DA', gender:'m', profession:'Warrior', book:4, adv });

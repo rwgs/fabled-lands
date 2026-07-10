@@ -88,7 +88,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 60. Affliction `<effect>` forms `divide`/`target`/`stamina` inert; item `<curse>` children never attach
 - [x] 61. book6/628: the rerunnable `<set>` clobbers the roll's var — inn rest/dysentery never fires
 - [x] 64. Asset-only releases do not invalidate the PWA cache
-- [ ] 70. Visit box renders unticked on the visit it ticks; bare `<tick/>` prints "If not, , and read on" (§496 + widespread)
+- [x] 70. Visit box renders unticked on the visit it ticks; bare `<tick/>` prints "If not, , and read on" (§496 + widespread)
 
 **LOW**
 - [x] 9. Centralise tag dispatch into a registry
@@ -2422,3 +2422,13 @@ the `<tick/>, and read on` phrasing appears in **45 sections**):
 
 Add a headless assertion (first visit to a `boxes="1"` section shows ☑ after
 render and the prose contains "tick the box", no ", ,") and re-run the scan.
+
+**Done (2026-07-10).** (1) `render()` now runs `setSectionBoxes` before the walk
+(keeps the tick cap) but *draws* the box row after `appendChildren`, inserted above
+`.flow`, so a `<tick/>` applied this visit reads ☑ immediately. (2) A new
+`isBareBoxTick()` guard (a `<tick>` with no words and no attribute beyond `count=`)
+makes `renderPassive` print "tick the box" for the otherwise word-less box tick, so
+"If not, <tick/>, and read on" renders as "If not, tick the box, and read on".
+Added three `_test.html` assertions rendering §1.496 (state ticked, box shows ☑,
+prose reads naturally with no ", ,"). Suite green: `RESULT ALL PASS pass=644
+fail=0`.
