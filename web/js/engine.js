@@ -964,6 +964,18 @@ export function buyResurrectionDeal(state, { book, section, text, god, cost = 0 
   state.addResurrection({ book, section, text, god: god || null });
 }
 
+/** Cash in the earliest resurrection deal on death: consume it and revive at half
+ *  the character's maximum Stamina (min 1). Returns the deal's { book, section }
+ *  to send the player to, or null if there was none. The revive rule lives here,
+ *  not in the app layer (task 34). */
+export function reviveWithResurrection(state) {
+  const res = state.data.resurrections.shift();
+  if (!res) return null;
+  state.data.stamina = Math.max(1, Math.floor(state.data.staminaMax / 2));
+  state.changed();
+  return { book: res.book, section: res.section };
+}
+
 // ---- roll resolution helpers ----------------------------------------------
 /** Total die-roll adjustment from the <adjust> children of a roll node.
  *  Each <adjust> is a conditional modifier ("add N if you have a good crew");

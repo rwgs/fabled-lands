@@ -5,7 +5,7 @@ import * as data from './js/data.js';
 import { GameState, readSlotData, importSave, loadSlotMeta, deleteSlot, makeItem, nextFreeSlot, sanitizeData, currencyAward, splitItemName } from './js/state.js';
 import * as eng from './js/engine.js';
 import { fightRound, makeFight, groupFightRound, isDefeated } from './js/combat.js';
-import { goodsFrom, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo } from './js/market.js';
+import { goodsFrom, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo, canUpgradeCrew, payChoiceCost } from './js/market.js';
 import { Story } from './js/render.js';
 import { Narrator } from './js/tts.js';
 import { renderSheet } from './js/ui.js';
@@ -384,6 +384,13 @@ async function run() {
     const gr = GameState.create({ name:'R', gender:'f', profession:'Priest', book:1, adv }); gr.data.shards=100;
     eng.buyResurrectionDeal(gr, { book:2, section:'50', text:'a deal', god:'Elnir', cost:30 });
     ok('resurrection: charges cost + records deal', gr.data.shards===70 && gr.hasResurrection() && gr.data.resurrections[0].section==='50', `sh=${gr.data.shards}`);
+    // reviveWithResurrection (task 34): consume the deal, revive at half max Stamina, return target.
+    gr.data.staminaMax = 20; gr.data.stamina = 0;
+    const revTarget = eng.reviveWithResurrection(gr);
+    ok('task34: revive consumes the deal + heals to half max + returns target',
+       revTarget && revTarget.book===2 && revTarget.section==='50' && gr.data.stamina===10 && !gr.hasResurrection(),
+       `t=${JSON.stringify(revTarget)} st=${gr.data.stamina} has=${gr.hasResurrection()}`);
+    ok('task34: revive with no deal returns null and leaves Stamina', eng.reviveWithResurrection(gr) === null && gr.data.stamina === 10);
 
     // render representative sections
     const container = document.createElement('div');
@@ -2441,6 +2448,38 @@ async function run() {
       const nP1 = nar.prepare(flowP);
       const nP2 = nar.prepare(flowP);
       ok('task33: <p> sections still narrate and prepare is idempotent', nP1 >= 3 && nP2 === nP1, `p1=${nP1} p2=${nP2}`);
+    }
+
+    // --- task 34: rules moved out of the view layer -------------------------
+    { // block-scoped
+      // Crew upgrade one-grade-at-a-time rule now lives in market.canUpgradeCrew,
+      // and applyInlineBuy enforces it (not just the disabled button).
+      const gc = GameState.create({ name:'C34', gender:'m', profession:'Warrior', book:1, adv });
+      gc.data.shards = 500;
+      gc.addShip({ type:'barque', name:'S', crew:'poor', cargo:[], docked:null });
+      ok('task34: canUpgradeCrew allows one grade up', canUpgradeCrew(gc, 'average').ok === true);
+      ok('task34: canUpgradeCrew refuses a two-grade jump', canUpgradeCrew(gc, 'good').ok === false);
+      const jump = applyInlineBuy(gc, { price: 50, crew: 'good' });
+      ok('task34: applyInlineBuy refuses the two-grade jump + spends nothing', jump.ok === false && gc.data.shards === 500 && gc.ships[0].crew === 'poor', `ok=${jump.ok} sh=${gc.data.shards} crew=${gc.ships[0].crew}`);
+      const step = applyInlineBuy(gc, { price: 50, crew: 'average' });
+      ok('task34: applyInlineBuy applies a one-grade upgrade + charges', step.ok === true && gc.data.shards === 450 && gc.ships[0].crew === 'average');
+      ok('task34: now good is one grade up', canUpgradeCrew(gc, 'good').ok === true);
+      const gns = GameState.create({ name:'NS34', gender:'m', profession:'Warrior', book:1, adv });
+      ok('task34: canUpgradeCrew refuses with no ship', canUpgradeCrew(gns, 'average').ok === false);
+
+      // Choice-cost transaction now lives in market.payChoiceCost.
+      const gp = GameState.create({ name:'P34', gender:'m', profession:'Warrior', book:1, adv });
+      gp.data.shards = 100;
+      payChoiceCost(gp, { pay: false, cost: 30 });
+      ok('task34: payChoiceCost with pay=false charges nothing', gp.data.shards === 100);
+      payChoiceCost(gp, { pay: true, cost: 30 });
+      ok('task34: payChoiceCost deducts Shards when paying', gp.data.shards === 70);
+      gp.addItem(makeItem('item', 'green gem'));
+      payChoiceCost(gp, { pay: true, cost: 0, item: 'green gem' });
+      ok('task34: payChoiceCost consumes the required item', !gp.hasItem('green gem'));
+      gp.adjustCurrency('Mithral', 10);
+      payChoiceCost(gp, { pay: true, cost: 4, currency: 'Mithral', foreignCoin: true });
+      ok('task34: payChoiceCost deducts a foreign currency, not Shards', gp.currencyBalance('Mithral') === 6 && gp.data.shards === 70, `mith=${gp.currencyBalance('Mithral')} sh=${gp.data.shards}`);
     }
 
   } catch (e) {

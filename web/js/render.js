@@ -12,9 +12,9 @@ import {
   applyRest, buyResurrectionDeal, abilityChoiceOptions, readItemEffects,
 } from './engine.js';
 import { makeFight, fightRound, groupFightRound, isDefeated } from './combat.js';
-import { shopKind, goodsFrom, ownsGoods, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo } from './market.js';
+import { shopKind, goodsFrom, ownsGoods, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo, canUpgradeCrew, payChoiceCost } from './market.js';
 import { normalize, makeItem, parseTags, currencyAward, splitItemName, isShardsCurrency } from './state.js';
-import { ABILITY_LABEL, CREW_LEVELS } from './rules.js';
+import { ABILITY_LABEL } from './rules.js';
 import { bookTitle, availableBooks } from './data.js';
 import { animateDice, modal } from './ui.js';
 
@@ -1479,8 +1479,7 @@ export class Story {
           if (this.sectionFight) this.sectionFight.outcome = 'fled';
           if (this.state.isDead()) { this.rerender(); return; }
         }
-        if (pay && cost) { if (foreignCoin) this.state.adjustCurrency(currency, -cost); else this.state.adjustMoney(-cost); }
-        if (pay && itemReq) { const it = this.state.findItems(itemReq)[0]; if (it) this.state.removeItemById(it.id); }
+        payChoiceCost(this.state, { pay, cost, currency, foreignCoin, item: itemReq }); // transaction lives in market.js (task 34)
         if (section == null) return;
         this.navigate(targetBook, section);
       });
@@ -2357,19 +2356,17 @@ export class Story {
       return null;
     }
 
-    // Crew upgrade: one grade at a time (poor→average→good→excellent), so the
-    // offer is usable only when your crew is exactly the grade below the target.
+    // Crew upgrade: one grade at a time (poor→average→good→excellent). The rule
+    // lives in market.canUpgradeCrew (task 34); the view just gates on its verdict.
     if (crew) {
-      const crewRank = (c) => CREW_LEVELS.indexOf(c);
-      const ship = this.state.ships[0];
-      const usable = !!ship && crewRank(ship.crew) === crewRank(crew) - 1;
+      const up = canUpgradeCrew(this.state, crew);
       const btn = document.createElement('button');
       btn.className = 'btn-mini';
       const inner = document.createElement('span');
       this.appendChildren(inner, node, path);
       btn.textContent = inner.textContent.trim() || (price ? `Hire ${titleCase(crew)} crew (${price} Shards)` : `${titleCase(crew)} crew`);
-      btn.disabled = (price > 0 && this.state.data.shards < price) || !usable;
-      if (!usable) btn.title = ship ? `Your crew must be ${CREW_LEVELS[crewRank(crew) - 1] || '—'} first.` : 'You have no ship.';
+      btn.disabled = (price > 0 && this.state.data.shards < price) || !up.ok;
+      if (!up.ok) btn.title = up.reason;
       btn.addEventListener('click', () => {
         const res = applyInlineBuy(this.state, { price, crew });
         if (!res.ok) { if (res.note) this.notify(res.note, 'warn'); return; }

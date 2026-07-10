@@ -4,7 +4,7 @@ import * as data from './data.js';
 import { GameState, loadSlotMeta, deleteSlot, nextFreeSlot, readSlotData, importSave } from './state.js';
 import { ABILITIES, ABILITY_LABEL, ABILITY_BLURB, PROFESSIONS, rankTitle, ordinal } from './rules.js';
 import { Story } from './render.js';
-import { useItemEffect, seedRng } from './engine.js';
+import { useItemEffect, seedRng, reviveWithResurrection } from './engine.js';
 import { renderSheet, modal, toast, escapeHtml } from './ui.js';
 import { VERSION } from './version.js';
 import { Narrator } from './tts.js'; // [TTS] optional narration — remove this + the [TTS] hooks below to drop the feature
@@ -639,10 +639,8 @@ async function handleDeath() {
   const choice = await modal({ title: 'You have died', body, buttons, dismissable: false });
   deathShown = false;
   if (choice === 'res' && res) {
-    state.data.resurrections.shift();
-    state.data.stamina = Math.max(1, Math.floor(state.data.staminaMax / 2));
-    state.changed();
-    navigate(res.book, res.section);
+    const target = reviveWithResurrection(state); // revive rule lives in engine.js (task 34)
+    if (target) navigate(target.book, target.section);
   } else if (choice === 'undo') { undo(); }
   else if (choice === 'load') { showSaves(); }
   else { showCreate(); }

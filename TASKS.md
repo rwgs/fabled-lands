@@ -95,7 +95,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 13. Optional: build-time XML validation
 - [x] 32. Implement or explicitly stub the remaining unhandled tags
 - [x] 33. Narrate sections without `<p>` wrappers (TTS)
-- [ ] 34. Finish moving rules out of the view layer
+- [x] 34. Finish moving rules out of the view layer
 - [ ] 35. iOS home-screen icons: provide PNG apple-touch-icon
 - [x] 36. Minor rule divergences (grab-bag)
 - [x] 37. Fix the `safeAddGodd` typo in the source XML
@@ -1169,21 +1169,38 @@ wrapping) + full render-every-section scan. `RESULT ALL PASS pass=607 fail=0`.
 
 ---
 
-## 34. Finish moving rules out of the view layer  — LOW (maintainability)
+## 34. Finish moving rules out of the view layer  — **done**
 
-Known strays that violate the architecture invariant (rules live in DOM-free
-modules):
-- `renderInlineSell` performs the cargo transaction itself — mutates
-  `ship.cargo` and money in the click handler (render.js:1313–1331; folded into
-  task 23's rewrite).
-- The "crew upgrades go one grade at a time" rule is inlined in
-  `renderInlineBuy` (render.js:1260) — `CREW_LEVELS` already lives in rules.js.
-- Choice costs are applied directly in `renderChoice`'s click handler
-  (render.js:724 — `adjustMoney(-cost)` / `removeItemById`).
-- `app.js:504` hard-codes the resurrection revive rule (half max Stamina) in
-  the app layer — move to `engine.js` beside `buyResurrectionDeal`.
+Known strays that violated the architecture invariant (rules live in DOM-free
+modules), each now moved into `market.js`/`engine.js` with the view reduced to
+reading attributes + wiring the click:
 
-Move each into `market.js`/`engine.js` and cover with headless unit tests.
+- **Cargo transaction** — already resolved by task 23: `renderInlineSell`'s
+  cargo→Shards move lives in `market.sellCargo` (the view only keeps the
+  view-linked barter-reward wiring, `applyLinkedCargoBuys`). Re-verified, no
+  change needed.
+- **Crew "one grade at a time" rule** — extracted to a new
+  `market.canUpgradeCrew(state, crew)` (`{ok, reason}`), which `applyInlineBuy`
+  now *enforces* (a two-grade jump is refused and spends nothing) rather than the
+  rule being computed only in the view's disabled-button gate. `renderInlineBuy`
+  just consumes the verdict for its disable/tooltip; `CREW_LEVELS` no longer
+  needs importing into `render.js`.
+- **Choice cost** — the paid-`<choice>` transaction (deduct Shards / foreign
+  currency, consume the required item) moved from `renderChoice`'s click handler
+  into `market.payChoiceCost(state, {pay, cost, currency, foreignCoin, item})`.
+- **Resurrection revive** — the "revive at half max Stamina" rule moved from
+  `app.js`'s `handleDeath` into `engine.reviveWithResurrection(state)`, which
+  consumes the earliest deal, heals to `max(1, floor(staminaMax/2))`, and returns
+  its `{book, section}` for the app to navigate to (or `null` if none).
+
+Verified: 12 new headless assertions (crew: one-grade allowed, two-grade jump
+refused by both `canUpgradeCrew` and `applyInlineBuy` with no Shards spent,
+one-grade applies + charges, no-ship refusal; `payChoiceCost` pay=false no-op,
+Shards deduct, item consume, foreign-currency debit; `reviveWithResurrection`
+half-heal + target + consume, and null when none) + the existing §400/§740/pay="f"
+choice-cost and crew tests still green + a real-app boot (`?demo=1.1`, no fatal,
+no module-load error) + full render-every-section scan. `RESULT ALL PASS pass=619
+fail=0`.
 
 ---
 

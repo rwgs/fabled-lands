@@ -135,10 +135,10 @@ export function applyInlineBuy(state, opts = {}) {
   if (price > 0 && state.data.shards < price) return { ok: false, note: 'Not enough Shards.' };
 
   if (crew) {
-    const ship = state.ships[0];
-    if (!ship) return { ok: false, note: 'You have no ship.' };
+    const up = canUpgradeCrew(state, crew); // one-grade-at-a-time rule (task 34)
+    if (!up.ok) return { ok: false, note: up.reason };
     if (price) state.adjustMoney(-price);
-    ship.crew = crew;
+    state.ships[0].crew = canonCrew(crew);
     state.changed();
     return { ok: true };
   }
@@ -155,6 +155,32 @@ export function applyInlineBuy(state, opts = {}) {
   if (price) state.adjustMoney(-price);
   state.addItem(makeItem(tool ? 'tool' : 'item', tool || item, bonus || 0, ability || null, tags || [], effects || []));
   return { ok: true };
+}
+
+/** Whether a crew upgrade to `crew` is allowed right now: you have a ship and its
+ *  crew is exactly one grade below the target (crews improve one grade at a time —
+ *  task 24). Returns { ok, reason } so the view can gate/tooltip the offer and
+ *  applyInlineBuy can enforce it. */
+export function canUpgradeCrew(state, crew) {
+  const ship = state.ships[0];
+  if (!ship) return { ok: false, reason: 'You have no ship.' };
+  const target = CREW_LEVELS.indexOf(canonCrew(crew));
+  if (target < 0) return { ok: false, reason: 'Unknown crew grade.' };
+  const have = CREW_LEVELS.indexOf(ship.crew);
+  if (have === target - 1) return { ok: true };
+  const reason = have >= target ? 'Your crew is already at least that good.'
+    : `Your crew must be ${CREW_LEVELS[target - 1]} first.`;
+  return { ok: false, reason };
+}
+
+/** Apply the cost of taking a paid <choice>: deduct its Shards (or foreign
+ *  currency) and consume the required item, but only when the choice actually
+ *  `pay`s (pay="t", or a bare shards= cost). The view reads the attributes; the
+ *  transaction lives here (task 34). */
+export function payChoiceCost(state, { pay, cost = 0, currency = null, foreignCoin = false, item = null }) {
+  if (!pay) return;
+  if (cost) { if (foreignCoin) state.adjustCurrency(currency, -cost); else state.adjustMoney(-cost); }
+  if (item) { const it = state.findItems(item)[0]; if (it) state.removeItemById(it.id); }
 }
 
 /** Sell one carried item by name for `gain` Shards. Returns { ok }. */
