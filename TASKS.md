@@ -100,7 +100,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 36. Minor rule divergences (grab-bag)
 - [x] 37. Fix the `safeAddGodd` typo in the source XML
 - [x] 38. Gate cache widgets on `lock`/`unlock` under the single-pass render (book1/91 gamble)
-- [ ] 39. Defer confiscate-and-return `<transfer … from=>` until a fight resolves (book2/462)
+- [x] 39. Defer confiscate-and-return `<transfer … from=>` until a fight resolves (book2/462)
 - [ ] 65. Rules modal emits invalid table heading markup
 - [ ] 66. Add a CI workflow that runs the headless smoke suite
 - [ ] 67. README: align the illustration docs with the shipped build
@@ -1332,14 +1332,34 @@ sections render clean). `RESULT ALL PASS pass=626 fail=0`.
 ## 39. Defer confiscate-and-return `<transfer … from=>` until a fight resolves  — LOW
 
 `<transfer>` is implemented (task 20), but in book2/462 the return leg
-(`<if dead="f"><transfer item="*" from="2.462"/></if>`) is active from entry —
+(`<if dead="f"><transfer item="*" from="2.462"/></if>`) was active from entry —
 the player is "not dead" throughout the fight, not only after winning — so the
-weapons/armour stashed at the top are handed straight back and the vampire is
-fought armed (the same net effect as the old do-nothing behaviour, so no
-regression, but not the intended weaponless fight). Non-fight transfers (villa
-stashing, banking) are correct. Fix: defer effects that appear after a `<fight>`
-and are gated on `dead="f"` until the fight actually resolves (relates to the
-fight-gate machinery and task 28's `dead="t"` handling). Add a §462 test.
+weapons/armour stashed at the top were handed straight back and the vampire was
+fought armed.
+
+**Done (2026-07-09).** This turned out to be a broader bug: *every* post-fight
+`<if dead="f">` in the corpus is an "if you win…" outcome (11 sections —
+book1/21/297/634, book2/413/462/469/514, book3/7, book6/55/186/348/718), and
+because the player is "alive" all through the fight, each one fired its rewards on
+**entry** — book6/348 handed over 12,000 Shards, book2/413/55/718 ticked their
+win codewords, book1/634/3.7 gave Shards, all before a blow was struck.
+
+Fix (`render.js`): the `if/elseif/else` chain walker now recognises a *fight-outcome
+chain* — an `<if>` carrying a `dead=` attribute positioned after a fight — via a new
+`isDeferredDeadChain(node)`, and holds the **whole** chain inactive (so the `<else>`
+lose-branch can't slip active either) until `aggregateFightOutcome` reports `win`
+or `lose`. Once resolved the ordinary `dead=` test is correct: a win → alive →
+the "if you win" branch applies its rewards / the §462 confiscate-return; a loss →
+dead → the `<else>` (or plain death). Nothing before a fight, and no non-`dead=`
+conditional, is affected. The suppression reuses the existing grayed-branch
+`this.inactive` path, so `<transfer>`/`<gain>`/`<tick>` apply nothing and reward
+`item`/`weapon` awards render as disabled Take buttons until the win.
+
+Verified: 4 new headless assertions (§462 confiscates gear to the cache on entry;
+the return branch stays grayed mid-fight; no weapon/armour returns to the sheet
+while fighting; winning returns the stashed gear and empties the cache) + the full
+fight/branch suite and render-every-section scan unchanged. `RESULT ALL PASS
+pass=630 fail=0`.
 
 ---
 

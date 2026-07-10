@@ -273,7 +273,7 @@ export class Story {
   // ---- core walk -----------------------------------------------------------
   appendChildren(container, parent, basePath) {
     const nodes = Array.from(parent.childNodes);
-    let chainActive = false, chainDone = false; // if/elseif/else chain state
+    let chainActive = false, chainDone = false, chainDeferred = false; // if/elseif/else chain state
 
     nodes.forEach((node, idx) => {
       // A forced economic payment (see renderPayment) blocks the rest of the
@@ -313,8 +313,17 @@ export class Story {
         let active = false;
         if (tag === 'if' || !chainActive) {
           chainActive = true;
-          active = tag === 'else' ? true : evaluateCondition(node, this.state);
+          // A dead=-gated chain sitting AFTER an unresolved fight is that fight's
+          // win/lose outcome. The player is "alive" throughout the fight, so a naive
+          // dead="f" test fires the "if you win" branch — and its rewards / the
+          // confiscate-return <transfer> (book2/462) — mid-fight. Hold the WHOLE chain
+          // inactive until the fight is decided (won or lost); the else must not slip
+          // active either, so the flag rides the whole chain. (task 39)
+          chainDeferred = tag === 'if' && this.isDeferredDeadChain(node);
+          active = chainDeferred ? false : (tag === 'else' ? true : evaluateCondition(node, this.state));
           chainDone = active;
+        } else if (chainDeferred) {
+          active = false; // still inside the deferred (fight-outcome) chain
         } else if (chainDone) {
           active = false; // a previous branch already matched
         } else if (tag === 'else') {
@@ -325,7 +334,7 @@ export class Story {
         this.renderConditionalBranch(container, node, path, active);
         return;
       }
-      chainActive = false; chainDone = false;
+      chainActive = false; chainDone = false; chainDeferred = false;
 
       if (tag === 'success' || tag === 'failure' || tag === 'outcomes') {
         this.renderBranch(container, node, path, this.activeRoll);
@@ -1911,6 +1920,19 @@ export class Story {
     if (!cw.split(/[|,]/).some((c) => this.escapeCodewords.has(c.trim()))) return false;
     if (!this.sectionFights.length) return false; // before the fight → an entry clear, apply now
     return this.aggregateFightOutcome(this.sectionFights) !== 'win';
+  }
+
+  // A dead=-gated <if> chain positioned AFTER a fight is that fight's win/lose
+  // outcome (book2/462 confiscate-return, book6/348's "if you win" reward, …).
+  // Defer the whole chain until the fight is decided: while it is unresolved the
+  // player is still alive, which would wrongly activate the "if you win" branch and
+  // apply its rewards / confiscate-return before a blow is struck. Once the fight
+  // resolves (win → alive; lose → dead), the normal dead= test is correct. (task 39)
+  isDeferredDeadChain(node) {
+    if (node.getAttribute('dead') == null) return false;   // only fight-outcome gates
+    if (!this.sectionFights.length) return false;          // no fight before this node
+    const outcome = this.aggregateFightOutcome(this.sectionFights);
+    return outcome !== 'win' && outcome !== 'lose';        // still unresolved (or fled) → hold
   }
 
   // Tag a rendered nav button with its fight role, for applyFightGate to act on.

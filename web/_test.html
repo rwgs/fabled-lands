@@ -2519,6 +2519,31 @@ async function run() {
       ok('task35: apple-touch-icon decodes at 180x180', dims && dims.w === 180 && dims.h === 180, JSON.stringify(dims));
     }
 
+    // --- task 39: confiscate-and-return <transfer> deferred until the fight is won (book2/462) ---
+    { // block-scoped
+      const g462 = GameState.create({ name:'V462', gender:'m', profession:'Warrior', book:2, adv });
+      g462.data.stamina = 100; g462.data.staminaMax = 100; // survive the vampire
+      const startItems = g462.itemCount();
+      const c462 = document.createElement('div');
+      const st462 = new Story(c462, g462, { navigate(){}, onDeath(){}, notify(){} });
+      st462.begin(await data.getSection(2, '462'), 2, '462');
+      const afterConfiscate = g462.itemCount();
+      // On entry the weapon+armour are stashed in cache 2.462, and the dead="f"
+      // return leg must NOT fire yet (the vampire is fought unarmed).
+      ok('task39: §462 confiscates gear on entry (moved to the cache)',
+         afterConfiscate < startItems && g462.cacheItems('2.462').length === (startItems - afterConfiscate) && g462.cacheItems('2.462').length >= 2,
+         `start=${startItems} after=${afterConfiscate} cache=${g462.cacheItems('2.462').length}`);
+      ok('task39: §462 the return branch is held inactive mid-fight (grayed)', !!c462.querySelector('.cond-inactive'));
+      ok('task39: §462 no weapon/armour back on the sheet during the fight',
+         g462.data.items.every((i) => i.kind !== 'weapon' && i.kind !== 'armour'));
+      // Win the fight → the dead="f" branch activates → the gear is handed back.
+      st462.sectionFights.forEach((f) => { f.outcome = 'win'; });
+      st462.rerender();
+      ok('task39: §462 winning returns the stashed gear and empties the cache',
+         g462.itemCount() === startItems && g462.cacheItems('2.462').length === 0,
+         `n=${g462.itemCount()} start=${startItems} cache=${g462.cacheItems('2.462').length}`);
+    }
+
   } catch (e) {
     out.push('FATAL ' + (e.stack || e.message));
     fail++;
