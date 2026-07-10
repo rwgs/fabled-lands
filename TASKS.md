@@ -102,7 +102,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 38. Gate cache widgets on `lock`/`unlock` under the single-pass render (book1/91 gamble)
 - [x] 39. Defer confiscate-and-return `<transfer … from=>` until a fight resolves (book2/462)
 - [x] 65. Rules modal emits invalid table heading markup
-- [ ] 66. Add a CI workflow that runs the headless smoke suite
+- [x] 66. Add a CI workflow that runs the headless smoke suite
 - [ ] 67. README: align the illustration docs with the shipped build
 - [x] 42. Inner `<difficulty>`/`<random>`/`<rankcheck>` rolls inside a `<group>` are unrun
 - [x] 44. Fold the ring of ultimate power's `Rank`/`Stamina` auras (book5/564)
@@ -2288,10 +2288,22 @@ Add a GitHub Actions workflow that, on push/PR:
    `--user-data-dir` (Chrome is preinstalled on `ubuntu-latest` runners).
 3. Fails unless the dumped `#results` starts with `RESULT ALL PASS`.
 
-Optionally also run the `build-data.ps1` XML validation pre-pass (`pwsh` is on
-the runners) and fail if the regenerated JSON differs from the committed bundle
-(catches hand-edited `web/data/*.json`). Keep it to one small workflow file —
-no build toolchain is to be introduced.
+**Done (2026-07-09).** Added `.github/workflows/smoke.yml` — one small workflow,
+one job (`ubuntu-latest`), no build toolchain: checkout → serve the repo root with
+`python3 -m http.server` → wait for it → drive `google-chrome --headless=new
+--dump-dom --virtual-time-budget=90000` with a fresh `--user-data-dir` (so no stale
+service-worker cache reports a false pass) → the step exits non-zero unless the
+dumped DOM contains `RESULT ALL PASS`, echoing the first `FAIL` lines otherwise.
+The script uses `set -euo pipefail` with an `if`-guarded wait loop and `|| true`
+on Chrome so only a genuine suite failure reds the job.
+
+Deliberately **omitted** the optional regenerate-and-diff of `web/data/*.json`:
+[[build-needs-pwsh7]] shows JSON formatting is sensitive to the PowerShell build
+that produced it, so a cross-platform (Linux `pwsh`) regenerate could diff
+spuriously and red the job for no real defect. The smoke suite already loads the
+committed JSON and renders every section, so a malformed/hand-broken bundle fails
+the suite anyway. (Cannot be executed from this environment — validated for
+structure: no tabs, well-formed `on:`/`jobs:`, `set -e`-safe shell.)
 
 ---
 

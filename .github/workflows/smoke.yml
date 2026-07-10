@@ -1,0 +1,48 @@
+name: Smoke test
+
+# Runs the headless smoke suite (web/_test.html) on every push and pull request.
+# The suite exercises the rules engine and renders every section of all six books,
+# so a regression that would only show up in the browser is caught in CI instead
+# of shipping silently. No build toolchain is introduced — just Python's stdlib
+# HTTP server and the Chrome that ubuntu-latest ships preinstalled.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Render every section headlessly
+        run: |
+          set -euo pipefail
+          # Serve the repo root; _test.html loads ./js and ./data relative to /web/.
+          python3 -m http.server 8848 --directory "$GITHUB_WORKSPACE" &
+          SERVER=$!
+          trap 'kill "$SERVER" 2>/dev/null || true' EXIT
+          # Wait for the server to accept connections before driving Chrome.
+          for _ in $(seq 1 40); do
+            if curl -sf http://localhost:8848/web/_test.html -o /dev/null; then break; fi
+            sleep 0.5
+          done
+
+          DOM="$(mktemp)"
+          UDD="$(mktemp -d)"   # a fresh profile so no stale service-worker cache can serve an old bundle
+          google-chrome --headless=new --disable-gpu --no-sandbox \
+            --no-first-run --no-default-browser-check \
+            --dump-dom --virtual-time-budget=90000 \
+            --user-data-dir="$UDD" \
+            "http://localhost:8848/web/_test.html" > "$DOM" || true
+
+          echo "----- result -----"
+          grep -oE 'RESULT (ALL PASS|FAILURES) pass=[0-9]+ fail=[0-9]+' "$DOM" | head -1 || echo "(no RESULT line — the suite did not run)"
+          if grep -q 'RESULT ALL PASS' "$DOM"; then
+            echo "✓ Smoke suite passed."
+          else
+            echo "✗ Smoke suite failed. First FAIL lines:"
+            grep -oE 'FAIL [^<]{0,160}' "$DOM" | head -50 || true
+            exit 1
+          fi
