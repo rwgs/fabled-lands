@@ -60,7 +60,8 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 51. `<difficulty|rankcheck flag=…>` roll gates unimplemented; shared `<success>` binds only the last roll
 - [x] 52. `removeCodeword` leaves the codeword's *value* behind — bonus counters never reset
 - [x] 68. `<if ability="rank|stamina">` always reads 0 — Rank gates never open (§416 + 11 more)
-- [ ] 69. Bare post-fight `<lose>/<gain>` apply on entry, not on the fight outcome (§570 + 7 more)
+- [x] 69. Bare post-fight `<lose>/<gain>` apply on entry, not on the fight outcome (§570 + 7 more)
+- [x] 71. `<lose staminato="N">` never applies — the handler is gated on a `stamina=` attr it lacks (16 sections)
 
 **MEDIUM**
 - [x] 5. Implement `<items group … limit="N">` "choose up to N" pickup
@@ -2400,6 +2401,40 @@ only on the matching branch (win/uncond → on win; lose → on loss). Excluding
 `hidden="t"` keeps task 54 untouched. Add a headless test (enter §570, assert
 Shards/Stamina unchanged pre-fight; lose → 1 Stamina + 0 Shards; §199 win → +200)
 and re-run the every-section scan.
+
+**Done (2026-07-10).** `computeFightGate` now also builds an `effectNodes` map:
+each bare, non-`hidden` `<lose>/<gain>` seen after a `<fight>` and outside any
+`WRAP` wrapper (`if`/`elseif`/`else`/`success`/`failure`/`outcomes`/`group`/
+`choice`) is classified `win`/`lose`/`uncond` by the same LOSE/WIN prose heuristic
+that marks nav nodes. `renderPassive` checks that map before applying: while the
+fight is unresolved (or fled) it holds the effect (shows the words, applies
+nothing, does not memoise); once resolved it applies only on the branch taken
+(`win`/`uncond` → win, `lose` → loss). Four `_test.html` assertions cover §570
+(entry keeps 45 Shards / 20 Stamina; lose → 1 Stamina + 0 Shards) and §199 (entry
+pays nothing; win → +200). Surfaced task **71** en route (§570's `staminato` had
+never fired). Suite green: `RESULT ALL PASS pass=649 fail=0`.
+
+---
+
+## 71. `<lose staminato="N">` never applies — handler gated on a missing `stamina=` attr  — HIGH (engine)
+
+*(Surfaced 2026-07-10 while fixing task 69's §570.)* `applyEffectBody`'s Stamina
+branch is `if (get('stamina') != null) { … if (get('staminato') != null) … }` — the
+`staminato` case lives *inside* a guard that requires a `stamina=` attribute. But
+`<lose staminato="N">` ("you are beaten down to N Stamina", e.g. §570 "wake up on 1
+Stamina") never carries `stamina=`, so the block is skipped and the reduction never
+happens. A corpus scan shows **16 sections** use `staminato` and **none** pair it
+with `stamina=`, so the effect is dead everywhere: book1/21, 157, 297, 308, 488,
+498, 551, 570; book4/169, 338, 420; book5/66, 398, 521, 540, 669 (two use
+`staminato="prestamina"` — "back to your pre-fight Stamina").
+
+Fix: widen the guard to `get('stamina') != null || get('staminato') != null`; the
+`staminato` arm already computes the damage as `current − target`. Add a direct
+`applyEffect` assertion (15 → 1 on `staminato="1"`).
+
+**Done (2026-07-10).** One-line guard widened; existing `staminato` arm unchanged.
+Added a unit assertion (Stamina 15 → 1) plus the §570 integration coverage from
+task 69. Suite green: `RESULT ALL PASS pass=649 fail=0`.
 
 ---
 

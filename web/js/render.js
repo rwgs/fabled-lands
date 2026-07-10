@@ -800,6 +800,29 @@ export class Story {
       return this.renderAbilityChoice(container, node, path);
     }
 
+    // A bare <lose>/<gain> written after a <fight> in win/lose prose is a
+    // fight-OUTCOME effect (task 69). Applying it on entry (as a plain effect would)
+    // hands over the reward / exacts the penalty before a blow is struck — §570
+    // stripped every Shard and dropped you to 1 Stamina the instant you arrived.
+    // Hold it until the fight resolves, then apply only on the branch actually taken
+    // (win / unconditional → on a win; lose → on a loss). computeFightGate tagged it.
+    const fightRole = this.fightGate && this.fightGate.effectNodes.get(node);
+    if (fightRole && !this.inactive) {
+      const outcome = this.aggregateFightOutcome(this.sectionFights);
+      const take = outcome === 'win' ? fightRole !== 'lose'
+                 : outcome === 'lose' ? fightRole === 'lose'
+                 : false; // unresolved or fled → hold (show the words, apply nothing)
+      if (!take) {
+        if (!hidden) {
+          const span = document.createElement('span');
+          span.className = 'fx';
+          this.appendChildren(span, node, path);
+          if (span.textContent.trim()) container.appendChild(span);
+        }
+        return null;
+      }
+    }
+
     const key = 'fx@' + path;
     const setVarName = tag === 'set' ? node.getAttribute('var') : null;
     // A roll this visit has taken ownership of this var: freeze the <set> so it can
@@ -1869,23 +1892,31 @@ export class Story {
   // Identify the navigation that follows a <fight> and which of it is the
   // "if you lose…" branch. While the fight is unresolved these controls are
   // disabled; on a win the lose-branch is disabled; on a loss only it is enabled.
-  // Returns { navNodes:Set, loseNodes:Set, hasLosePath } or null when no fight.
+  // Also classifies each BARE post-fight <lose>/<gain> effect (one written in
+  // win/lose prose rather than inside an <if dead>/<success>/<failure> wrapper) as
+  // 'win'/'lose'/'uncond', so renderPassive can hold it until the fight resolves
+  // instead of applying it on entry (task 69).
+  // Returns { navNodes:Set, loseNodes:Set, effectNodes:Map, hasLosePath } or null.
   computeFightGate(sectionEl) {
     if (!sectionEl || !sectionEl.querySelector('fight')) return null;
-    const navNodes = new Set(), loseNodes = new Set();
+    const navNodes = new Set(), loseNodes = new Set(), effectNodes = new Map();
     // Conservative: only clear "you lose / are beaten / reduced to 0" cues mark a
     // lose-branch. WIN cues merely veto a lose-mark (so "…dead. If you win…" stays
     // a win). Under-marking just falls back to normal death — never strands a win.
     const LOSE = /(you lose|if you lose|are beaten|are defeated|reduced to \d|pass out|knocked (out|unconscious)|battered into|lose the (fight|combat|battle)|you are killed|you are slain)/i;
     const WIN = /(you win|if you win|defeat|reduce the|kill the|slay|victor|survive|beat the|overcome the|are victorious)/i;
+    // Wrappers that already gate their contents to a branch/action — an effect
+    // inside one is not a "bare" post-fight effect (it applies via that branch).
+    const WRAP = new Set(['if', 'elseif', 'else', 'success', 'failure', 'outcomes', 'group', 'choice']);
     let seenFight = false, recent = '';
-    const walk = (n, skip) => {
+    const walk = (n, skip, gated) => {
       for (const ch of Array.from(n.childNodes)) {
         if (ch.nodeType === Node.TEXT_NODE) { if (seenFight) recent = (recent + ' ' + (ch.nodeValue || '')).slice(-220); continue; }
         if (ch.nodeType !== Node.ELEMENT_NODE) continue;
         const tag = ch.tagName.toLowerCase();
-        if (tag === 'fight') { seenFight = true; recent = ''; walk(ch, true); continue; }
+        if (tag === 'fight') { seenFight = true; recent = ''; walk(ch, true, gated); continue; }
         const childSkip = skip || tag === 'flee' || tag === 'fightdamage'; // Flee/fightdamage own gotos aren't gated
+        const childGated = gated || WRAP.has(tag);
         // A <choice flee="t"> is "flee at any time" — never gate it (book3/662),
         // so the player can bail mid-fight. A box= choice keyed to a mid-fight escape
         // codeword (task 54) is likewise ungated: its own box check governs it, so it
@@ -1899,12 +1930,21 @@ export class Story {
           if (boolAttr(ch.getAttribute('dead')) || (LOSE.test(recent) && !WIN.test(recent))) loseNodes.add(ch);
           recent = '';
         }
-        walk(ch, childSkip);
+        // A bare, non-hidden <lose>/<gain> after the fight is a fight-outcome effect.
+        // (hidden="t" bookkeeping — e.g. task-54 escape clears — is left to its own
+        // deferral.) Classify by the surrounding prose, defaulting to unconditional.
+        if (seenFight && !skip && !gated && (tag === 'lose' || tag === 'gain') && !boolAttr(ch.getAttribute('hidden'))) {
+          const role = LOSE.test(recent) && !WIN.test(recent) ? 'lose'
+                     : WIN.test(recent) && !LOSE.test(recent) ? 'win'
+                     : 'uncond';
+          effectNodes.set(ch, role);
+        }
+        walk(ch, childSkip, childGated);
       }
     };
-    walk(sectionEl, false);
-    if (!navNodes.size) return null;
-    return { navNodes, loseNodes, hasLosePath: loseNodes.size > 0 };
+    walk(sectionEl, false, false);
+    if (!navNodes.size && !effectNodes.size) return null;
+    return { navNodes, loseNodes, effectNodes, hasLosePath: loseNodes.size > 0 };
   }
 
   // Mid-fight escape codewords (task 54): a codeword that is BOTH ticked somewhere in

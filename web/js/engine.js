@@ -429,9 +429,12 @@ function applyLose(el, state, opts) {
     } else if (get('shards') === '*') { if (state.data.shards) { state.data.shards = 0; state.changed(); notes.push('lost all Shards'); } }
     else { const n = resolveValue(state, get('shards')); state.adjustMoney(-n); notes.push(`−${n} Shards`); }
   }
-  if (get('stamina') != null) {
+  if (get('stamina') != null || get('staminato') != null) {
     let n;
     const s = get('stamina');
+    // staminato="N" is "beaten down TO N Stamina" (§570 "wake up on 1 Stamina") —
+    // it carries no stamina= attribute, so it must gate the block on its own (task
+    // 71); the damage is however far above N you currently are.
     if (get('staminato') != null) { const target = resolveValue(state, get('staminato')); n = Math.max(0, state.data.stamina - target); }
     // <adjust> children reduce (or raise) the wound: "subtract your armour from
     // the roll" (book4/679, book6/306/527/696/742) or "−1 if you worship the
