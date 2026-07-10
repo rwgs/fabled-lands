@@ -112,6 +112,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 44. Fold the ring of ultimate power's `Rank`/`Stamina` auras (book5/564)
 - [x] 62. Render `<image file=…>` and use-effect images (map of Bazalek, book3/75)
 - [x] 63. Heterogeneous "choose one" rewards (item / Shards / resurrection) over-apply (book1/597)
+- [x] 72. "codeword gained" notification fires even when the codeword was already held
 
 **Done**
 - [x] 1. Gate combat progression / model fight outcomes
@@ -2467,3 +2468,25 @@ makes `renderPassive` print "tick the box" for the otherwise word-less box tick,
 Added three `_test.html` assertions rendering §1.496 (state ticked, box shows ☑,
 prose reads naturally with no ", ,"). Suite green: `RESULT ALL PASS pass=644
 fail=0`.
+
+---
+
+## 72. "codeword gained" notification fires even when the codeword was already held  — LOW (engine)
+
+*(Filed 2026-07-10 from a bug report.)* `applyTick`'s codeword branch
+(`engine.js` ~L574) unconditionally pushed `'codeword gained'` onto the note list
+and returned it, so `<tick codeword="X"/>` popped the "codeword gained" toast even
+when the player already held X. Codewords are a set (`state.data.codewords[cw] =
+true`), so re-granting one is a no-op on state — but the user still saw a reward
+message for nothing gained. Common because books re-assert a codeword on a section
+the player may revisit.
+
+Fix: check `state.hasCodeword(cw)` before adding and only push the note when at
+least one listed codeword was actually new; `did` stays `true` regardless so a
+pipe-listed re-grant still never falls through to the bare visit-box tick.
+
+**Done (2026-07-10).** Guarded the note with a `gained` flag over the split list;
+state write and `did` unchanged. Suite green over three runs: `RESULT ALL PASS
+pass=649 fail=0` (the one intermittent "fight attack produces a log line" failure
+is the pre-existing 900 ms animation-timing flake, confirmed present on the
+stashed pristine build too).

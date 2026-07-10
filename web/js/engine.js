@@ -571,7 +571,12 @@ function applyTick(el, state, opts) {
   let did = false;
   const cacheN = get('cache');
 
-  if (get('codeword') != null) { get('codeword').split(/[|,]/).forEach((c) => state.addCodeword(c.trim())); notes.push('codeword gained'); did = true; }
+  if (get('codeword') != null) {
+    let gained = false;
+    get('codeword').split(/[|,]/).forEach((c) => { const cw = c.trim(); if (!state.hasCodeword(cw)) gained = true; state.addCodeword(cw); });
+    if (gained) notes.push('codeword gained'); // stay silent when the codeword was already held
+    did = true;
+  }
   if (get('shards') != null) {
     const n = resolveValue(state, get('shards'));
     if (cacheN != null) { state.adjustCacheMoney(cacheN, n); notes.push('stash credited'); }
