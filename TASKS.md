@@ -103,7 +103,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 39. Defer confiscate-and-return `<transfer … from=>` until a fight resolves (book2/462)
 - [x] 65. Rules modal emits invalid table heading markup
 - [x] 66. Add a CI workflow that runs the headless smoke suite
-- [ ] 67. README: align the illustration docs with the shipped build
+- [x] 67. README: align the illustration docs with the shipped build
 - [x] 42. Inner `<difficulty>`/`<random>`/`<rankcheck>` rolls inside a `<group>` are unrun
 - [x] 44. Fold the ring of ultimate power's `Rank`/`Stamina` auras (book5/564)
 - [x] 62. Render `<image file=…>` and use-effect images (map of Bazalek, book3/75)
@@ -2322,3 +2322,13 @@ included and shipped by the build, while the remaining per-section art is not
 (the drop-in instructions for `web/assets/illus/` stay). Doc-only change — but
 still run `stamp-version.ps1`? **No:** README is not hashed by the stamp and not
 served by the app, so no stamp/test loop is needed beyond a sanity read.
+
+**Done (2026-07-09).** Reworded the "What's included & known limits" bullet: the
+three `<image>` illustrations — book 1 *Forest of the Forsaken*, book 3 *Map of
+Bazalek Isle*, book 5 *The Black Diptych* (confirmed to live in `books/book1|3|5/`)
+— ship via the build into `web/assets/illus/` and are shown by `render.js`, while
+the general per-section art (`142.jpg`, …) is still absent and skipped gracefully;
+the drop-in instructions stay. Also tightened the repo-tree comment on `images/`
+from "Section illustrations are NOT included" to "General per-section art is NOT
+included," since that folder never held the bespoke illustrations (they come from
+the book folders). Doc-only; no stamp/test loop run, as noted above.

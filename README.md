@@ -41,7 +41,7 @@ fabled-lands/
 │   ├── book1/…book6/  e.g. book1/20.xml, plus Adventurers.xml (starting characters)
 │   └── books.ini      Book titles
 ├── rules/            Rules.xml, QuickRules.xml
-├── images/           world-map.jpg (+ icons). Section illustrations are NOT included.
+├── images/           world-map.jpg (+ icons). General per-section art is NOT included.
 ├── java-engine/      The original Java engine (JaFL) — kept for reference, UNTOUCHED
 ├── build/            Build scripts (PowerShell)
 │   ├── build-data.ps1  Bundles books/ + rules/ + maps → web/data & web/assets
@@ -223,9 +223,13 @@ Two behaviours follow the original Java app rather than a simpler "hide it" appr
 - **Regional maps** for all six books are included (each book folder's `<Region>-Map.jpg`,
   copied to `web/assets/maps/book<N>.jpg` by the build) and shown in the in-game **Maps**
   viewer alongside the world map.
-- **Section illustrations** are not part of this repository, so inline art is skipped
-  gracefully. If you obtain the illustration files, drop them in `web/assets/illus/` named as
-  the XML references them (e.g. `142.jpg`) and they will appear automatically.
+- **Section illustrations**: the three illustrations referenced by an `<image>` tag —
+  book 1's *Forest of the Forsaken*, book 3's *Map of Bazalek Isle*, and book 5's *The Black
+  Diptych* — live beside their book XML and are copied to `web/assets/illus/` by the build,
+  where `render.js` displays them. The **general per-section art** (e.g. `142.jpg`) is not
+  part of this repository, so that inline art is skipped gracefully. If you obtain those
+  files, drop them in `web/assets/illus/` named as the XML references them (e.g. `142.jpg`)
+  and they will appear automatically.
 - The engine covers the full common rule set. A handful of very rare, bespoke section
   mechanics degrade gracefully (text still shows; unknown tags render their prose).
 - New games begin at **Book 1, §1** with that book's starting profile (1st Rank, 9 Stamina,
