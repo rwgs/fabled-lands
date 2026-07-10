@@ -9,6 +9,7 @@ import { goodsFrom, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCar
 import { Story } from './js/render.js';
 import { Narrator } from './js/tts.js';
 import { renderSheet } from './js/ui.js';
+import { renderStatic } from './js/app.js';
 
 const out = [];
 let pass = 0, fail = 0;
@@ -2542,6 +2543,20 @@ async function run() {
       ok('task39: §462 winning returns the stashed gear and empties the cache',
          g462.itemCount() === startItems && g462.cacheItems('2.462').length === 0,
          `n=${g462.itemCount()} start=${startItems} cache=${g462.cacheItems('2.462').length}`);
+    }
+
+    // --- task 65: rules modal renders a heading-in-row as a <th>, not a nested <h3> ---
+    { // block-scoped
+      const doc65 = renderStatic(data.getMeta().quickRules);
+      const tr65 = doc65.querySelector('table tr');
+      ok('task65: QuickRules renders a table row', !!tr65);
+      ok('task65: the row heading is a <th>, not a nested <hN>',
+         !!tr65 && !!tr65.querySelector('th') && !tr65.querySelector('h1,h2,h3,h4,h5,h6'),
+         tr65 && tr65.innerHTML);
+      ok('task65: the header cell carries the heading text', !!tr65 && /Quick Rules/.test(tr65.querySelector('th').textContent));
+      // A heading OUTSIDE a table still renders as a real heading element.
+      const doc65b = renderStatic('<section><h4>ABILITIES</h4><table><tr><td>x</td></tr></table></section>');
+      ok('task65: a heading outside a table stays an <hN>', !!doc65b.querySelector('h4') && !doc65b.querySelector('table th'));
     }
 
   } catch (e) {

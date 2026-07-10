@@ -101,7 +101,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 37. Fix the `safeAddGodd` typo in the source XML
 - [x] 38. Gate cache widgets on `lock`/`unlock` under the single-pass render (book1/91 gamble)
 - [x] 39. Defer confiscate-and-return `<transfer … from=>` until a fight resolves (book2/462)
-- [ ] 65. Rules modal emits invalid table heading markup
+- [x] 65. Rules modal emits invalid table heading markup
 - [ ] 66. Add a CI workflow that runs the headless smoke suite
 - [ ] 67. README: align the illustration docs with the shipped build
 - [x] 42. Inner `<difficulty>`/`<random>`/`<rankcheck>` rolls inside a `<group>` are unrun
@@ -2250,17 +2250,26 @@ fail=0`.
 
 ---
 
-## 65. Rules modal emits invalid table heading markup  — LOW
+## 65. Rules modal emits invalid table heading markup  — **done**
 
-`renderStatic()` handles every `h1`–`h6` element before its later, identical
-condition that creates a `<th>`. The latter branch is unreachable. In
-`rules/QuickRules.xml`, `<h3>Quick Rules</h3>` is a direct child of `<tr>`, so
-the modal produces an `<h3>` inside a table row rather than a table header cell.
-That is invalid table structure and loses the expected table semantics/styling.
+`renderStatic()` (`app.js`) handled every `h1`–`h6` element before its later,
+identical condition that created a `<th>`, so the `<th>` branch was unreachable.
+In `rules/QuickRules.xml`, `<h3>Quick Rules</h3>` is a direct child of `<tr>`, so
+the modal produced an `<h3>` nested illegally inside a table row.
 
-Fix: make the static renderer context-aware: render a heading nested in a row as
-a `<th>` (with an appropriate `colspan`), and retain heading elements only
-outside tables. Add a focused DOM assertion for `QuickRules.xml`.
+Fix (`app.js`): the heading case is now context-aware — a heading whose DOM parent
+is a `<tr>` renders as a `<th>` that spans the table's widest row (colspan computed
+from the source table's row cell counts, ≥1); a heading anywhere else stays a real
+`<hN>`. The dead duplicate branch was removed. To make it testable, `renderStatic`
+is now `export`ed and the module's auto-`boot()` is guarded on the presence of
+`#app` (index.html has it; the headless harness does not), so importing `app.js`
+from `_test.html` has no side effects.
+
+Verified: 4 new headless assertions (QuickRules renders a `<tr>`; its heading is a
+`<th>` with no nested `<hN>`; the header cell keeps the "Quick Rules" text; a
+heading outside a table stays an `<hN>`) + a real-app boot (`?demo=1.1`, still
+auto-boots, no fatal) + full render-every-section scan. `RESULT ALL PASS pass=634
+fail=0`.
 
 ---
 
