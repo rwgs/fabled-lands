@@ -2482,6 +2482,29 @@ async function run() {
       ok('task34: payChoiceCost deducts a foreign currency, not Shards', gp.currencyBalance('Mithral') === 6 && gp.data.shards === 70, `mith=${gp.currencyBalance('Mithral')} sh=${gp.data.shards}`);
     }
 
+    // --- task 35: PNG apple-touch-icon + manifest PNG icons -----------------
+    { // block-scoped — iOS Safari rejects SVG touch icons, so these must be PNG.
+      const idx = await (await fetch('./index.html')).text();
+      const atMatch = idx.match(/rel="apple-touch-icon"[^>]*href="([^"]+)"/);
+      ok('task35: apple-touch-icon points to a PNG', !!atMatch && /\.png$/.test(atMatch[1]), atMatch && atMatch[1]);
+
+      const manifest = JSON.parse(await (await fetch('./manifest.webmanifest')).text());
+      const pngIcons = (manifest.icons || []).filter((i) => i.type === 'image/png');
+      const sizes = pngIcons.map((i) => i.sizes);
+      ok('task35: manifest offers PNG icons at 192 and 512', sizes.includes('192x192') && sizes.includes('512x512'), sizes.join(','));
+
+      // The referenced PNGs must actually exist and decode at the declared size.
+      const at = await fetch('./' + (atMatch ? atMatch[1] : 'assets/apple-touch-icon.png'));
+      ok('task35: the apple-touch-icon PNG is fetchable', at.ok);
+      const dims = await new Promise((res) => {
+        const im = new Image();
+        im.onload = () => res({ w: im.naturalWidth, h: im.naturalHeight });
+        im.onerror = () => res(null);
+        im.src = './assets/apple-touch-icon.png';
+      });
+      ok('task35: apple-touch-icon decodes at 180x180', dims && dims.w === 180 && dims.h === 180, JSON.stringify(dims));
+    }
+
   } catch (e) {
     out.push('FATAL ' + (e.stack || e.message));
     fail++;

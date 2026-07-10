@@ -3,7 +3,7 @@
 // once loaded/installed. Progress lives in localStorage (per-origin), so it
 // survives offline and reloads.
 
-const VERSION = 'fl-26.07.09.c953eab';
+const VERSION = 'fl-26.07.09.10be8b4';
 
 // REQUIRED = the app shell + all book data. Without every one of these the game
 // can't run offline, so the install must FAIL (and the previous complete cache
@@ -27,6 +27,9 @@ const REQUIRED = [
   './js/tts.js',
   './assets/icon.svg',
   './assets/icon-maskable.svg',
+  './assets/apple-touch-icon.png',
+  './assets/icon-192.png',
+  './assets/icon-512.png',
   './data/meta.json',
   './data/book1.json',
   './data/book2.json',

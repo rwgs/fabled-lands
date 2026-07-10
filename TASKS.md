@@ -96,7 +96,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 32. Implement or explicitly stub the remaining unhandled tags
 - [x] 33. Narrate sections without `<p>` wrappers (TTS)
 - [x] 34. Finish moving rules out of the view layer
-- [ ] 35. iOS home-screen icons: provide PNG apple-touch-icon
+- [x] 35. iOS home-screen icons: provide PNG apple-touch-icon
 - [x] 36. Minor rule divergences (grab-bag)
 - [x] 37. Fix the `safeAddGodd` typo in the source XML
 - [ ] 38. Gate cache widgets on `lock`/`unlock` under the single-pass render (book1/91 gamble)
@@ -1204,14 +1204,34 @@ fail=0`.
 
 ---
 
-## 35. iOS home-screen icons: provide PNG apple-touch-icon  — LOW
+## 35. iOS home-screen icons: provide PNG apple-touch-icon  — **done**
 
-`web/index.html:11` points `apple-touch-icon` at an SVG, and the manifest
-offers only SVG icons — iOS Safari does not accept SVG touch icons, so
-installed home-screen icons fall back to a page screenshot. Generate PNG sizes
-(at minimum 180×180; ideally also 192/512 for the manifest), reference them in
-`index.html` + `manifest.webmanifest`, and add them to the service-worker
-shell precache.
+`web/index.html` pointed `apple-touch-icon` at an SVG, and the manifest offered
+only SVG icons — iOS Safari does not accept SVG touch icons, so installed
+home-screen icons fell back to a page screenshot.
+
+Fix:
+- **Generated three PNGs** from `assets/icon.svg` and committed them under
+  `web/assets/`: `apple-touch-icon.png` (180×180), `icon-192.png`, `icon-512.png`.
+  Rasterised with headless Chrome (`--screenshot` at the icon's native 512 on the
+  `#2b1a0f` theme background, so the icon is a full opaque square — ideal for
+  iOS's own masking), then downscaled 512→192/180 with high-quality bicubic
+  (`System.Drawing`). No build toolchain or dependency was introduced. (Chrome's
+  headless-new minimum window size crops direct screenshots below ~500px, hence
+  the render-at-512-then-downscale approach.)
+- **`index.html`** — `apple-touch-icon` now references `assets/apple-touch-icon.png`
+  with `sizes="180x180"`.
+- **`manifest.webmanifest`** — added PNG icon entries at 192×192 and 512×512
+  (`purpose:"any"`) alongside the existing scalable SVGs.
+- **`sw.js`** — the three PNGs join the `REQUIRED` precache next to the icon
+  SVGs, so they are available offline. (Task 64 already makes `web/assets/**` part
+  of the build stamp, so replacing an icon now busts the cache.)
+
+Verified: 4 new headless assertions (apple-touch-icon href is a `.png`; manifest
+lists PNG icons at 192 and 512; the touch-icon PNG is fetchable and decodes at
+exactly 180×180) + task 64's precache-fetchability test now also covers the three
+PNGs + a visual check of the rendered 512 and 180 icons + full render-every-section
+scan. `RESULT ALL PASS pass=623 fail=0`.
 
 ---
 
