@@ -1,6 +1,11 @@
 /* Fabled Lands — classic-fantasy, mobile-first styling. */
 
 :root {
+  /* Tell mobile browsers (Chrome "Auto dark theme" et al.) this page manages
+     its own colours via data-theme, so they don't algorithmically darken the
+     light surfaces when the phone OS is in dark mode. Flipped to dark below. */
+  color-scheme: light;
+
   --leather: #2b1a0f;
   --leather-2: #3a2415;
   --parchment: #f4e8ce;
@@ -47,6 +52,8 @@
    reading surfaces to a warm "leather at night" palette and lifts text, links,
    and accents to legible tones. */
 :root[data-theme="dark"] {
+  color-scheme: dark;
+
   --parchment-edge: #55412c;   /* only ever a border/edge — safe to darken */
   --ink: #e9dcc2;              /* only ever text — safe to lighten */
   --ink-soft: #b3a488;
