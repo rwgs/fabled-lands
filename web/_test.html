@@ -1160,10 +1160,24 @@ async function run() {
     ok('§91 the gamble renders a roll widget, not a swallowing button', !!c91.querySelector('.btn-roll') && !c91.querySelector('.group-action'));
     g91.adjustCacheMoney('1.91', 10); // place a 10-Shard bet
     st91.rerender();
+    const dep91 = () => Array.from(c91.querySelectorAll('.money-cache .btn-mini')).find((b) => /Deposit/.test(b.textContent));
+    ok('task38: §91 the bet is editable before rolling', dep91() && dep91().disabled === false && !c91.querySelector('.money-cache.locked'));
     const rnd91 = Math.random; Math.random = () => 0.5; // 2 dice → 4+4 = 8 → range 5-9 → lose (×0)
     c91.querySelector('.btn-roll').click(); await settle42();
     Math.random = rnd91;
     ok('§91 rolling resolves the matching outcome (a 5-9 loses the bet)', g91.cacheMoney('1.91') === 0, `bet=${g91.cacheMoney('1.91')}`);
+    ok('task38: §91 the bet locks after rolling (deposit/withdraw disabled)',
+       g91.isCacheLocked('1.91') === true && dep91() && dep91().disabled === true && !!c91.querySelector('.money-cache.locked'),
+       `locked=${g91.isCacheLocked('1.91')} depDisabled=${dep91() && dep91().disabled}`);
+
+    // Regression: a top-level (stash) lock must NOT disable its money-cache widget —
+    // only a lock bundled with a roll (the gamble) gates the widget (task 38).
+    const gStash = GameState.create({ name:'Stash', gender:'m', profession:'Warrior', book:1, adv });
+    const cStash = document.createElement('div');
+    const stStash = new Story(cStash, gStash, { navigate(){}, onDeath(){}, notify(){} });
+    stStash.begin(parse('<section name="t"><p><tick special="lock" cache="bank" hidden="t"/>Stash freely.</p><moneycache name="bank" text="Bank"/></section>'), 1, 't');
+    const depBank = Array.from(cStash.querySelectorAll('.money-cache .btn-mini')).find((b) => /Deposit/.test(b.textContent));
+    ok('task38: a stash (non-roll) lock leaves its widget editable', gStash.isCacheLocked('bank') === true && depBank && depBank.disabled === false, `locked=${gStash.isCacheLocked('bank')} dis=${depBank && depBank.disabled}`);
 
     // §2.53: the swim group's codeword *marker* (a non-hidden <lose codeword>) is
     // removed on the roll attempt, not on entry — so it can't clobber the entry

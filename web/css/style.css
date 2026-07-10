@@ -343,6 +343,7 @@ img { max-width: 100%; }
 .cache-balance { display: flex; justify-content: space-between; align-items: baseline; gap: 0.6rem; margin-bottom: 0.5rem; }
 .cache-sum { font-weight: 800; color: var(--ink); }
 .cache-controls { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; }
+.cache.locked .cache-controls { opacity: 0.5; }
 .cache-amount { width: 6rem; padding: 0.3rem 0.5rem; border: 1px solid var(--gold); border-radius: 6px; background: var(--btn-soft-1); color: var(--ink); font-size: 0.9rem; }
 .cache-list { display: flex; flex-direction: column; gap: 0.3rem; margin: 0.4rem 0; }
 .cache-item { display: flex; justify-content: space-between; align-items: center; gap: 0.6rem; }

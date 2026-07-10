@@ -110,7 +110,22 @@ export class Story {
     // Likewise a per-fight attack/Defence bonus from <tick special="attack|defence">
     // (task 49) applies only to the current section's fight — clear it on entry.
     this.state.clearFightBonuses();
-    this.ctx = { applied: new Set(), rolls: new Map(), fights: new Map(), buys: new Map(), groupLimits: new Map(), groupPicks: new Map(), wroteVars: new Set(), rolledVars: new Set(), pathNodes: new Map() };
+    this.ctx = { applied: new Set(), rolls: new Map(), fights: new Map(), buys: new Map(), groupLimits: new Map(), groupPicks: new Map(), wroteVars: new Set(), rolledVars: new Set(), pathNodes: new Map(), rollLockCaches: new Set() };
+    // Gambling-bet lock (task 38): a <tick special="lock" cache="X"> bundled inside
+    // a roll <group> means "freeze the bet once you roll" (book1/91, book2/134) — as
+    // opposed to a top-level lock, which is stash bookkeeping and must NOT disable
+    // its widget. Record those caches so only their widget gates on the lock flag,
+    // and reset each to unlocked on entry so a fresh visit lets you re-bet (the
+    // deferred lock, applied on the roll in renderGroupWithRoll, re-locks it).
+    Array.from(sectionEl.querySelectorAll('group')).forEach((g) => {
+      if (!g.querySelector('random, difficulty, rankcheck, training')) return;
+      g.querySelectorAll('tick[special="lock"][cache]').forEach((t) => {
+        const name = t.getAttribute('cache');
+        if (!name) return;
+        this.ctx.rollLockCaches.add(name);
+        if (this.state.isCacheLocked(name)) this.state.lockCache(name, false);
+      });
+    });
     // Pre-scan grouped-award controllers (<items group="X" limit="N"/>) so the
     // individual award rows know their "choose up to N" cap no matter whether the
     // controller sits before or after them in the section (both orders occur).
@@ -623,10 +638,15 @@ export class Story {
       }
       if (tag === 'text') { this.appendChildren(span, k, kp); return; }
       if (PASSIVE_TAGS.has(tag) || tag === 'rest') {
-        if (boolAttr(k.getAttribute('hidden'))) {
+        // A bundled cache lock/unlock (task 38) means "freeze the bet on the roll",
+        // so it defers with the visible consequences even when hidden — unlike a
+        // hidden price-flag arming, which must still fire on entry.
+        const special = (k.getAttribute('special') || '').toLowerCase();
+        const cacheLockTick = tag === 'tick' && (special === 'lock' || special === 'unlock');
+        if (boolAttr(k.getAttribute('hidden')) && !cacheLockTick) {
           this.renderElement(span, k, kp); // hidden book-keeping arms on entry (renderPassive)
         } else {
-          deferred.push(k); // visible cost/consequence — apply on the roll
+          deferred.push(k); // visible cost/consequence (or a bet lock/unlock) — apply on the roll
           const desc = (k.textContent || '').trim();
           if (desc) this.appendText(span, desc);
         }
@@ -2580,6 +2600,14 @@ export class Story {
       if (amt > 0 && this.state.cacheMoney(name) > 0) { this.state.withdrawCacheMoney(name, amt, charge); this.rerender(); }
     });
     controls.appendChild(dep); controls.appendChild(wd);
+    // A gambling bet locks once rolled (task 38): disable the controls so it can't
+    // be changed after the dice. Only caches whose lock is bundled with a roll are
+    // gated this way — a stash cache stays freely editable.
+    if (this.ctx.rollLockCaches.has(name) && this.state.isCacheLocked(name)) {
+      input.disabled = true; dep.disabled = true; wd.disabled = true;
+      dep.title = wd.title = 'Your bet is locked in — you can’t change it now.';
+      box.classList.add('locked');
+    }
     box.appendChild(controls);
     container.appendChild(box);
     return box;

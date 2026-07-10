@@ -99,7 +99,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 35. iOS home-screen icons: provide PNG apple-touch-icon
 - [x] 36. Minor rule divergences (grab-bag)
 - [x] 37. Fix the `safeAddGodd` typo in the source XML
-- [ ] 38. Gate cache widgets on `lock`/`unlock` under the single-pass render (book1/91 gamble)
+- [x] 38. Gate cache widgets on `lock`/`unlock` under the single-pass render (book1/91 gamble)
 - [ ] 39. Defer confiscate-and-return `<transfer … from=>` until a fight resolves (book2/462)
 - [ ] 65. Rules modal emits invalid table heading markup
 - [ ] 66. Add a CI workflow that runs the headless smoke suite
@@ -1295,11 +1295,37 @@ make lock/unlock re-render-aware) and gate the widget on that. Add a §91 test.
 **Was blocked on task 42; now unblocked (2026-07-08).** §91's `<random dice="2">`
 sat inside the same `force="t"` group as the `<tick special="lock">`, so the roll
 was swallowed. Task 42 fixed that — the gamble now rolls and its `<outcomes>`
-resolve (a §91 test covers it). What remains for THIS task is only the widget
+resolve (a §91 test covers it). What remained for THIS task is only the widget
 nicety: while the cache is locked, the money-cache widget's deposit/withdraw should
-disable so the bet can't change after rolling. (With the hidden lock+unlock both
-applying on entry the cache nets unlocked, so the bet is still editable — a cosmetic
-gap, not a correctness one.)
+disable so the bet can't change after rolling.
+
+**Done (2026-07-09).** The tricky part was distinguishing the two lock/unlock
+patterns in the corpus so the fix couldn't regress the stash sections:
+- *Gamble* (book1/91, book2/134): the `<tick special="lock" cache=X>` sits **inside
+  the roll `<group>`** — "freeze the bet on the roll." Its widget should lock.
+- *Stash* (book1/177, book2/211, the townhouse/apartment sections): a **top-level**
+  lock/unlock brackets a freely-editable `<itemcache>`; disabling that widget would
+  be a real regression.
+
+Fix (`render.js` + a CSS cue):
+1. **Pre-scan** in `begin()` records every cache whose lock is bundled in a roll
+   group into `ctx.rollLockCaches`, and resets those (and only those) to unlocked
+   on entry, so a fresh visit re-opens the bet. Stash caches are never in the set.
+2. **`renderGroupWithRoll`** now *defers* a hidden `special="lock"`/`"unlock"` tick
+   to fire on the roll (not on entry) — §91's lock was the lone hidden-lock-in-a-
+   roll-group. Hidden price-flag arming (book3/680, book2/138) still fires on entry
+   as before (only `special="lock|unlock"` is redirected).
+3. **`renderMoneyCache`** disables its input/deposit/withdraw (and adds a
+   `.cache.locked` dim) only when the cache is in `ctx.rollLockCaches` **and**
+   `isCacheLocked` — so exactly the gamble bet locks after the dice; stash widgets
+   are untouched. (`<itemcache>` is deliberately not gated: no gambling cache uses
+   one, so adding it would be untested dead code.)
+
+Verified: 3 new headless assertions (§91 bet editable before the roll; the bet's
+deposit/withdraw disable + `.money-cache.locked` after rolling; a synthetic
+top-level stash lock leaves its money-cache editable) + the existing §91
+roll-resolves-outcome test + full render-every-section scan (all 26 lock/unlock
+sections render clean). `RESULT ALL PASS pass=626 fail=0`.
 
 ---
 
