@@ -94,7 +94,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 12. Add headless unit tests for the extracted rules
 - [x] 13. Optional: build-time XML validation
 - [x] 32. Implement or explicitly stub the remaining unhandled tags
-- [ ] 33. Narrate sections without `<p>` wrappers (TTS)
+- [x] 33. Narrate sections without `<p>` wrappers (TTS)
 - [ ] 34. Finish moving rules out of the view layer
 - [ ] 35. iOS home-screen icons: provide PNG apple-touch-icon
 - [x] 36. Minor rule divergences (grab-bag)
@@ -1132,15 +1132,40 @@ bite): true `<while>` looping, `<fightround>` per-round automation, and the
 
 ---
 
-## 33. Narrate sections without `<p>` wrappers (TTS)  — LOW
+## 33. Narrate sections without `<p>` wrappers (TTS)  — **done**
 
-`tts.js` `prepare()` (tts.js:56) wraps sentences only inside `.flow` `<p>`
-elements, but 1,544 of 4,389 sections render their prose as bare text nodes
-directly in `.flow` — the 🔊 button and auto-narrate silently do nothing there
-(e.g. book4/16, book2/745): `chunks` is empty and `play()` returns before
-setting `playing`, with no user feedback. Collect/wrap top-level text nodes as
-well (or normalise them into paragraphs at render time), and give the button a
-disabled state when there is genuinely nothing to read.
+`tts.js` `prepare()` wrapped sentences only inside `.flow` `<p>` elements, but
+~1,544 of 4,389 sections render their prose as bare text nodes directly in
+`.flow` — the 🔊 button and auto-narrate silently did nothing there (e.g.
+book4/16, book2/745): `chunks` was empty and `play()` returned before setting
+`playing`, with no user feedback.
+
+Fix:
+- **`tts.js`** — after the `<p>` pass, `prepare()` now also calls a new
+  `wrapFlowRuns(flowEl)` that wraps runs of bare inline prose (text nodes +
+  inline elements) sitting directly in `.flow` into the same `.tts-s` sentence
+  spans (via the existing `wrapSentences`, so listeners on any moved controls are
+  preserved). Block widgets — `<p>`, the choices/fight/market/roll `<div>`s,
+  tables, etc. (a `FLOW_BLOCK` tag set) — end the current run and are left in
+  place, so they are never swept into a sentence span. Chosen over "normalise
+  into paragraphs at render time" to keep the change entirely inside the optional
+  TTS module (no view-layer churn across 1,544 sections).
+- **Disabled state** — a non-mutating `Narrator.canNarrate(flowEl)` reports
+  whether a section has any prose worth reading (clones the flow, strips the same
+  non-prose regions `prepare` excludes — `CONTROL_SEL` + `.choices` + `table` —
+  and tests for alphanumerics). `app.js`'s new `syncNarrateBtn()` runs on every
+  (re)render (wired into the Story `onRender` hook, beside `handleRerender`) and
+  disables the 🔊 button (title "Nothing to read aloud here") when there is
+  genuinely nothing. `.icon-btn:disabled` gets a dimmed style; the hover rule is
+  now `:not(:disabled)`. Wrapping stays lazy (only on play) — `canNarrate` leaves
+  the DOM pristine, confirmed in a real-app boot.
+
+Verified: 7 new headless assertions (book4/16 bare-text → chunks > 0 and the
+prose captured; book2/745 active-`<else>` prose narrates; a choices-only section
+→ 0 chunks; `canNarrate` true/false agreeing with `prepare`; a `<p>` section
+still narrates and `prepare` is idempotent) + a real-app boot at `?demo=4.16`
+(story renders, no fatal, the narrate button is enabled with no eager `.tts-s`
+wrapping) + full render-every-section scan. `RESULT ALL PASS pass=607 fail=0`.
 
 ---
 

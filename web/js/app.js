@@ -18,6 +18,16 @@ let advData = {}; // book number -> parsed adventurers data
 const narrator = new Narrator(); // [TTS]
 let narrateBtn = null;           // [TTS]
 const currentFlow = () => document.querySelector('#story .flow'); // [TTS]
+// [TTS] Enable the 🔊 button only when the current section actually has prose to
+// read, so it doesn't look active while silently doing nothing (task 33). Called
+// after each (re)render; the play/stop title is otherwise owned by narrator.onState.
+function syncNarrateBtn() {
+  if (!narrateBtn) return;
+  const can = narrator.canNarrate(currentFlow());
+  narrateBtn.disabled = !can;
+  if (!can) narrateBtn.title = 'Nothing to read aloud here';
+  else if (!narrator.playing) narrateBtn.title = 'Read aloud';
+}
 
 async function boot() {
   try { await data.loadMeta(); }
@@ -441,6 +451,7 @@ function buildGameScreen() {
       narrateBtn.title = playing ? 'Stop reading' : 'Read aloud';
     };
     actions.appendChild(narrateBtn);
+    syncNarrateBtn();
 
     // Auto-narrate on/off — reads each new section automatically as you arrive.
     const autoBtn = iconBtn('🔁', '', () => {
@@ -499,7 +510,7 @@ function buildGameScreen() {
     navigate: (book, section) => navigate(book, section),
     onDeath: handleDeath,
     notify: (msg, type) => toast(msg, type),
-    onRender: () => narrator.handleRerender(), // [TTS] stop narration when the DOM changes
+    onRender: () => { narrator.handleRerender(); syncNarrateBtn(); }, // [TTS] stop narration + refresh the button state when the DOM changes
   });
 
   state.onChange(() => { refreshSheet(); surfaceSaveError(); });

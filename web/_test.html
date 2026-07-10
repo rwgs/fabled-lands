@@ -2394,6 +2394,55 @@ async function run() {
       ok('task64: every precached asset URL is fetchable', missing.length === 0, 'missing: ' + missing.join(', '));
     }
 
+    // --- task 33: narrate sections whose prose is bare text (no <p> wrapper) ---
+    { // block-scoped
+      const nar = new Narrator();
+      const g33 = GameState.create({ name:'N33', gender:'m', profession:'Warrior', book:1, adv });
+
+      // book4/16: all prose is bare text + inline widgets directly in .flow — the
+      // exact shape that used to yield 0 chunks (button silently did nothing).
+      const c16 = document.createElement('div');
+      const st16 = new Story(c16, g33, { navigate(){}, onDeath(){}, notify(){} });
+      st16.begin(await data.getSection(4, 16), 4, '16');
+      const flow16 = c16.querySelector('.flow');
+      const canBefore = nar.supported ? nar.canNarrate(flow16) : true; // read pristine DOM first
+      const n16 = nar.prepare(flow16);
+      const spoken16 = nar.chunks.map((c) => c.text).join(' ');
+      ok('task33: a bare-text section yields narration chunks', n16 > 0, 'chunks=' + n16);
+      ok('task33: the bare prose is captured', /trampled by many of the herd/.test(spoken16), spoken16.slice(0, 60));
+      ok('task33: canNarrate agrees (pristine DOM has prose)', canBefore === true);
+
+      // book2/745: bare text + an active <else> branch whose prose is appended
+      // straight into .flow (no <p>). Its words must be narrated too.
+      const c745 = document.createElement('div');
+      const st745 = new Story(c745, g33, { navigate(){}, onDeath(){}, notify(){} });
+      st745.begin(await data.getSection(2, 745), 2, '745');
+      const flow745 = c745.querySelector('.flow');
+      const n745 = nar.prepare(flow745);
+      const spoken745 = nar.chunks.map((c) => c.text).join(' ');
+      ok('task33: else-branch prose narrates', n745 > 0 && /underestimated the potency/.test(spoken745), 'chunks=' + n745);
+
+      // A choices-only section is genuinely empty of prose → 0 chunks, button off.
+      const cEmpty = document.createElement('div');
+      const stE = new Story(cEmpty, g33, { navigate(){}, onDeath(){}, notify(){} });
+      stE.begin(parse('<section name="t"><choices><choice section="2">Onward</choice></choices></section>'), 1, 't');
+      const flowE = cEmpty.querySelector('.flow');
+      const canEmpty = nar.supported ? nar.canNarrate(flowE) : false;
+      const nE = nar.prepare(flowE);
+      ok('task33: a choices-only section yields no chunks', nE === 0, 'chunks=' + nE);
+      ok('task33: canNarrate is false when there is nothing to read', canEmpty === false);
+
+      // A normal <p>-wrapped section still narrates (no regression) and wrapping
+      // is idempotent (re-preparing the same DOM keeps the same chunk count).
+      const cP = document.createElement('div');
+      const stP = new Story(cP, g33, { navigate(){}, onDeath(){}, notify(){} });
+      stP.begin(parse('<section name="t"><p>First sentence here. Second sentence too.</p><p>A third one. <goto section="2"/></p></section>'), 1, 't');
+      const flowP = cP.querySelector('.flow');
+      const nP1 = nar.prepare(flowP);
+      const nP2 = nar.prepare(flowP);
+      ok('task33: <p> sections still narrate and prepare is idempotent', nP1 >= 3 && nP2 === nP1, `p1=${nP1} p2=${nP2}`);
+    }
+
   } catch (e) {
     out.push('FATAL ' + (e.stack || e.message));
     fail++;

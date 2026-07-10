@@ -183,8 +183,9 @@ img { max-width: 100%; }
 .header-title { flex: 1; text-align: center; font-family: var(--display); color: var(--gold-bright); font-size: 1.2rem; letter-spacing: 0.03em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .header-actions { display: flex; align-items: center; gap: 0.3rem; }
 .icon-btn { flex: none; background: rgba(255,255,255,0.06); border: 1px solid rgba(200,150,42,0.4); color: var(--gold-bright); font-size: 1.25rem; width: 2.5rem; height: 2.5rem; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
-.icon-btn:hover { background: rgba(200,150,42,0.18); }
+.icon-btn:hover:not(:disabled) { background: rgba(200,150,42,0.18); }
 .icon-btn.active { background: rgba(200,150,42,0.3); border-color: var(--gold-bright); }
+.icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .icon-btn.speed-btn { width: auto; min-width: 2.5rem; padding: 0 0.45rem; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
 
 /* narration (text-to-speech) */

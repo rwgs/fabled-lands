@@ -61,6 +61,12 @@ export class Narrator {
         if (p.closest('.choices, .fight, .market')) return;
         wrapSentences(p);
       });
+      // Most sections wrap their prose in <p>, but ~1,544 render it as bare text
+      // and inline nodes directly in .flow (e.g. book4/16, book2/745). Wrap those
+      // top-level runs too, or the 🔊 button would silently do nothing there. Block
+      // widgets (choices/fight/market/roll divs, tables) stay put as run
+      // boundaries and are not swept into a sentence span. (task 33)
+      wrapFlowRuns(flowEl);
       spans = Array.from(flowEl.querySelectorAll('.tts-s'));
     }
     this.chunks = spans
@@ -68,6 +74,17 @@ export class Narrator {
       .filter((c) => /[A-Za-z0-9]/.test(c.text));
     this.index = 0;
     return this.chunks.length;
+  }
+
+  /** Whether this flow has any prose worth narrating — used to disable the button
+   *  when there is genuinely nothing to read. Non-mutating (leaves the DOM
+   *  untouched); mirrors what prepare() would collect, so it agrees with the
+   *  chunk count without wrapping anything. */
+  canNarrate(flowEl) {
+    if (!SUPPORTED || !flowEl) return false;
+    const clone = flowEl.cloneNode(true);
+    clone.querySelectorAll(NON_PROSE_SEL).forEach((e) => e.remove());
+    return /[A-Za-z0-9]/.test(clone.textContent || '');
   }
 
   // ---- playback ------------------------------------------------------------
@@ -130,6 +147,36 @@ export class Narrator {
 // ---- helpers ---------------------------------------------------------------
 const SENTENCE_RE = /[^.!?…]*[.!?…]+["'’”)\]]*|\s*[^.!?…]+$/g;
 const ENDS = /[.!?…]["'’”)\]]*\s*$/;
+
+// Top-level elements in .flow that are block widgets / tables, not prose. They
+// bound a prose run and are left in place rather than swept into a sentence span.
+const FLOW_BLOCK = new Set(['P', 'DIV', 'FIGURE', 'TABLE', 'THEAD', 'TBODY', 'TR', 'UL', 'OL', 'LI', 'HR', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6']);
+// The same non-prose regions, as a selector, for the non-mutating canNarrate()
+// check: control labels (CONTROL_SEL already covers .roll/.fight/.market/buttons)
+// plus the choices table and any data table.
+const NON_PROSE_SEL = CONTROL_SEL + ', .choices, table';
+
+/** Wrap runs of bare inline prose (text + inline elements) sitting directly in
+ *  .flow into sentence spans, so sections without a <p> wrapper still narrate.
+ *  Block widgets (see FLOW_BLOCK) end the current run and are left untouched. */
+function wrapFlowRuns(flowEl) {
+  let run = [];
+  const flush = () => {
+    if (run.length && run.some((n) => (n.textContent || '').trim())) {
+      const holder = document.createElement('span');
+      holder.className = 'tts-run';
+      flowEl.insertBefore(holder, run[0]);
+      run.forEach((n) => holder.appendChild(n)); // move (preserves listeners)
+      wrapSentences(holder);
+    }
+    run = [];
+  };
+  Array.from(flowEl.childNodes).forEach((node) => {
+    if (node.nodeType === Node.ELEMENT_NODE && FLOW_BLOCK.has(node.tagName)) flush();
+    else run.push(node);
+  });
+  flush();
+}
 
 /** Group a paragraph's children into per-sentence spans, MOVING nodes so any
  *  interactive elements keep their event listeners. */
