@@ -157,6 +157,33 @@ export function fightRound(state, fight, dmgNode) {
 /** True when an enemy in a group has been beaten (Stamina at/under its threshold). */
 export function isDefeated(fight) { return fight.stamina <= fight.winThreshold; }
 
+/** Divine Wrath blessing (book6/94): inflict 1d damage on the enemy once, before or
+ *  during the fight. Reduces the enemy's Stamina (and any staminaLost tally), may fell
+ *  it, marks the fight so it can't be reused, and consumes the blessing unless
+ *  permanent. Returns the damage dealt (0 if unavailable). Headless. (task 80) */
+export function useWrathBlessing(state, fight) {
+  if (!fight || fight.wrathUsed || !state.hasBlessing('wrath')) return 0;
+  const dmg = Math.min(rollDice(1).total, fight.stamina);
+  fight.stamina -= dmg;
+  if (fight.staminaLost) state.adjustCodewordValue(fight.staminaLost, dmg);
+  if (fight.stamina <= fight.winThreshold) fight.outcome = 'win';
+  fight.wrathUsed = true;
+  state.useBlessing('wrath');
+  return dmg;
+}
+
+/** Defence through Faith blessing (book5/248/692/89): +bonus (default 3) to Defence for
+ *  THIS fight only. Adds a transient per-fight Defence bonus (cleared on leaving the
+ *  section), marks the fight, and consumes the blessing unless permanent. Returns the
+ *  bonus applied (0 if unavailable). Headless. (task 80) */
+export function useDefenceBlessing(state, fight, bonus = 3) {
+  if (!fight || fight.defenceUsed || !state.hasBlessing('defence')) return 0;
+  state.addFightBonus('defence', bonus);
+  fight.defenceUsed = true;
+  state.useBlessing('defence');
+  return bonus;
+}
+
 /**
  * One round of a simultaneous group fight (group="…"): the player strikes ONE
  * still-standing enemy (the one they choose — §6.618 "against whichever opponent

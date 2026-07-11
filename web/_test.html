@@ -4,7 +4,7 @@
 import * as data from './js/data.js';
 import { GameState, readSlotData, importSave, loadSlotMeta, deleteSlot, makeItem, nextFreeSlot, sanitizeData, currencyAward, splitItemName } from './js/state.js';
 import * as eng from './js/engine.js';
-import { fightRound, makeFight, groupFightRound, isDefeated } from './js/combat.js';
+import { fightRound, makeFight, groupFightRound, isDefeated, useWrathBlessing, useDefenceBlessing } from './js/combat.js';
 import { goodsFrom, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo, canUpgradeCrew, payChoiceCost } from './js/market.js';
 import { Story } from './js/render.js';
 import { Narrator } from './js/tts.js';
@@ -1804,6 +1804,58 @@ async function run() {
     new Story(c176b, g176b, { navigate(bk, sec){ nav176b = { bk, sec }; }, onDeath(){}, notify(){} }).begin(await data.getSection(1, '176'), 1, '176');
     Array.from(c176b.querySelectorAll('.goto')).find((g) => /\b85\b/.test(g.textContent)).click();
     ok('§1.176 sailing on keeps the ship at large and goes to 85', sh176b.docked === null && nav176b && String(nav176b.sec) === '85');
+
+    // --- task 80: combat blessings (Divine Wrath / Defence through Faith) --------------
+    // Headless: Divine Wrath deals 1d to the enemy, once, and is consumed.
+    const gw80 = GameState.create({ name:'W80', gender:'m', profession:'Warrior', book:6, adv });
+    gw80.data.stamina = 30; gw80.data.staminaMax = 30; gw80.addBlessing('wrath');
+    const fw80 = makeFight(parse('<fight name="Ogre" combat="6" defence="9" stamina="12"/>'), gw80);
+    const rndW80 = Math.random; Math.random = () => 0.5; // 1d → floor(0.5*6)+1 = 4
+    const dmgW80 = useWrathBlessing(gw80, fw80);
+    Math.random = rndW80;
+    ok('§80 Divine Wrath deals 1d to the enemy (4)', dmgW80 === 4 && fw80.stamina === 8, `dmg=${dmgW80} stam=${fw80.stamina}`);
+    ok('§80 Divine Wrath is consumed and marked used', !gw80.hasBlessing('wrath') && fw80.wrathUsed === true);
+    ok('§80 Divine Wrath cannot be used twice', useWrathBlessing(gw80, fw80) === 0);
+    const gw80b = GameState.create({ name:'W80b', gender:'m', profession:'Warrior', book:6, adv });
+    gw80b.addBlessing('wrath');
+    const fw80b = makeFight(parse('<fight name="Imp" combat="4" defence="7" stamina="3"/>'), gw80b);
+    const rndW80b = Math.random; Math.random = () => 0.99; // 1d → 6 ≥ 3 → felled
+    useWrathBlessing(gw80b, fw80b);
+    Math.random = rndW80b;
+    ok('§80 Divine Wrath can fell a weak enemy (outcome win)', fw80b.outcome === 'win' && fw80b.stamina === 0);
+
+    // Headless: Defence through Faith adds +3 for the fight, once, and is consumed.
+    const gd80 = GameState.create({ name:'D80', gender:'m', profession:'Warrior', book:5, adv });
+    gd80.addBlessing('defence');
+    const fd80 = makeFight(parse('<fight name="Knight" combat="8" defence="14" stamina="20"/>'), gd80);
+    const defBase80 = gd80.fightDefenceBonus();
+    ok('§80 Defence through Faith adds +3 for the fight', useDefenceBlessing(gd80, fd80) === 3 && gd80.fightDefenceBonus() === defBase80 + 3);
+    ok('§80 Defence through Faith is consumed and marked used', !gd80.hasBlessing('defence') && fd80.defenceUsed === true);
+    ok('§80 Defence through Faith cannot be used twice', useDefenceBlessing(gd80, fd80) === 0);
+    const gn80 = GameState.create({ name:'N80', gender:'m', profession:'Warrior', book:5, adv });
+    const fn80 = makeFight(parse('<fight name="X" combat="1" defence="1" stamina="5"/>'), gn80);
+    ok('§80 no blessing → the combat helpers are inert', useWrathBlessing(gn80, fn80) === 0 && useDefenceBlessing(gn80, fn80) === 0);
+
+    // DOM: the fight widget shows the blessing buttons only when held; clicking uses them.
+    const secF80 = '<section name="TF80"><p><fight name="Troll" combat="7" defence="12" stamina="16"/></p></section>';
+    const gdom80 = GameState.create({ name:'DOM80', gender:'m', profession:'Warrior', book:6, adv });
+    gdom80.data.stamina = 30; gdom80.data.staminaMax = 30; gdom80.addBlessing('wrath'); gdom80.addBlessing('defence');
+    const cdom80 = document.createElement('div');
+    new Story(cdom80, gdom80, { navigate(){}, onDeath(){}, notify(){} }).begin(parse(secF80), 6, 'TF80');
+    const wrathBtn80 = () => Array.from(cdom80.querySelectorAll('button')).find((b) => /Divine Wrath/.test(b.textContent));
+    const defBtn80 = () => Array.from(cdom80.querySelectorAll('button')).find((b) => /Defence through Faith/.test(b.textContent));
+    ok('§80 the fight widget shows both blessing buttons when held', !!wrathBtn80() && !!defBtn80());
+    defBtn80().click();
+    ok('§80 using Defence through Faith: +3 fight defence, button gone, blessing consumed', gdom80.fightDefenceBonus() === 3 && !defBtn80() && !gdom80.hasBlessing('defence'));
+    ok('§80 the widget shows the boosted Defence', new RegExp('Your Defence ' + (gdom80.defence() + 3) + '(?!\\d)').test(cdom80.querySelector('.you').textContent), cdom80.querySelector('.you').textContent);
+    const rndDom80 = Math.random; Math.random = () => 0.5; // 1d → 4; 16−4 = 12
+    wrathBtn80().click();
+    Math.random = rndDom80;
+    ok('§80 using Divine Wrath damages the enemy, removes its button, consumes the blessing', /Stamina 12\//.test(cdom80.querySelector('.en-stam').textContent) && !wrathBtn80() && !gdom80.hasBlessing('wrath'));
+    const gno80 = GameState.create({ name:'NO80', gender:'m', profession:'Warrior', book:6, adv });
+    const cno80 = document.createElement('div');
+    new Story(cno80, gno80, { navigate(){}, onDeath(){}, notify(){} }).begin(parse(secF80), 6, 'TF80');
+    ok('§80 no blessing → the fight widget shows no combat-blessing buttons', !Array.from(cno80.querySelectorAll('button')).some((b) => /Divine Wrath|Defence through Faith/.test(b.textContent)));
 
     // --- task 47: <choice item="?" tags="light"> gates on a light source ---
     const g291 = GameState.create({ name:'C291', gender:'m', profession:'Warrior', book:2, adv });

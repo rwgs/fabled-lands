@@ -80,7 +80,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 
 **MEDIUM**
 - [x] 81. Ships: honour `todock=` and track which at-large ship is being sailed *(split from task 73)*
-- [ ] 80. Combat blessings: expose Defence through Faith (+3, one fight) and Divine Wrath (1d pre-damage) as fight-widget buttons *(split from task 76)*
+- [x] 80. Combat blessings: expose Defence through Faith (+3, one fight) and Divine Wrath (1d pre-damage) as fight-widget buttons *(split from task 76)*
 - [ ] 75. Live `<tick>` forms for equipment, profession changes and patterned titles are incomplete/inert
 - [ ] 79. Keeping a preview or importing a save reports success when persistence fails
 - [x] 5. Implement `<items group … limit="N">` "choose up to N" pickup
@@ -2879,6 +2879,28 @@ is then consumed; Defence raises the player's fight Defence by +3 (or `bonus=`) 
 that fight only and clears on leaving the section; the buttons appear only while a
 fight is unresolved and only when the blessing is held; a permanent such blessing is
 not consumed. Stamp and re-run all sections.
+
+**Done (2026-07-11).** Added two headless helpers to `combat.js`:
+`useWrathBlessing(state, fight)` rolls 1d, cuts the enemy's Stamina (and any
+`staminaLost` tally), fells it if that reaches the win threshold, marks `fight.wrathUsed`
+and consumes the blessing (via `useBlessing`, so a permanent one survives — task 76);
+`useDefenceBlessing(state, fight, bonus=3)` adds a per-fight Defence bonus through the
+existing `addFightBonus('defence', …)` store (task 49, cleared on leaving the section —
+so it lasts exactly one combat), marks `fight.defenceUsed` and consumes the blessing.
+Both are once-per-fight (guarded by the fight-object flags) and no-ops without the
+blessing. `render.js` `drawFight` renders "Use Divine Wrath (1d damage)" / "Use Defence
+through Faith (+3 Defence)" buttons on an unresolved single-fight widget only when the
+player holds the blessing — so a blessing-less character (the every-section scan) never
+sees them; the "Your Defence" line now includes the per-fight bonus so the boost is
+visible. Rules stay in `combat.js`/`state.js`; the view only renders the button and the
+result. Added 13 assertions (Wrath 1d damage + fell + once + consume; Defence +3 + once
++ consume; inert without the blessing; DOM buttons shown-only-when-held, click applies +
+consumes + removes the button, and the boosted Defence displays). Web-only — stamped
+`26.07.11.54c1322`. Suite green: `RESULT ALL PASS pass=746 fail=0`.
+
+Deferred (not needed by the corpus uses, which are single fights): the buttons are on
+the single-fight widget only, not group fights — a group-fight Wrath would need a target
+choice among foes. File a follow-up only if a group section is found to need them.
 
 ---
 

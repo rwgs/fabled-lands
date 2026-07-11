@@ -11,7 +11,7 @@ import {
   rollDifficulty, rollRankCheck, rollTraining, rollDice, matchRange, childAdjustment,
   applyRest, buyResurrectionDeal, abilityChoiceOptions, readItemEffects,
 } from './engine.js';
-import { makeFight, fightRound, groupFightRound, isDefeated } from './combat.js';
+import { makeFight, fightRound, groupFightRound, isDefeated, useWrathBlessing, useDefenceBlessing } from './combat.js';
 import { shopKind, goodsFrom, ownsGoods, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo, canUpgradeCrew, payChoiceCost } from './market.js';
 import { normalize, makeItem, parseTags, currencyAward, splitItemName, isShardsCurrency } from './state.js';
 import { ABILITY_LABEL } from './rules.js';
@@ -2380,7 +2380,10 @@ export class Story {
 
     const you = document.createElement('div');
     you.className = 'fight-stats you';
-    you.innerHTML = `<span>Your Combat ${this.state.ability('combat')}</span><span>Your Defence ${this.state.defence()}</span><span>Your Stamina ${this.state.data.stamina}/${this.state.effectiveStaminaMax()}</span>`;
+    // Include any per-fight Defence bonus (Defence through Faith / special="defence") so
+    // the displayed value matches what combat resolution uses. (tasks 49, 80)
+    const shownDef = this.state.defence() + this.state.fightDefenceBonus();
+    you.innerHTML = `<span>Your Combat ${this.state.ability('combat')}</span><span>Your Defence ${shownDef}</span><span>Your Stamina ${this.state.data.stamina}/${this.state.effectiveStaminaMax()}</span>`;
     box.appendChild(you);
 
     const logEl = document.createElement('div');
@@ -2447,6 +2450,34 @@ export class Story {
         }
       });
       controls.appendChild(flee);
+    }
+
+    // Combat blessings (task 80): usable once per fight while it is unresolved, and only
+    // shown when the player actually holds the blessing (so a blessing-less character —
+    // e.g. the every-section scan — never sees them). Divine Wrath deals 1d to the enemy
+    // (and can fell it); Defence through Faith adds +3 to Defence for this fight. The
+    // rules live in combat.js; the view only renders the button and the outcome.
+    if (this.state.hasBlessing('wrath') && !fight.wrathUsed) {
+      const w = document.createElement('button');
+      w.className = 'btn-secondary blessing-combat';
+      w.textContent = 'Use Divine Wrath (1d damage)';
+      w.addEventListener('click', () => {
+        const dmg = useWrathBlessing(this.state, fight);
+        this.notify(`Divine Wrath strikes the ${fight.name} for ${dmg}!`);
+        if (fight.outcome || this.state.isDead()) { this.rerender(); return; }
+        this.drawFight(box, fight, node, dmgNode, fleeNode, key, false);
+      });
+      controls.appendChild(w);
+    }
+    if (this.state.hasBlessing('defence') && !fight.defenceUsed) {
+      const d = document.createElement('button');
+      d.className = 'btn-secondary blessing-combat';
+      d.textContent = 'Use Defence through Faith (+3 Defence)';
+      d.addEventListener('click', () => {
+        useDefenceBlessing(this.state, fight);
+        this.drawFight(box, fight, node, dmgNode, fleeNode, key, false);
+      });
+      controls.appendChild(d);
     }
     box.appendChild(controls);
   }
