@@ -448,7 +448,7 @@ function applyLose(el, state, opts) {
   }
   if (get('blessing') != null) {
     const b = get('blessing');
-    if (b === '*') { const had = state.data.blessings.length; if (had) { state.data.blessings = []; state.changed(); notes.push('lost all blessings'); } }
+    if (b === '*') { if (state.removeAllBlessings()) notes.push('lost all blessings'); }
     else if (b === '?') {
       if (state.data.blessings.length) {
         const pick = opts.chooser ? opts.chooser(state.data.blessings.slice(), 1, 'blessing') : null;
@@ -583,7 +583,7 @@ function applyTick(el, state, opts) {
     else { state.adjustMoney(n); notes.push(`+${n} Shards`); }
     did = true;
   }
-  if (get('blessing') != null) { state.addBlessing(get('blessing')); notes.push('blessing'); did = true; }
+  if (get('blessing') != null) { state.addBlessing(get('blessing'), boolAttr(get('permanent'))); notes.push('blessing'); did = true; }
   if (get('curse') != null) { state.addCurse(get('curse')); did = true; }
   if (get('god') != null) { state.setGod(get('god'), readEffects(el)); did = true; }
   if (get('title') != null) {

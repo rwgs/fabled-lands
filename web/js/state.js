@@ -21,6 +21,10 @@ function canonBlessing(b) {
   const k = String(b).trim().toLowerCase();
   return BLESSING_ALIASES[k] || k;
 }
+// The six ability blessings — each lets the player reroll a FAILED roll of that
+// ability (JaFL). Luck ('luck') rerolls any roll; Safe Travel ('travel') rerolls a
+// random type="travel" encounter. (task 76)
+const ABILITY_BLESSINGS = new Set(['charisma', 'combat', 'magic', 'sanctity', 'scouting', 'thievery']);
 
 function freshData() {
   return {
@@ -39,6 +43,7 @@ function freshData() {
     oneDieRolls: false,   // the Three Fortunes' difficultyCurse: 1 die on ability rolls (task 36)
     titles: [],           // {name, value}
     blessings: [],        // string ability names or labels
+    permanentBlessings: [], // canonical names of blessings that are never used up (task 76)
     curses: [],           // {type, ...}
     codewords: {},        // name -> true
     codewordValues: {},   // name -> number
@@ -591,12 +596,56 @@ export class GameState {
   // Compared/stored canonically so "storm"/"storms" (and any casing) are one
   // blessing — this also repairs legacy saves that stored the alias spelling.
   hasBlessing(b) { const c = canonBlessing(b); return this.data.blessings.some((x) => canonBlessing(x) === c); }
-  addBlessing(b) { if (!this.hasBlessing(b)) { this.data.blessings.push(canonBlessing(b)); this.changed(); } }
+  // permanent="true" (book6/159 Safety from Storms) marks a blessing that is never
+  // used up; re-granting an existing blessing as permanent upgrades it. (task 76)
+  addBlessing(b, permanent = false) {
+    const c = canonBlessing(b);
+    if (!this.hasBlessing(b)) this.data.blessings.push(c);
+    if (permanent) { (this.data.permanentBlessings ||= []); if (!this.data.permanentBlessings.includes(c)) this.data.permanentBlessings.push(c); }
+    this.changed();
+    return c;
+  }
   removeBlessing(b) {
     const c = canonBlessing(b);
     const i = this.data.blessings.findIndex((x) => canonBlessing(x) === c);
+    const pi = (this.data.permanentBlessings || []).findIndex((x) => canonBlessing(x) === c);
+    if (pi >= 0) this.data.permanentBlessings.splice(pi, 1);
     if (i >= 0) { this.data.blessings.splice(i, 1); this.changed(); return true; }
+    if (pi >= 0) this.changed();
     return false;
+  }
+  // A punitive "lose all blessings" (<lose blessing="*">) clears even permanent ones
+  // (JaFL: a blessing can be removed even if permanent). (task 76)
+  removeAllBlessings() {
+    const had = this.data.blessings.length || (this.data.permanentBlessings || []).length;
+    this.data.blessings = [];
+    this.data.permanentBlessings = [];
+    if (had) this.changed();
+    return had > 0;
+  }
+  isBlessingPermanent(b) { const c = canonBlessing(b); return (this.data.permanentBlessings || []).some((x) => canonBlessing(x) === c); }
+  // Spend a blessing on its use (a reroll, etc.): consumed unless permanent. Returns
+  // true if the blessing was held (so its benefit applies). (task 76)
+  useBlessing(b) {
+    if (!this.hasBlessing(b)) return false;
+    if (this.isBlessingPermanent(b)) return true; // permanent — never used up
+    this.removeBlessing(b);
+    return true;
+  }
+  // Which blessings the player may spend to reroll the just-resolved roll (task 76):
+  // an ability blessing rerolls a FAILED check of that ability; Luck rerolls any roll;
+  // Safe Travel rerolls a random type="travel" encounter. Returns canonical names.
+  rerollBlessings({ ability = null, success = false, kind = 'check', travel = false } = {}) {
+    const out = [];
+    if (kind === 'random') {
+      if (travel && this.hasBlessing('travel')) out.push('travel');
+      if (this.hasBlessing('luck')) out.push('luck');
+      return out;
+    }
+    if (success) return out; // a passed check needs no reroll
+    if (ability && ABILITY_BLESSINGS.has(canonBlessing(ability)) && this.hasBlessing(ability)) out.push(canonBlessing(ability));
+    if (this.hasBlessing('luck')) out.push('luck');
+    return out;
   }
   // ---- afflictions: curses / diseases / poisons ------------------------
   // Each is {name, type, effects:[{ability,bonus}], cumulative, lift}, matched by
@@ -844,6 +893,11 @@ export function sanitizeData(raw) {
     return name ? { name, value: asNum(o.value, 0, { int: true }) } : null;
   }).filter(Boolean);
   out.blessings = asArr(d.blessings).filter((b) => typeof b === 'string');
+  // Permanent-blessing markers (task 76): keep only string names that name a held
+  // blessing, canonicalised and de-duplicated. Absent in legacy string-only saves ⇒ [].
+  out.permanentBlessings = [...new Set(asArr(d.permanentBlessings)
+    .filter((b) => typeof b === 'string').map((b) => canonBlessing(b))
+    .filter((c) => out.blessings.some((x) => canonBlessing(x) === c)))];
   out.curses = asArr(d.curses).map((a) => sanitizeAffliction(a, 'curse')).filter(Boolean);
   out.diseases = asArr(d.diseases).map((a) => sanitizeAffliction(a, 'disease')).filter(Boolean);
   out.poisons = asArr(d.poisons).map((a) => sanitizeAffliction(a, 'poison')).filter(Boolean);

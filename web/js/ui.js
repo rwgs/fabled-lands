@@ -181,7 +181,14 @@ export function renderSheet(state, container, opts = {}) {
     container.appendChild(chipList(cws.sort()));
   }
 
-  if (d.blessings.length) { container.appendChild(sectionTitle('Blessings')); container.appendChild(chipList(d.blessings)); }
+  if (d.blessings.length) {
+    // Mark a permanent blessing (book6/159 Safety from Storms) so it reads distinctly
+    // from an ordinary, single-use one. (task 76)
+    const canonB = (b) => { const k = String(b).trim().toLowerCase(); return k === 'storms' ? 'storm' : k; };
+    const perm = new Set((d.permanentBlessings || []).map(canonB));
+    container.appendChild(sectionTitle('Blessings'));
+    container.appendChild(chipList(d.blessings.map((b) => perm.has(canonB(b)) ? `${b} (permanent)` : b)));
+  }
   // Afflictions chip by their own name (fall back to the type), and diseases/poisons
   // get their own sections — a hidden penalty must be visible on the sheet (task 57).
   const afflictionNames = (list) => list.map((a) => (a && (a.name || a.type)) || '').filter(Boolean);

@@ -1541,6 +1541,68 @@ async function run() {
     eng.applyEffect(parse('<set var="q" item="?" tags="light" value="shards/300"/>'), greg77, {});
     ok('regression: shards= with a selector but no cache still reads the purse (600/300=2)', greg77.getVar('q') === 2, `q=${greg77.getVar('q')}`);
 
+    // --- task 76: blessings — metadata, permanence, migration, and rerolls -----------
+    // Metadata + consumption: an ordinary blessing is used up; a permanent one is not.
+    const gb76 = GameState.create({ name:'B76', gender:'m', profession:'Warrior', book:1, adv });
+    gb76.data.blessings = []; gb76.data.permanentBlessings = [];
+    gb76.addBlessing('luck');
+    gb76.addBlessing('storm', true); // permanent (book6/159)
+    ok('§76 addBlessing stores the blessings', gb76.hasBlessing('luck') && gb76.hasBlessing('storm'));
+    ok('§76 permanent="true" marks the blessing permanent', gb76.isBlessingPermanent('storm') && !gb76.isBlessingPermanent('luck'));
+    ok('§76 useBlessing consumes an ordinary blessing', gb76.useBlessing('luck') === true && !gb76.hasBlessing('luck'));
+    ok('§76 useBlessing keeps a permanent blessing', gb76.useBlessing('storm') === true && gb76.hasBlessing('storm'));
+    ok('§76 useBlessing on a missing blessing returns false', gb76.useBlessing('luck') === false);
+    // "storms"/"storm" are one blessing; re-granting as permanent upgrades it (no dup).
+    const gb76b = GameState.create({ name:'B76b', gender:'m', profession:'Warrior', book:1, adv });
+    gb76b.data.blessings = []; gb76b.data.permanentBlessings = [];
+    gb76b.addBlessing('storms'); // ordinary, alias spelling
+    ok('§76 storms alias is stored, not yet permanent', gb76b.hasBlessing('storm') && !gb76b.isBlessingPermanent('storm'));
+    gb76b.addBlessing('storm', true); // upgrade to permanent
+    ok('§76 re-granting permanent upgrades in place (no duplicate)', gb76b.data.blessings.length === 1 && gb76b.isBlessingPermanent('storm'));
+    ok('§76 removeAllBlessings clears permanent blessings too', gb76b.removeAllBlessings() && !gb76b.hasBlessing('storm') && gb76b.data.permanentBlessings.length === 0);
+
+    // Engine grant reads permanent= (book6/159); lose-all clears even permanent (book4/607).
+    const gb76g = GameState.create({ name:'B76g', gender:'m', profession:'Warrior', book:6, adv });
+    eng.applyEffect(parse('<tick blessing="storm" permanent="true">Safety from Storms</tick>'), gb76g, {});
+    ok('§6.159 <tick blessing=storm permanent=true> is permanent', gb76g.hasBlessing('storm') && gb76g.isBlessingPermanent('storm'));
+    eng.applyEffect(parse('<lose blessing="*"/>'), gb76g, {});
+    ok('§4.607 <lose blessing="*"> removes even the permanent storm', !gb76g.hasBlessing('storm'));
+
+    // Migration: legacy string-only save → no permanent markers; a save's markers are
+    // canonicalised and orphan markers (no held blessing) are dropped.
+    const mig76a = sanitizeData({ abilities:{combat:5}, stamina:9, blessings:['luck','combat'] });
+    ok('§76 migrate: legacy save keeps blessings, permanentBlessings []', mig76a.blessings.length === 2 && Array.isArray(mig76a.permanentBlessings) && mig76a.permanentBlessings.length === 0);
+    const mig76b = sanitizeData({ abilities:{combat:5}, stamina:9, blessings:['storms'], permanentBlessings:['storms','ghost'] });
+    ok('§76 migrate: permanent marker canonicalised + orphan dropped', mig76b.permanentBlessings.length === 1 && mig76b.permanentBlessings[0] === 'storm');
+
+    // rerollBlessings eligibility (headless).
+    const gre76 = GameState.create({ name:'RE76', gender:'m', profession:'Warrior', book:1, adv });
+    gre76.data.blessings = ['combat', 'luck', 'travel']; gre76.data.permanentBlessings = [];
+    ok('§76 failed COMBAT check → COMBAT + Luck rerolls', JSON.stringify(gre76.rerollBlessings({ ability:'combat', success:false, kind:'check' })) === JSON.stringify(['combat','luck']));
+    ok('§76 passed COMBAT check → no reroll offered', gre76.rerollBlessings({ ability:'combat', success:true, kind:'check' }).length === 0);
+    ok('§76 failed SCOUTING check (no SCOUTING blessing) → Luck only', JSON.stringify(gre76.rerollBlessings({ ability:'scouting', success:false, kind:'check' })) === JSON.stringify(['luck']));
+    ok('§76 random → Luck; travel random → Safe Travel + Luck', JSON.stringify(gre76.rerollBlessings({ kind:'random' })) === JSON.stringify(['luck']) && JSON.stringify(gre76.rerollBlessings({ kind:'random', travel:true })) === JSON.stringify(['travel','luck']));
+
+    // DOM: a failed ability roll offers a one-click blessing reroll that replaces the
+    // result and consumes the blessing. Synthetic §T76 THIEVERY roll at Difficulty 15.
+    const gdr76 = GameState.create({ name:'DR76', gender:'m', profession:'Warrior', book:1, adv });
+    gdr76.data.abilities.thievery = 6; gdr76.data.blessings = ['thievery', 'luck']; gdr76.data.permanentBlessings = [];
+    const sec76 = '<section name="T76"><p><difficulty ability="thievery" level="15">roll THIEVERY</difficulty></p><outcomes><success section="10">win</success><failure section="20">lose</failure></outcomes></section>';
+    const cdr76 = document.createElement('div');
+    new Story(cdr76, gdr76, { navigate(){}, onDeath(){}, notify(){} }).begin(parse(sec76), 1, 'T76');
+    ok('§T76 no reroll button before rolling', !cdr76.querySelector('.blessing-reroll'));
+    const rnd76 = Math.random; Math.random = () => 0; // 1+1=2, +6 = 8 ≤ 15 → failure
+    cdr76.querySelector('.btn-roll').click(); await settle42();
+    Math.random = rnd76;
+    ok('§T76 a failed THIEVERY roll offers two reroll buttons (THIEVERY + Luck)', cdr76.querySelectorAll('.blessing-reroll').length === 2, `n=${cdr76.querySelectorAll('.blessing-reroll').length}`);
+    const thievBtn = Array.from(cdr76.querySelectorAll('.blessing-reroll')).find((b) => /THIEVERY/.test(b.textContent));
+    ok('§T76 a THIEVERY reroll button is offered', !!thievBtn);
+    const rnd76b = Math.random; Math.random = () => 0.99; // 6+6=12, +6 = 18 > 15 → success
+    thievBtn.click(); await settle42();
+    Math.random = rnd76b;
+    ok('§T76 the THIEVERY blessing is consumed by the reroll (Luck kept)', !gdr76.hasBlessing('thievery') && gdr76.hasBlessing('luck'));
+    ok('§T76 the reroll now succeeds and offers no further reroll', !cdr76.querySelector('.blessing-reroll') && /Success/.test(cdr76.textContent));
+
     // --- task 47: <choice item="?" tags="light"> gates on a light source ---
     const g291 = GameState.create({ name:'C291', gender:'m', profession:'Warrior', book:2, adv });
     const c291 = document.createElement('div');

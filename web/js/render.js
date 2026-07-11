@@ -460,6 +460,22 @@ export class Story {
     return btn;
   }
 
+  // After a resolved roll, offer any blessing the player may spend to reroll it (task 76).
+  // `opts` = { ability, success, kind:'check'|'random', travel }; eligibility lives in
+  // state.rerollBlessings. `reroll` re-runs the SAME roll and stores the fresh result (it
+  // must not itself re-render — this does). A used blessing is consumed unless permanent.
+  appendBlessingReroll(widget, opts, reroll) {
+    if (this.inactive) return;
+    for (const name of this.state.rerollBlessings(opts)) {
+      const label = name === 'luck' ? 'Luck' : name === 'travel' ? 'Safe Travel' : name.toUpperCase();
+      const btn = document.createElement('button');
+      btn.className = 'btn-secondary blessing-reroll';
+      btn.textContent = `Use your blessing of ${label} to reroll`;
+      btn.addEventListener('click', () => { if (this.state.useBlessing(name)) reroll(); this.rerender(); });
+      widget.appendChild(btn);
+    }
+  }
+
   // <field name="X" label="L"/> — display the live value of a codeword counter
   // (0 if unset), e.g. the Uttaku court status or the running bribery/offering
   // bonus. Re-reads on every render so it tracks <tick name="X">. (task 32)
@@ -1598,6 +1614,11 @@ export class Story {
     if (stored) {
       const abLabel = (stored.ability || spec.split('|')[0] || '').toUpperCase();
       this.showDiceResult(widget, stored.dice, `${abLabel} ${stored.abilityScore >= 0 ? '+' : ''}${stored.abilityScore} = ${stored.total} vs ${level}`, stored.success ? 'Success' : 'Failure', stored.success);
+      this.appendBlessingReroll(widget, { ability: stored.ability, success: stored.success, kind: 'check' }, () => {
+        const res = rollDifficulty(this.state, stored.ability, level, modifier + childAdjustment(node, this.state), mode);
+        if (node.getAttribute('var')) { this.state.setVar(node.getAttribute('var'), res.margin); this.ctx.wroteVars.add(node.getAttribute('var')); this.ctx.rolledVars.add(node.getAttribute('var')); }
+        this.ctx.rolls.set(key, res);
+      });
       return widget;
     }
     // Under the Three Fortunes' difficultyCurse an ability roll uses one die (task 36).
@@ -1679,6 +1700,15 @@ export class Story {
 
     if (stored) {
       this.showDiceResult(widget, stored.dice, `Rolled ${stored.total}`, '', true);
+      // Luck rerolls any dice result; Safe Travel rerolls a type="travel" encounter.
+      const travel = (node.getAttribute('type') || '').toLowerCase() === 'travel';
+      this.appendBlessingReroll(widget, { kind: 'random', travel }, () => {
+        const r = rollDice(dice);
+        const total = r.total + childAdjustment(node, this.state);
+        const res = { kind: 'random', dice: r.dice, total };
+        if (varName) { this.state.setVar(varName, total); this.ctx.wroteVars.add(varName); this.ctx.rolledVars.add(varName); }
+        this.ctx.rolls.set(key, res);
+      });
     } else if (gated && !armed) {
       const btn = this.rollButton(`Roll ${diceWord(dice)}`, widget, () => {});
       btn.disabled = true; btn.title = 'Pay first to make this roll.';
@@ -1710,6 +1740,11 @@ export class Story {
     if (gated && armed && stored) { this.ctx.rolls.delete(key); stored = null; }
     if (stored) {
       this.showDiceResult(widget, stored.dice, `Rolled ${stored.total} vs Rank ${this.state.rankValue()}`, stored.success ? 'Success' : 'Failure', stored.success);
+      this.appendBlessingReroll(widget, { success: stored.success, kind: 'check' }, () => {
+        const res = rollRankCheck(this.state, dice, add, childAdjustment(node, this.state));
+        if (node.getAttribute('var')) { this.state.setVar(node.getAttribute('var'), res.margin); this.ctx.wroteVars.add(node.getAttribute('var')); this.ctx.rolledVars.add(node.getAttribute('var')); }
+        this.ctx.rolls.set(key, res);
+      });
     } else if (gated && !armed) {
       const btn = this.rollButton(`Rank check (roll ${diceWord(dice)})`, widget, () => {});
       btn.disabled = true; btn.title = 'Pay first to make this roll.';
@@ -1741,6 +1776,10 @@ export class Story {
     if (stored) {
       const ab = stored.ability;
       this.showDiceResult(widget, stored.dice, `Rolled ${stored.total} vs ${ab.toUpperCase()} ${stored.natural}`, stored.success ? `+1 ${ab.toUpperCase()}` : 'No gain', stored.success);
+      // Only Luck rerolls a training roll (self-improvement, not an ability *test*).
+      this.appendBlessingReroll(widget, { success: stored.success, kind: 'check' }, () => {
+        this.ctx.rolls.set(key, rollTraining(this.state, ab, dice, add));
+      });
       return widget;
     }
     const pickKey = 'pick@' + path;

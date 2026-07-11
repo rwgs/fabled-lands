@@ -63,7 +63,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 
 **HIGH**
 - [x] 77. Selector-aware `<set item|cache …>` expressions read the sheet instead of the selected item/cache (21 nodes)
-- [ ] 76. Blessings are stored as inert labels — ability/Luck/travel/Defence/Wrath benefits cannot be used
+- [x] 76. Blessings are stored as inert labels — ability/Luck/travel benefits cannot be used *(core rerolls done; combat Defence/Wrath split → task 80)*
 - [ ] 74. Standalone `force="f"` effects auto-apply — missions/initiations cannot be declined; choose-one losses over-apply
 - [ ] 73. Ship dock/current-vessel state is not maintained — any owned ship can sail or trade from anywhere
 - [x] 45. Multi-fight sections: the fight gate & death-deferral track only the *last* `<fight>`
@@ -79,6 +79,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 71. `<lose staminato="N">` never applies — the handler is gated on a `stamina=` attr it lacks (16 sections)
 
 **MEDIUM**
+- [ ] 80. Combat blessings: expose Defence through Faith (+3, one fight) and Divine Wrath (1d pre-damage) as fight-widget buttons *(split from task 76)*
 - [ ] 75. Live `<tick>` forms for equipment, profession changes and patterned titles are incomplete/inert
 - [ ] 79. Keeping a preview or importing a save reports success when persistence fails
 - [x] 5. Implement `<items group … limit="N">` "choose up to N" pickup
@@ -2643,6 +2644,41 @@ random roll, Safe Travel, +3 Defence for one fight, Wrath pre-damage, ordinary
 consumption, permanent storm retention, save migration and duplicate prevention.
 Re-run all sections.
 
+**Done — core rerolls (2026-07-10).** Landed the metadata/consumption model and the
+ability/Luck/Safe-Travel rerolls; the combat Defence-through-Faith / Divine-Wrath
+choices were split into their own follow-up (**task 80**, fight-widget buttons)
+per the agreed scope.
+
+- **state.js** — blessings keep their string shape in `data.blessings`, with a new
+  parallel `data.permanentBlessings` (canonical names). `addBlessing(b, permanent)`
+  records/upgrades permanence and de-dupes; `removeBlessing` drops the marker too;
+  `removeAllBlessings()` clears both (a punitive `<lose blessing="*">` removes even
+  permanent ones); `isBlessingPermanent`; `useBlessing(b)` consumes unless permanent;
+  `rerollBlessings({ability,success,kind,travel})` returns the spendable blessings —
+  an ability blessing on a FAILED check of that ability, Luck on any roll, Safe
+  Travel on a `random type="travel"`. `sanitizeData` migrates string-only saves
+  (⇒ `permanentBlessings: []`) and keeps only canonicalised markers for held
+  blessings (orphans dropped).
+- **engine.js** — the grant path reads `permanent=` (`addBlessing(name, boolAttr(permanent))`
+  — book6/159); the `<lose blessing="*">` path routes through `removeAllBlessings()`.
+- **render.js** — a shared `appendBlessingReroll(widget, opts, reroll)` shows a
+  one-click "Use your blessing of X to reroll" beneath a resolved roll; clicking
+  consumes the blessing (unless permanent) and re-runs the SAME roll, overwriting the
+  memoised result (so a pay-to-roll gate's flag is not re-consumed). Wired into
+  `renderDifficulty` (ability + Luck on failure), `renderRankcheck` (Luck on failure),
+  `renderTraining` (Luck on failure), and `renderRandom` (Luck always; Safe Travel on
+  `type="travel"`). Only appears when the blessing is actually held, so the
+  render-every-section scan (a blessing-less character) is unaffected.
+- **ui.js** — a permanent blessing chips as "X (permanent)" so it reads distinctly.
+
+Storm/disease/poison/injury immunity paths are untouched (still `<if blessing=…>` +
+XML-driven `<lose>`). Added 22 assertions (metadata/permanence/consumption, alias
+upgrade, lose-all, engine grant + lose-all, save migration + orphan drop,
+`rerollBlessings` eligibility across ability/Luck/Safe-Travel, and a synthetic §T76
+DOM reroll: a failed THIEVERY roll offers THIEVERY+Luck buttons, using THIEVERY
+consumes it and re-rolls to success). Web-only — stamped `26.07.10.264f3fa`. Suite
+green: `RESULT ALL PASS pass=684 fail=0`.
+
 ---
 
 ## 77. Selector-aware `<set item|cache …>` expressions ignore their selected item/cache  — HIGH (engine)
@@ -2752,3 +2788,37 @@ success without both save data and metadata. Reuse `lastSaveError`'s player-faci
 message. Add tests with a throwing `localStorage.setItem` for keep/import, plus
 recovery/retry tests. No app stamp is needed for the TASKS-only filing; when the
 fix is implemented, stamp and run the full suite.
+
+---
+
+## 80. Combat blessings: expose Defence through Faith and Divine Wrath on the fight widget  — MEDIUM (combat/render/state)
+
+*(Split from task 76 on 2026-07-10.)* Task 76 landed the blessing
+metadata/consumption model (`useBlessing`, `permanentBlessings`, migration) and the
+ability/Luck/Safe-Travel rerolls, but deferred the two **combat** blessing benefits,
+which the books define but the engine cannot yet apply:
+
+- **Defence through Faith** (`blessing="defence"`, optional `bonus=` defaulting to 3)
+  — add its bonus to the player's Defence for **one chosen combat**, then consume it
+  (book5/248/692, book6/…); and
+- **Divine Wrath** (`blessing="wrath"`) — inflict **1d** pre-fight damage on the enemy,
+  then consume it (book5/89, book6/94).
+
+The plumbing already exists to build on: `combat.js` reads a transient
+per-fight Defence/attack bonus (`state.fightDefenceBonus()`/`fightAttackBonus()`,
+task 49, cleared each section in `begin`), and enemy up-front damage has a
+`preDamage` path (task 26). The agreed UX (from the task-76 scoping) is **buttons on
+the fight widget**: when the player holds `defence`/`wrath` and a fight is unresolved,
+show "Use Divine Wrath (1d damage)" / "Use Defence through Faith (+N Defence)"; a
+click applies the effect (Wrath → reduce enemy Stamina by a 1d roll once; Defence →
+set the per-fight Defence bonus for this fight) and consumes the blessing via
+`state.useBlessing(...)` unless permanent. Keep the rules headless (a
+`combat.js`/`state.js` helper decides eligibility and applies the effect; the view
+only renders the buttons and the dice), and guard against using each benefit more
+than once per fight.
+
+Add DOM/headless tests: Wrath cuts enemy Stamina by the rolled 1d exactly once and
+is then consumed; Defence raises the player's fight Defence by +3 (or `bonus=`) for
+that fight only and clears on leaving the section; the buttons appear only while a
+fight is unresolved and only when the blessing is held; a permanent such blessing is
+not consumed. Stamp and re-run all sections.
