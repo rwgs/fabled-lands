@@ -111,6 +111,9 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 70. Visit box renders unticked on the visit it ticks; bare `<tick/>` prints "If not, , and read on" (§496 + widespread)
 
 **LOW**
+- [ ] 84. De-flake the "fight attack produces a log line" test (timing-dependent on the 900 ms dice animation)
+- [ ] 83. Combat blessings (Wrath/Defence) buttons appear only on the single-fight widget, not group fights *(split from task 80)*
+- [ ] 82. Test harness: a duplicate top-level `const` in `run()` silently aborts the whole suite (reads as a hang, not a failure)
 - [ ] 78. Validate numeric `<section name>` against its filename; fix five mismatched source files
 - [x] 9. Centralise tag dispatch into a registry
 - [x] 10. Dice RNG quality / reproducibility
@@ -2974,3 +2977,75 @@ noted at Yellowport; or sail on → it stays at large). Added 10 assertions (app
 exemption, sail-marks/arrive-clears, save migration, and DOM §4.114 two-ship split +
 §1.176 ashore-vs-sail). Web-only — stamped `26.07.11.05cddc7`. Suite green:
 `RESULT ALL PASS pass=733 fail=0`.
+
+---
+
+## 82. Test harness: a duplicate top-level `const` in `run()` silently aborts the whole suite  — LOW (test infra)
+
+*(Filed 2026-07-11 from experience adding tasks 73/81/75.)* Every assertion in
+`web/_test.html` lives in one `async function run()` scope. Adding a test block that
+reuses a `const`/`let` name already declared **anywhere** in `run()` is a *parse-time*
+`SyntaxError` (e.g. "Identifier 'g53' has already been declared"), which aborts the
+**entire** module before `run()` is ever called. The symptom is misleading: the page
+stays at `#results = "running…"` with title `FL tests` (not `TESTS_OK`/`TESTS_FAIL`), so
+the headless smoke check reports "no RESULT line" and it reads as a hang, not a failing
+assertion. Diagnosing it requires re-running Chrome with `--enable-logging=stderr --v=1`
+and grepping the console for the `SyntaxError`. This bit three times in one session
+(g53/c53, g114/c114, and a near-miss), each costing a diagnostic round-trip.
+
+Make the harness fail loudly and locally instead:
+- Wrap each task's test block in its own block scope `{ … }` (or an IIFE) so its
+  `const`s are local and a collision is impossible across blocks — the cheapest fix and
+  it also documents block boundaries; **or**
+- keep one scope but add a lightweight guard/step that surfaces a top-level parse error
+  as a visible `FATAL` (e.g. load the module via a small bootstrap that catches the
+  `error` event and writes it into `#results`), so the smoke check sees a failure rather
+  than a hang; **and/or**
+- add a build/CI check that the test module parses (a Node `--check`-style pass, or run
+  it headless and assert the title becomes `TESTS_OK`/`TESTS_FAIL`).
+
+No engine/data change. Add a note in `AGENTS.md`'s build+test section about the
+symptom so the next contributor recognises "stuck at running…" as a duplicate
+declaration. Re-run the suite to confirm the guard reports a synthetic collision as a
+visible failure.
+
+---
+
+## 83. Combat blessings (Wrath/Defence) buttons appear only on the single-fight widget  — LOW (render)
+
+*(Split from task 80 on 2026-07-11.)* Task 80 added the "Use Divine Wrath (1d damage)"
+and "Use Defence through Faith (+3 Defence)" buttons in `drawFight` (the single-fight
+widget), where every corpus grant's *intended* use lives. But the blessings are
+player-held and mechanically usable in **any** fight, so a player who holds one and
+enters a simultaneous **group fight** (`drawGroupFight` — §6.192/273/291/618) cannot
+use it: the buttons aren't rendered there. Divine Wrath is granted in book6 (§94) and
+the group fights are all in book6, so the scenario is reachable, if uncommon.
+
+Add the buttons to `drawGroupFight` too. Defence through Faith is target-agnostic —
+reuse `useDefenceBlessing` unchanged. Divine Wrath needs a target among the living
+foes: either extend `useWrathBlessing` to accept a specific `fight` (render one Wrath
+button per still-standing foe, mirroring the per-foe Attack buttons) or let the player
+pick. Keep the once-per-combat guard across the whole group (a single `wrathUsed`/
+`defenceUsed` marker on the group, not per-foe). Add a DOM test: a group fight with a
+Wrath holder shows the option, using it damages the chosen foe once and consumes the
+blessing. Stamp and re-run all sections.
+
+---
+
+## 84. De-flake the "fight attack produces a log line" test  — LOW (test infra)
+
+*(Filed 2026-07-11 from repeated flakes this session.)* The `web/_test.html`
+assertion **`fight attack produces a log line`** (§105: click the fight `.btn-roll`,
+`await` 900 ms, assert a `.fight-log div` exists) fails intermittently under headless
+Chrome `--virtual-time-budget`: `rollButton`'s click handler `await animateDice(box)`
+before `fightRound` runs, and the fixed 900 ms wait occasionally elapses (in virtual
+time) before the log line is written. It failed on ~half the smoke runs this session
+with no code change, so a genuine regression here could be dismissed as "the flake",
+eroding suite trust (see the [[flaky-fight-log-test]] memory for the operational
+"just re-run" guidance).
+
+Make it deterministic: either stub/short-circuit `animateDice` in the test environment
+(a hook or a near-zero duration), or drop the wall-clock `await` and assert on the
+resolved state instead — e.g. after the click settles, check `fight.log.length` /
+`state` directly rather than polling the DOM after a timeout. Confirm the assertion
+passes on repeated headless runs. No engine change; test-only.
