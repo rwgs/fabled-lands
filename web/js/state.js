@@ -723,6 +723,23 @@ export class GameState {
     this.changed();
   }
   removeTitle(name) { const i = this.data.titles.findIndex((t) => t.name === name); if (i >= 0) { this.data.titles.splice(i, 1); this.changed(); } }
+  // A patterned title (JaFL <tick title titlePattern titleValue titleAdjust>): a NEW
+  // title starts at `init` (titleValue); an existing one advances by `adjust`
+  // (titleAdjust). `pattern` ({0}=value) renders the formatted title. (task 75)
+  adjustPatternedTitle(name, pattern, init = 1, adjust = 1) {
+    const t = this.data.titles.find((t) => t.name === name);
+    if (t) { t.value += adjust; if (pattern) t.pattern = pattern; }
+    else this.data.titles.push({ name, value: init, pattern: pattern || null });
+    this.changed();
+  }
+  // Change the character's profession (book6/118 former Priest, book6/731). Stored
+  // capitalised to match the starting professions; checks normalise casing. (task 75)
+  setProfession(p) {
+    const n = String(p || '').trim();
+    if (!n) return;
+    this.data.profession = n.charAt(0).toUpperCase() + n.slice(1).toLowerCase();
+    this.changed();
+  }
 
   // ---- resurrections ---------------------------------------------------
   hasResurrection() { return this.data.resurrections.length > 0; }
@@ -937,7 +954,10 @@ export function sanitizeData(raw) {
   out.oneDieRolls = asBool(d.oneDieRolls);
   out.titles = asArr(d.titles).map((t) => {
     const o = asObj(t); const name = asStr(o.name).trim();
-    return name ? { name, value: asNum(o.value, 0, { int: true }) } : null;
+    if (!name) return null;
+    const rec = { name, value: asNum(o.value, 0, { int: true }) };
+    if (o.pattern) rec.pattern = asStr(o.pattern); // patterned title format (task 75)
+    return rec;
   }).filter(Boolean);
   out.blessings = asArr(d.blessings).filter((b) => typeof b === 'string');
   // Permanent-blessing markers (task 76): keep only string names that name a held

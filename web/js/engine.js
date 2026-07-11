@@ -315,6 +315,31 @@ function matchEquipment(pool, state, kind, spec, el) {
   return items.some((it) => alts.some((a) => globMatch(a, it.name)));
 }
 
+/** Select the possessions a <tick … addbonus|addtag|removetag> acts on (task 75). The
+ *  selector attr (item/weapon/armour/tool) sets the pattern and, for weapon/armour/tool,
+ *  the kind; tags= and using= narrow further; the pool is a cache when cache= is set.
+ *  "*" = all matches, a name/glob = those named, "?"/blank = one — the chooser's pick
+ *  when several qualify, else the first. */
+function selectEquipment(el, state, eqAttr, cacheN, opts = {}) {
+  const kind = eqAttr === 'item' ? null : eqAttr;
+  const pool = cacheN != null ? state.cacheItems(cacheN) : state.data.items;
+  let items = kind ? pool.filter((it) => it.kind === kind) : pool.slice();
+  if (boolAttr(el.getAttribute('using'))) {
+    const eq = kind === 'weapon' ? state.wieldedWeapon() : (kind === 'armour' ? state.wornArmour() : null);
+    items = (eq && items.includes(eq)) ? [eq] : [];
+  }
+  const tags = el.getAttribute('tags');
+  if (tags) { const want = tags.split(/[,|]/).map(normalize).filter(Boolean); items = items.filter((it) => want.every((t) => (it.tags || []).map(normalize).includes(t))); }
+  const pat = String(el.getAttribute(eqAttr) || '').trim();
+  if (pat === '*') return items;
+  if (pat === '' || pat === '?') {
+    if (items.length <= 1) return items.slice(0, 1);
+    const pick = opts.chooser ? opts.chooser(items.slice(), 1, kind || 'item') : null;
+    return (pick && pick.length) ? pick : items.slice(0, 1);
+  }
+  return matchItems(items, pat);
+}
+
 /** True if the player owns a ship whose type matches `spec`. A ship condition
  *  may abbreviate the type (brig/gall) or list alternatives (brigantine|galleon);
  *  both the stored type and each listed value are canonicalised so a brigantine
@@ -587,8 +612,19 @@ function applyTick(el, state, opts) {
   if (get('curse') != null) { state.addCurse(get('curse')); did = true; }
   if (get('god') != null) { state.setGod(get('god'), readEffects(el)); did = true; }
   if (get('title') != null) {
-    const val = get('titleValue') ? resolveValue(state, get('titleValue')) : (get('amount') ? resolveValue(state, get('amount')) : 0);
-    state.addTitle(get('title'), val); did = true;
+    // A titlePattern= makes a patterned title (JaFL): a NEW title starts at titleValue
+    // (default 1), an existing one advances by titleAdjust (default 1), and the pattern
+    // ({0}=value) renders it ("Circle 2 Master of bokh" — book5/119/172/235). (task 75)
+    const pattern = get('titlePattern');
+    if (pattern != null) {
+      const init = get('titleValue') != null ? resolveValue(state, get('titleValue')) : 1;
+      const adjust = get('titleAdjust') != null ? resolveValue(state, get('titleAdjust')) : 1;
+      state.adjustPatternedTitle(get('title'), pattern, init, adjust);
+    } else {
+      const val = get('titleValue') ? resolveValue(state, get('titleValue')) : (get('amount') ? resolveValue(state, get('amount')) : 0);
+      state.addTitle(get('title'), val);
+    }
+    did = true;
   }
   if (get('ability') != null) {
     // An ability attr was present — route it (rank/stamina/*/?/effect=…) and mark
@@ -603,21 +639,26 @@ function applyTick(el, state, opts) {
   if (get('special') != null) { applySpecial(el, state); did = true; }
   if (get('crew') != null && state.currentShip()) { state.currentShip().crew = get('crew'); state.changed(); did = true; }
   if (get('cargo') != null && state.currentShip()) { (state.currentShip().cargo ||= []).push(get('cargo')); state.changed(); did = true; }
-  // Enchant one or more items in place: addbonus= raises the bonus, addtag=
-  // stamps a tag. item= selects them from the inventory, or from a cache when
-  // cache= is set (the Molherned weapon-blessing stashes — book §…).
-  if ((get('addbonus') != null || get('addtag') != null) && get('item') != null) {
-    const pattern = get('item');
-    const pool = cacheN != null ? state.cacheItems(cacheN) : state.data.items;
-    const targets = pattern === '*' ? pool.slice() : (pattern === '?' ? pool.slice(0, 1) : matchItems(pool, pattern));
+  // Enchant one or more possessions in place: addbonus= raises the bonus, addtag=
+  // stamps a tag, removetag= strips one. The target is selected by item=/weapon=/
+  // armour=/tool= (kind-filtered), narrowed by tags= / using= (the wielded weapon or
+  // worn armour), and drawn from a cache when cache= is set. "*" = all matches, a name
+  // = those named, "?"/blank = one (the chooser's pick, else the first). (tasks 20, 75)
+  const eqAttr = ['weapon', 'armour', 'tool', 'item'].find((k) => get(k) != null);
+  if (eqAttr != null && (get('addbonus') != null || get('addtag') != null || get('removetag') != null)) {
+    const targets = selectEquipment(el, state, eqAttr, cacheN, opts);
     const addb = get('addbonus') != null ? resolveValue(state, get('addbonus')) : 0;
-    const addt = get('addtag');
+    const addt = get('addtag'), remt = get('removetag');
     targets.forEach((it) => {
       if (addb) it.bonus = (it.bonus || 0) + addb;
       if (addt) { it.tags = it.tags || []; if (!it.tags.map(normalize).includes(normalize(addt))) it.tags.push(addt); }
+      if (remt) it.tags = (it.tags || []).filter((t) => normalize(t) !== normalize(remt));
     });
     if (targets.length) { if (cacheN == null) state.reconcileEquipment(); state.changed(); did = true; }
   }
+  // Change profession (book6/731 "become a Priest"); a pipe-list ("mage|rogue|…") is a
+  // player choice handled by the view's picker (book6/118), so apply only a single one here.
+  if (get('profession') != null && !get('profession').includes('|')) { state.setProfession(get('profession')); did = true; }
 
   // Bare <tick> (no meaningful attrs): tick the visit box(es) for this section.
   if (!did) {

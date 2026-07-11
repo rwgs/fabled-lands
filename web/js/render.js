@@ -846,6 +846,16 @@ export class Story {
       return this.renderAbilityChoice(container, node, path);
     }
 
+    // A <tick weapon|item="?" addbonus|addtag|removetag> where more than one possession
+    // qualifies: let the player pick which is enchanted rather than defaulting. (task 75)
+    if (!hidden && this.needsEquipmentChoice(node)) {
+      return this.renderEquipmentChoice(container, node, path);
+    }
+    // A <tick profession="a|b|c"> — the former Priest chooses a new profession. (task 75)
+    if (!hidden && this.needsProfessionChoice(node)) {
+      return this.renderProfessionChoice(container, node, path);
+    }
+
     // A bare <lose>/<gain> written after a <fight> in win/lose prose is a
     // fight-OUTCOME effect (task 69). Applying it on entry (as a plain effect would)
     // hands over the reward / exacts the penalty before a blow is struck — §570
@@ -946,6 +956,79 @@ export class Story {
       this.rerender();
     }, isLoss ? '−' : '+');
     return null;
+  }
+
+  // Does a <tick …="?" addbonus|addtag|removetag> ask the player to choose WHICH
+  // possession is enchanted? Only when the target is an open "?"/blank of a kind with
+  // more than one candidate — a name/all, a tags=/using= narrowing, or a cache target
+  // is deterministic and applies without a picker. (task 75)
+  needsEquipmentChoice(node) {
+    if (node.tagName.toLowerCase() !== 'tick') return false;
+    if (node.getAttribute('addbonus') == null && node.getAttribute('addtag') == null && node.getAttribute('removetag') == null) return false;
+    const eqAttr = ['weapon', 'armour', 'tool', 'item'].find((k) => node.getAttribute(k) != null);
+    if (eqAttr == null) return false;
+    const pat = String(node.getAttribute(eqAttr) || '').trim();
+    if (pat !== '?' && pat !== '') return false;
+    if (boolAttr(node.getAttribute('using')) || node.getAttribute('tags') || node.getAttribute('cache')) return false;
+    const kind = eqAttr === 'item' ? null : eqAttr;
+    const candidates = kind ? this.state.data.items.filter((it) => it.kind === kind) : this.state.data.items;
+    return candidates.length > 1;
+  }
+
+  renderEquipmentChoice(container, node, path) {
+    const memo = 'fx@' + path;
+    const eqAttr = ['weapon', 'armour', 'tool', 'item'].find((k) => node.getAttribute(k) != null);
+    const kind = eqAttr === 'item' ? null : eqAttr;
+    const candidates = kind ? this.state.data.items.filter((it) => it.kind === kind) : this.state.data.items.slice();
+    const desc = document.createElement('span');
+    this.appendChildren(desc, node, path);
+    if (desc.textContent.trim()) container.appendChild(desc);
+    if (this.ctx.applied.has(memo)) return null; // already chosen this visit
+    const box = document.createElement('span');
+    box.className = 'ability-choice';
+    candidates.forEach((it) => {
+      const btn = document.createElement('button');
+      btn.className = 'btn-mini ability-pick';
+      btn.textContent = it.name + (it.bonus ? ` (${it.bonus >= 0 ? '+' : ''}${it.bonus})` : '');
+      btn.addEventListener('click', () => {
+        applyEffect(node, this.state, { chooser: () => [it] });
+        this.ctx.applied.add(memo);
+        this.rerender();
+      });
+      box.appendChild(btn);
+    });
+    container.appendChild(box);
+    return box;
+  }
+
+  // A <tick profession="a|b|c"> asks the player to choose a new profession. (task 75)
+  needsProfessionChoice(node) {
+    if (node.tagName.toLowerCase() !== 'tick') return false;
+    const p = node.getAttribute('profession');
+    return p != null && p.includes('|');
+  }
+
+  renderProfessionChoice(container, node, path) {
+    const memo = 'fx@' + path;
+    const desc = document.createElement('span');
+    this.appendChildren(desc, node, path);
+    if (desc.textContent.trim()) container.appendChild(desc);
+    if (this.ctx.applied.has(memo)) return null;
+    const box = document.createElement('span');
+    box.className = 'ability-choice';
+    node.getAttribute('profession').split('|').map((s) => s.trim()).filter(Boolean).forEach((prof) => {
+      const btn = document.createElement('button');
+      btn.className = 'btn-mini ability-pick';
+      btn.textContent = prof.charAt(0).toUpperCase() + prof.slice(1).toLowerCase();
+      btn.addEventListener('click', () => {
+        this.state.setProfession(prof);
+        this.ctx.applied.add(memo);
+        this.rerender();
+      });
+      box.appendChild(btn);
+    });
+    container.appendChild(box);
+    return box;
   }
 
   // A reusable inline "choose an ability" control (used by ability-choice effects,

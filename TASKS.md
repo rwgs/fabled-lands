@@ -81,7 +81,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 **MEDIUM**
 - [x] 81. Ships: honour `todock=` and track which at-large ship is being sailed *(split from task 73)*
 - [x] 80. Combat blessings: expose Defence through Faith (+3, one fight) and Divine Wrath (1d pre-damage) as fight-widget buttons *(split from task 76)*
-- [ ] 75. Live `<tick>` forms for equipment, profession changes and patterned titles are incomplete/inert
+- [x] 75. Live `<tick>` forms for equipment, profession changes and patterned titles are incomplete/inert
 - [ ] 79. Keeping a preview or importing a save reports success when persistence fails
 - [x] 5. Implement `<items group … limit="N">` "choose up to N" pickup
 - [x] 6. Harden save import and migration
@@ -2666,6 +2666,32 @@ Do not put these mutations in `render.js`.
 Add focused tests for book5/386's full tag→bonus→cleanup cycle, book6/731's
 weapon/profession outcomes, the five-way former-Priest choice in book6/118, and
 two successive bokh grants displaying Circle 2. Rebuild data and run all sections.
+
+**Done (2026-07-11).** Three parts, rules kept headless:
+- **Equipment** — a shared `selectEquipment(el, state, eqAttr, cacheN, opts)` (engine.js)
+  replaces the old item-only enchant. It selects by `item`/`weapon`/`armour`/`tool`
+  (kind-filtered), narrowed by `tags=` and `using=` (wielded/worn), from the sheet or a
+  `cache`; `*` = all, a name = those named, `?`/blank = one (the `opts.chooser` pick when
+  several qualify, else the first). `applyTick` now applies `addbonus`/`addtag`/**`removetag`**
+  to the selection — so book5/386 can tag → up/down-bonus → clean up Targdaz's weapon,
+  book6/731's +1 boon works, and book6/135's `using="t" removetag="keep"` frees the broken
+  weapon. `render.js` adds `needsEquipmentChoice`/`renderEquipmentChoice`: a bare
+  `weapon="?"`/`item="?"` (no tags/using/cache) with >1 candidate shows an inline picker
+  instead of defaulting.
+- **Profession** — `state.setProfession` + an `applyTick` branch for a single
+  `<tick profession="priest">` (book6/731); a pipe-list (`mage|rogue|…`) routes to a new
+  `needsProfessionChoice`/`renderProfessionChoice` picker (book6/118 former Priest).
+- **Patterned titles** — `state.adjustPatternedTitle(name, pattern, init, adjust)` +
+  an `applyTick` `titlePattern` branch: a NEW title starts at `titleValue` (default 1),
+  an existing one advances by `titleAdjust` (default 1), and the title record carries the
+  `pattern` ({0}=value). `ui.js` renders it ("Circle 2 Master of bokh", not "bokh (2)");
+  `sanitizeData` round-trips `pattern`. Fixed the `titalAdjust`→`titleAdjust` typo in
+  `book5/235.xml` and rebuilt (only `book5.json` changed — 1 line; `meta.json` restamped).
+
+Added 15 assertions (bokh Circle 1→2 + sheet render + titleValue≠titleAdjust + migration;
+the §386 tag/bonus/removetag cycle; §135 `using` removetag; §731 profession=priest; DOM
+two-weapon enchant picker; DOM five-way profession picker). Rebuilt data (pwsh 7) —
+stamped `26.07.11.b048106`. Suite green: `RESULT ALL PASS pass=761 fail=0`.
 
 ---
 

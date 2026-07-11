@@ -196,7 +196,13 @@ export function renderSheet(state, container, opts = {}) {
   if (d.diseases.length) { container.appendChild(sectionTitle('Diseases')); container.appendChild(chipList(afflictionNames(d.diseases))); }
   if (d.poisons.length) { container.appendChild(sectionTitle('Poisons')); container.appendChild(chipList(afflictionNames(d.poisons))); }
   if (d.gods.length) { container.appendChild(sectionTitle('Gods')); container.appendChild(chipList(d.gods)); }
-  if (d.titles.length) { container.appendChild(sectionTitle('Titles')); container.appendChild(chipList(d.titles.map((t) => t.name + (t.value ? ` (${t.value})` : '')))); }
+  if (d.titles.length) {
+    // A patterned title renders its format with {0}=value ("Circle 2 Master of bokh");
+    // a plain title shows its name and any count. (task 75)
+    const titleLabel = (t) => t.pattern ? t.pattern.replace('{0}', t.value) : t.name + (t.value ? ` (${t.value})` : '');
+    container.appendChild(sectionTitle('Titles'));
+    container.appendChild(chipList(d.titles.map(titleLabel)));
+  }
 
   if (d.ships.length) {
     container.appendChild(sectionTitle('Ships'));

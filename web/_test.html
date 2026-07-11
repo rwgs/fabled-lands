@@ -1857,6 +1857,65 @@ async function run() {
     new Story(cno80, gno80, { navigate(){}, onDeath(){}, notify(){} }).begin(parse(secF80), 6, 'TF80');
     ok('§80 no blessing → the fight widget shows no combat-blessing buttons', !Array.from(cno80.querySelectorAll('button')).some((b) => /Divine Wrath|Defence through Faith/.test(b.textContent)));
 
+    // --- task 75: live <tick> forms (equipment / profession / patterned titles) --------
+    // Patterned title: first grant sets titleValue; later grants advance by titleAdjust;
+    // the pattern renders "Circle N Master of bokh".
+    const gt75 = GameState.create({ name:'T75', gender:'m', profession:'Warrior', book:5, adv });
+    eng.applyEffect(parse('<tick title="bokh" titlePattern="Circle {0} Master of bokh" titleValue="1" titleAdjust="1"/>'), gt75, {});
+    ok('§75 first bokh grant → Circle 1 (titleValue init)', gt75.titleValue('bokh') === 1);
+    eng.applyEffect(parse('<tick title="bokh" titlePattern="Circle {0} Master of bokh" titleValue="1" titleAdjust="1"/>'), gt75, {});
+    ok('§75 second bokh grant advances by titleAdjust → Circle 2', gt75.titleValue('bokh') === 2);
+    const cSheet75 = document.createElement('div'); renderSheet(gt75, cSheet75);
+    ok('§75 the sheet shows "Circle 2 Master of bokh", not "bokh (2)"', /Circle 2 Master of bokh/.test(cSheet75.textContent) && !/bokh \(2\)/.test(cSheet75.textContent));
+    // A distinct titleAdjust proves the advance uses titleAdjust, not titleValue.
+    const gt75b = GameState.create({ name:'T75b', gender:'m', profession:'Warrior', book:5, adv });
+    eng.applyEffect(parse('<tick title="grade" titlePattern="Grade {0}" titleValue="5" titleAdjust="2"/>'), gt75b, {});
+    eng.applyEffect(parse('<tick title="grade" titlePattern="Grade {0}" titleValue="5" titleAdjust="2"/>'), gt75b, {});
+    ok('§75 patterned title: init 5 then +2 = 7 (advance uses titleAdjust)', gt75b.titleValue('grade') === 7);
+    const mig75 = sanitizeData({ abilities:{combat:5}, stamina:9, titles:[{ name:'bokh', value:3, pattern:'Circle {0} Master of bokh' }] });
+    ok('§75 migrate: a title pattern round-trips', mig75.titles[0].pattern === 'Circle {0} Master of bokh' && mig75.titles[0].value === 3);
+
+    // Equipment: <tick weapon="?" tags=…> selects the tagged weapon; addtag/addbonus/removetag work.
+    const ge75 = GameState.create({ name:'E75', gender:'m', profession:'Warrior', book:5, adv });
+    ge75.data.items = []; const wpn75 = ge75.addItem(makeItem('weapon', 'targ blade', 2));
+    eng.applyEffect(parse('<tick weapon="?" addtag="Tz"/>'), ge75, {});
+    ok('§5.386 <tick weapon="?" addtag> tags the (single) weapon', (wpn75.tags || []).includes('Tz'));
+    eng.applyEffect(parse('<tick weapon="?" tags="Tz" addbonus="1"/>'), ge75, {});
+    ok('§5.386 <tick weapon="?" tags="Tz" addbonus="1"> raises the tagged weapon (2→3)', wpn75.bonus === 3);
+    eng.applyEffect(parse('<tick weapon="?" tags="Tz" addbonus="-1"/>'), ge75, {});
+    ok('§5.386 addbonus="-1" lowers it (3→2)', wpn75.bonus === 2);
+    eng.applyEffect(parse('<tick weapon="?" tags="Tz" removetag="Tz"/>'), ge75, {});
+    ok('§5.386 removetag strips the Tz tag (cleanup)', !(wpn75.tags || []).includes('Tz'));
+    // using="t" targets the wielded weapon (book6/135 removes its keep tag).
+    const gu75 = GameState.create({ name:'U75', gender:'m', profession:'Warrior', book:6, adv });
+    gu75.data.items = []; const kept75 = gu75.addItem(makeItem('weapon', 'oath blade', 3, null, ['keep']));
+    eng.applyEffect(parse('<tick weapon="?" using="t" removetag="keep"/>'), gu75, {});
+    ok('§6.135 <tick weapon="?" using="t" removetag="keep"> strips keep from the wielded weapon', !(kept75.tags || []).includes('keep'));
+
+    // Profession: a single <tick profession="priest"> changes the profession.
+    const gp75 = GameState.create({ name:'P75', gender:'m', profession:'Warrior', book:6, adv });
+    eng.applyEffect(parse('<tick profession="priest"/>'), gp75, {});
+    ok('§6.731 <tick profession="priest"> changes the profession to Priest', gp75.data.profession === 'Priest');
+
+    // DOM: <tick weapon="?" addbonus="1"> with TWO weapons prompts a choice; picking raises one.
+    const gdw75 = GameState.create({ name:'DW75', gender:'m', profession:'Warrior', book:6, adv });
+    gdw75.data.items = []; const wA75 = gdw75.addItem(makeItem('weapon', 'sabre', 1)); const wB75 = gdw75.addItem(makeItem('weapon', 'mace', 2));
+    const secW75 = '<section name="TW75"><p><tick weapon="?" addbonus="1">Increase the COMBAT bonus of one weapon by +1</tick></p></section>';
+    const cdw75 = document.createElement('div');
+    new Story(cdw75, gdw75, { navigate(){}, onDeath(){}, notify(){} }).begin(parse(secW75), 6, 'TW75');
+    ok('§6.731 two weapons → an enchant picker (no auto-apply)', cdw75.querySelectorAll('.ability-pick').length === 2 && wA75.bonus === 1 && wB75.bonus === 2);
+    Array.from(cdw75.querySelectorAll('.ability-pick')).find((b) => /sabre/i.test(b.textContent)).click();
+    ok('§6.731 picking a weapon raises only that one (+1)', wA75.bonus === 2 && wB75.bonus === 2);
+
+    // DOM: <tick profession="a|b|c"> renders a profession picker (book6/118 former Priest).
+    const gdp75 = GameState.create({ name:'DP75', gender:'m', profession:'Priest', book:6, adv });
+    const secP75 = '<section name="TP75"><p><tick profession="mage|rogue|troubadour|warrior|wayfarer">choose a new profession</tick></p></section>';
+    const cdp75 = document.createElement('div');
+    new Story(cdp75, gdp75, { navigate(){}, onDeath(){}, notify(){} }).begin(parse(secP75), 6, 'TP75');
+    ok('§6.118 profession="a|b|…" renders a five-way picker (no auto-change)', cdp75.querySelectorAll('.ability-pick').length === 5 && gdp75.data.profession === 'Priest');
+    Array.from(cdp75.querySelectorAll('.ability-pick')).find((b) => /Wayfarer/.test(b.textContent)).click();
+    ok('§6.118 picking a profession changes it (→ Wayfarer)', gdp75.data.profession === 'Wayfarer');
+
     // --- task 47: <choice item="?" tags="light"> gates on a light source ---
     const g291 = GameState.create({ name:'C291', gender:'m', profession:'Warrior', book:2, adv });
     const c291 = document.createElement('div');
