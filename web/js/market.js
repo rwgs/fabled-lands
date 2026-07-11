@@ -76,9 +76,12 @@ export function buyTrade(state, goods, price, currency = null) {
   const { kind, name, bonus, ability, tags, effects, shipType, cargoName, initialCrew } = goods;
   if (kind === 'ship') {
     walletSpend(state, currency, price);
-    state.addShip({ type: canonShipType(shipType), name: 'Ship', crew: canonCrew(initialCrew), cargo: [], docked: null });
+    // Berth the new ship at the port it is bought in, so <if docked="…"> sees it (task 73).
+    state.addShip({ type: canonShipType(shipType), name: 'Ship', crew: canonCrew(initialCrew), cargo: [], docked: state.data.location ?? null });
   } else if (kind === 'cargo') {
-    const ship = state.ships.find((s) => (s.cargo || []).length < shipCap(s.type));
+    // Load onto a ship at the current port (else any owned ship) that has cargo space.
+    const hasSpace = (s) => (s.cargo || []).length < shipCap(s.type);
+    const ship = state.shipsHere().find(hasSpace) || state.ships.find(hasSpace);
     if (!ship) return { ok: false, note: 'No cargo space.' };
     walletSpend(state, currency, price);
     (ship.cargo ||= []).push(cargoName);
@@ -105,7 +108,8 @@ export function sellTrade(state, goods, price, currency = null) {
     if (i < 0) return { ok: false };
     state.ships.splice(i, 1); walletEarn(state, currency, price); state.changed();
   } else if (kind === 'cargo') {
-    const ship = state.ships.find((s) => (s.cargo || []).includes(cargoName));
+    const hasCargo = (s) => (s.cargo || []).includes(cargoName);
+    const ship = state.shipsHere().find(hasCargo) || state.ships.find(hasCargo);
     if (!ship) return { ok: false };
     ship.cargo.splice(ship.cargo.indexOf(cargoName), 1); walletEarn(state, currency, price); state.changed();
   } else if (kind === 'armour' || (kind === 'weapon' && !named)) {
@@ -138,13 +142,13 @@ export function applyInlineBuy(state, opts = {}) {
     const up = canUpgradeCrew(state, crew); // one-grade-at-a-time rule (task 34)
     if (!up.ok) return { ok: false, note: up.reason };
     if (price) state.adjustMoney(-price);
-    state.ships[0].crew = canonCrew(crew);
+    state.currentShip().crew = canonCrew(crew);
     state.changed();
     return { ok: true };
   }
   if (shipType) {
     if (price) state.adjustMoney(-price);
-    state.addShip({ type: canonShipType(shipType), name: shipName || 'Ship', crew: canonCrew(initialCrew), cargo: [], docked: null });
+    state.addShip({ type: canonShipType(shipType), name: shipName || 'Ship', crew: canonCrew(initialCrew), cargo: [], docked: state.data.location ?? null });
     return { ok: true };
   }
   if (cargo != null) {
@@ -162,7 +166,7 @@ export function applyInlineBuy(state, opts = {}) {
  *  task 24). Returns { ok, reason } so the view can gate/tooltip the offer and
  *  applyInlineBuy can enforce it. */
 export function canUpgradeCrew(state, crew) {
-  const ship = state.ships[0];
+  const ship = state.currentShip();
   if (!ship) return { ok: false, reason: 'You have no ship.' };
   const target = CREW_LEVELS.indexOf(canonCrew(crew));
   if (target < 0) return { ok: false, reason: 'Unknown crew grade.' };

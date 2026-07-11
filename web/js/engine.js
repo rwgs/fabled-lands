@@ -253,7 +253,7 @@ export function evaluateCondition(el, state) {
   add(get('crew'), () => state.ships.some((s) => s.crew === get('crew')));
   add(get('cargo'), () => state.ships.some((s) => (s.cargo || []).length > 0));
   // docked="<place>" needs a ship berthed there; docked="t" means berthed anywhere.
-  add(get('docked'), () => { const d = get('docked'); return boolAttr(d) ? state.ships.some((s) => !!s.docked) : state.ships.some((s) => normalize(s.docked) === normalize(d)); });
+  add(get('docked'), () => { const d = get('docked'); return boolAttr(d) ? state.ships.some((s) => s.docked != null) : state.shipDockedAt(d); });
 
   // Refuse to silently pass a genuinely unrecognized condition attribute — warn
   // (once per attr) so a new/mis-spelled attribute surfaces instead of defaulting true.
@@ -537,7 +537,7 @@ function loseEquipment(el, state, kind, opts) {
 }
 
 function applyShipLose(el, state, opts = {}) {
-  const ship = state.ships[0];
+  const ship = state.currentShip(); // the local/current vessel, not just ships[0] (task 73)
   if (!ship) return;
   if (el.getAttribute('crew') != null) {
     // <lose crew="N"> shifts the crew grade by N along CREW_LEVELS: a positive N
@@ -561,7 +561,7 @@ function applyShipLose(el, state, opts = {}) {
       }
     } else { const i = cargo.indexOf(c); if (i >= 0) cargo.splice(i, 1); }
   }
-  if (el.getAttribute('ship') != null) { state.data.ships.shift(); }
+  if (el.getAttribute('ship') != null) { const i = state.data.ships.indexOf(ship); state.data.ships.splice(i >= 0 ? i : 0, 1); }
   state.changed();
 }
 
@@ -601,8 +601,8 @@ function applyTick(el, state, opts) {
   if (get('flag') != null) { state.setFlag(get('flag'), false); did = true; }
   if (get('price') != null) { state.setFlag(get('price'), true); did = true; }
   if (get('special') != null) { applySpecial(el, state); did = true; }
-  if (get('crew') != null && state.ships[0]) { state.ships[0].crew = get('crew'); state.changed(); did = true; }
-  if (get('cargo') != null && state.ships[0]) { (state.ships[0].cargo ||= []).push(get('cargo')); state.changed(); did = true; }
+  if (get('crew') != null && state.currentShip()) { state.currentShip().crew = get('crew'); state.changed(); did = true; }
+  if (get('cargo') != null && state.currentShip()) { (state.currentShip().cargo ||= []).push(get('cargo')); state.changed(); did = true; }
   // Enchant one or more items in place: addbonus= raises the bonus, addtag=
   // stamps a tag. item= selects them from the inventory, or from a cache when
   // cache= is set (the Molherned weapon-blessing stashes — book §…).
@@ -756,9 +756,10 @@ function applyAdjust(el, state) {
     state.adjustCodewordValue(get('name'), amount);
   } else if (get('title') != null || get('titleVal') != null) {
     state.addTitle(get('title') || get('titleVal'), amount);
-  } else if (get('crew') != null && state.ships[0]) {
-    const idx = ['poor', 'average', 'good', 'excellent'].indexOf(state.ships[0].crew);
-    state.ships[0].crew = ['poor', 'average', 'good', 'excellent'][Math.max(0, Math.min(3, idx + amount))] || state.ships[0].crew;
+  } else if (get('crew') != null && state.currentShip()) {
+    const ship = state.currentShip();
+    const idx = ['poor', 'average', 'good', 'excellent'].indexOf(ship.crew);
+    ship.crew = ['poor', 'average', 'good', 'excellent'][Math.max(0, Math.min(3, idx + amount))] || ship.crew;
     state.changed();
   }
   return '';
@@ -824,7 +825,9 @@ function setSelectorBonus(state, sel, kind) {
 function applySet(el, state) {
   const get = (a) => el.getAttribute(a);
   const name = get('var');
-  if (get('dock') != null) { state.ships.forEach((s) => { s.docked = get('dock'); }); state.changed(); return ''; }
+  // <set dock="X"> moves the ship in the current location (else the sole/first ship) to
+  // dock X — JaFL SetVarNode docks the ships here. (task 73)
+  if (get('dock') != null) { const s = state.currentShip(); if (s) { s.docked = get('dock'); state.changed(); } return ''; }
   if (!name) return '';
   const mode = setValueMode(get('modifier'));
   let val;
@@ -974,7 +977,7 @@ export function evalExpression(expr, state, mode = null, sel = null) {
     if (w === 'defence') return state.defence();
     if (w === 'armour') return state.armourBonus();
     if (w === 'weapon') return state.wieldedWeapon()?.bonus || 0;
-    if (w === 'crew') return CREW_LEVELS.indexOf(state.ships[0]?.crew) + 1 || 0;
+    if (w === 'crew') return CREW_LEVELS.indexOf(state.currentShip()?.crew) + 1 || 0;
     if (ABILITIES.includes(w)) {
       if (mode === 'natural') return state.abilityForCheck(w, true);  // written score
       if (mode === 'affected') return state.abilityForCheck(w, false); // item-boosted

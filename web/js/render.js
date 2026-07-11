@@ -110,6 +110,10 @@ export class Story {
     // Likewise a per-fight attack/Defence bonus from <tick special="attack|defence">
     // (task 49) applies only to the current section's fight — clear it on entry.
     this.state.clearFightBonuses();
+    // Record the player's location from the section's dock= attribute and berth any
+    // at-large ship here (it was sailed in); a section without dock= is inland/at sea,
+    // so the location clears and no ship is "here" unless it is at large. (task 73)
+    this.state.arriveAtDock(sectionEl.getAttribute('dock'));
     this.ctx = { applied: new Set(), rolls: new Map(), fights: new Map(), buys: new Map(), groupLimits: new Map(), groupPicks: new Map(), wroteVars: new Set(), rolledVars: new Set(), pathNodes: new Map(), rollLockCaches: new Set(), forcedChosen: new Map() };
     // Gambling-bet lock (task 38): a <tick special="lock" cache="X"> bundled inside
     // a roll <group> means "freeze the bet once you roll" (book1/91, book2/134) — as
@@ -1389,10 +1393,13 @@ export class Story {
     const targetBook = this.targetBook(node);
     const isSail = boolAttr(node.getAttribute('sail'));
     const force = node.getAttribute('force');
-    const primary = force == null || boolAttr(force, true); // default forced => primary continue
+    // force defaults to true (a primary "continue"), EXCEPT a sail goto, which the spec
+    // makes optional by default. (task 73)
+    const primary = force == null ? !isSail : boolAttr(force, true);
 
-    // Disable a sail goto if the player has no ship here.
-    const canSail = !isSail || this.state.ships.length > 0;
+    // A sail goto needs a ship at the CURRENT dock (not merely any owned ship — a ship
+    // left at Smogmaw can't sail from Kunrir). (task 73)
+    const canSail = !isSail || this.state.shipsHere().length > 0;
     const bookAvailable = availableBooks().includes(targetBook);
 
     const link = document.createElement('button');
@@ -1409,11 +1416,34 @@ export class Story {
 
     link.addEventListener('click', () => {
       if (!bookAvailable) { this.notify(`“${bookTitle(targetBook)}” (Book ${targetBook}) isn’t included in this edition.`, 'warn'); return; }
+      // A sail goto puts a ship "at large" before leaving; prompt when more than one
+      // ship is at this dock, else sail the single one. (task 73)
+      if (isSail) { this.sailThenGo(container, link, targetBook, section); return; }
       this.navigate(targetBook, section);
     });
     this.tagFightNav(node, link);
     container.appendChild(link);
     return link;
+  }
+
+  // Perform a sail action: set a ship "at large", then navigate. When several ships are
+  // at this dock, prompt the player to choose which one to sail (JaFL ship selection);
+  // otherwise sail the single ship here. (task 73)
+  sailThenGo(container, link, targetBook, section) {
+    const here = this.state.shipsHere();
+    if (here.length <= 1) { this.state.sailShip(here[0] && here[0].id); this.navigate(targetBook, section); return; }
+    link.disabled = true;
+    const box = document.createElement('div');
+    box.className = 'ship-choice';
+    box.appendChild(document.createTextNode('Sail which ship? '));
+    here.forEach((s) => {
+      const b = document.createElement('button');
+      b.className = 'btn-mini';
+      b.textContent = (s.name && s.name !== 'Ship') ? `${s.name} (${s.type})` : String(s.type);
+      b.addEventListener('click', () => { this.state.sailShip(s.id); this.navigate(targetBook, section); });
+      box.appendChild(b);
+    });
+    container.appendChild(box);
   }
 
   // Navigate back to the section the player came from (the last history entry).

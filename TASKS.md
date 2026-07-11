@@ -65,7 +65,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 77. Selector-aware `<set item|cache …>` expressions read the sheet instead of the selected item/cache (21 nodes)
 - [x] 76. Blessings are stored as inert labels — ability/Luck/travel benefits cannot be used *(core rerolls done; combat Defence/Wrath split → task 80)*
 - [x] 74. Standalone `force="f"` effects auto-apply — missions/initiations cannot be declined; choose-one losses over-apply
-- [ ] 73. Ship dock/current-vessel state is not maintained — any owned ship can sail or trade from anywhere
+- [x] 73. Ship dock/current-vessel state is not maintained — any owned ship can sail or trade from anywhere *(core done; todock= + sailing-ship pointer split → task 81)*
 - [x] 45. Multi-fight sections: the fight gate & death-deferral track only the *last* `<fight>`
 - [x] 46. `<set var … modifier="natural">` discards the value — book-2 rank ceremonies auto-succeed
 - [x] 47. `<choice item="?" tags=…>` is never enabled — light-gated passages hard-locked
@@ -79,6 +79,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 71. `<lose staminato="N">` never applies — the handler is gated on a `stamina=` attr it lacks (16 sections)
 
 **MEDIUM**
+- [ ] 81. Ships: honour `todock=` and track which at-large ship is being sailed *(split from task 73)*
 - [ ] 80. Combat blessings: expose Defence through Faith (+3, one fight) and Divine Wrath (1d pre-damage) as fight-widget buttons *(split from task 76)*
 - [ ] 75. Live `<tick>` forms for equipment, profession changes and patterned titles are incomplete/inert
 - [ ] 79. Keeping a preview or importing a save reports success when persistence fails
@@ -2547,6 +2548,38 @@ port; buying at a dock records that dock; sailing one of two ships changes only
 the chosen ship; arrival re-docks it; `todock=` moves the other at-large ship;
 book3/53's Smogmaw condition follows the actual berth. Re-run all sections.
 
+**Done — core (2026-07-11).** Implemented the location model headlessly. A ship's
+`docked` field is now maintained (a dock name, or `null` = "at large"), and a new
+`data.location` tracks where the *player* is:
+- **state.js** — ships gain a stable `id`; `arriveAtDock(x)` records the location and
+  berths any at-large ship here (sailed in — JaFL `ShipList.setAtDock`); `shipsHere()`
+  (`docked === location`), `currentShip()` (a ship here, else the first owned),
+  `shipDockedAt(x)`, `sailShip(id)` (set at large). A `sameDock` helper matches
+  null==null (at large) or case-insensitive dock names. `sanitizeData` migrates
+  `location` and back-fills ship `id`s.
+- **render.js** — `Story.begin` calls `arriveAtDock(section dock=)`, so entering a
+  dock berths the arriving ship and a `dock`-less section clears the location. A
+  `sail="t"` goto is enabled only when `shipsHere()` is non-empty (a ship left at
+  Smogmaw can no longer sail from Kunrir); clicking it sets the ship at large then
+  navigates, **prompting a choice** (`sailThenGo` → `.ship-choice`) when several ships
+  share the dock; `force` now defaults optional for a sail goto.
+- **engine.js** — `applyShipLose`, the `<tick crew|cargo>` grants, the adjust-crew
+  path, `<set dock="X">` and the `crew` expression identifier route through
+  `currentShip()`; `<if docked="X">` uses `shipDockedAt`.
+- **market.js** — a ship bought inline or in a market berths at the current port;
+  cargo loads onto / sells from a ship *here* first; `canUpgradeCrew` uses the local
+  ship.
+- **ui.js** — the sheet shows each ship's berth ("docked at X" / "at large").
+
+`<if ship="type">` (65 uses) is left as **any-owned** (ownership, not location), as
+the task requires. Deferred to **task 81**: `todock=` (book1/176, book4/114) and a
+persistent "which at-large ship am I sailing" pointer across sea sections (needed so
+`todock` and multi-at-large arrivals berth correctly). Added 22 assertions
+(berth-on-arrival, here/current routing, cargo-to-local-ship, buy-berths-at-dock,
+sail-gated-and-at-large, multi-ship sail chooser, §3.53 branch by real berth, save
+migration). Web-only — stamped `26.07.11.a06e630`. Suite green:
+`RESULT ALL PASS pass=723 fail=0`.
+
 ---
 
 ## 74. Standalone `force="f"` effects auto-apply — optional missions/initiations cannot be declined  — HIGH (render)
@@ -2846,3 +2879,32 @@ is then consumed; Defence raises the player's fight Defence by +3 (or `bonus=`) 
 that fight only and clears on leaving the section; the buttons appear only while a
 fight is unresolved and only when the blessing is held; a permanent such blessing is
 not consumed. Stamp and re-run all sections.
+
+---
+
+## 81. Ships: honour `todock=` and track which at-large ship is being sailed  — MEDIUM (state/render)
+
+*(Split from task 73 on 2026-07-11.)* Task 73 landed the core dock/location model
+(`data.location`, ship `docked`/`id`, `arriveAtDock`/`shipsHere`/`currentShip`/
+`sailShip`, sail gating + chooser, buy-berths-at-dock, cargo/crew/dock routing). Two
+pieces were deferred because they need a persistent "current vessel" pointer:
+
+1. **`todock="X"`** (book1/176, book4/114) — "when the character leaves this section,
+   any ships at sea the character isn't in move to dock X." This is only meaningful
+   once we track *which* at-large ship the player is currently sailing (the others get
+   sent to X). `Story.begin` reads the attribute but does nothing with it yet.
+2. **Sailing-ship identity across sea sections** — `arriveAtDock` currently berths
+   *every* at-large ship at the arrival dock (JaFL's own default). If the player gains
+   a second ship while at sea (so two are at large), arriving berths both together
+   instead of leaving the non-sailed one to be moved by `todock`. A
+   `data.sailingShipId`, set by the sail action and cleared on docking, would let
+   `arriveAtDock` berth only the sailed ship and let `todock` relocate the rest.
+
+Implement a `sailingShipId` on state (set in `sailShip`, cleared when that ship
+docks), make `arriveAtDock` berth only the sailed vessel (or all, if none is marked —
+the single-ship common case is unchanged), and apply a section's `todock=` on leaving
+to move other at-large ships. Keep it headless in `state.js`; thread only the
+`todock` value through `render.js` (apply it in the navigate-away path). Add tests:
+gain a ship at sea, sail one, arrive at a dock — only the sailed ship berths there and
+`todock=` sends the other to the named port; a single-ship voyage is unaffected. Stamp
+and re-run all sections.

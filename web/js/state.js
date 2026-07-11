@@ -26,6 +26,14 @@ function canonBlessing(b) {
 // random type="travel" encounter. (task 76)
 const ABILITY_BLESSINGS = new Set(['charisma', 'combat', 'magic', 'sanctity', 'scouting', 'thievery']);
 
+// Two ship locations match if both are "at large" (null) or the same dock name
+// (case-insensitive) — JaFL ShipList.isHere. (task 73)
+function sameDock(a, b) {
+  const na = a == null ? null : normalize(a);
+  const nb = b == null ? null : normalize(b);
+  return na === nb;
+}
+
 function freshData() {
   return {
     schema: SCHEMA,
@@ -50,7 +58,8 @@ function freshData() {
     boxes: {},            // "book.section" -> tick count
     flags: {},            // name -> bool
     vars: {},             // name -> number
-    ships: [],            // {type, name, crew, cargo:[], docked}
+    ships: [],            // {id, type, name, crew, cargo:[], docked}
+    location: null,       // the current dock (section dock=); null = inland / at sea (task 73)
     resurrections: [],    // {book, section, text, god}
     effects: [],          // {ability, bonus, type, uses, text}
     abilityFlags: {},     // ability -> {fixed?:true, cursed?:true} (effect="+fixed|+cursed")
@@ -719,8 +728,29 @@ export class GameState {
   addResurrection(r) { this.data.resurrections.push(r); this.changed(); }
 
   // ---- ships -----------------------------------------------------------
-  addShip(ship) { this.data.ships.push(ship); this.changed(); }
+  addShip(ship) { if (!ship.id) ship.id = nid(); if (ship.docked === undefined) ship.docked = this.data.location ?? null; this.data.ships.push(ship); this.changed(); return ship; }
   get ships() { return this.data.ships; }
+
+  // ---- ship location (task 73) -----------------------------------------
+  // A ship's `docked` is its own location: a dock name, or null = "at large" (at sea).
+  // `data.location` is where the PLAYER is (a section's dock=), or null (inland/at sea).
+  // Arrive at a dock: record it and berth any at-large ship here — the player is
+  // presumed to have just sailed it in (JaFL ShipList.setAtDock). A null dock (a land
+  // or sea section) clears the location and berths nothing.
+  arriveAtDock(dock) {
+    this.data.location = dock == null || dock === '' ? null : String(dock);
+    let moved = false;
+    if (this.data.location != null) for (const s of this.data.ships) if (s.docked == null) { s.docked = this.data.location; moved = true; }
+    if (moved) this.changed();
+  }
+  // Ships at the player's current location (docked === location; both null ⇒ at large).
+  shipsHere() { const loc = this.data.location ?? null; return this.data.ships.filter((s) => sameDock(s.docked ?? null, loc)); }
+  // The ship the current section acts on: one at this location, else the sole/first owned.
+  currentShip() { return this.shipsHere()[0] || this.data.ships[0] || null; }
+  // True if the player owns a ship berthed at dock X (JaFL <if docked="X">).
+  shipDockedAt(dock) { return this.data.ships.some((s) => s.docked != null && sameDock(s.docked, dock)); }
+  // Sail a ship out of port: it becomes "at large" (docked = null). Returns the ship.
+  sailShip(id) { const s = (id != null && this.data.ships.find((x) => x.id === id)) || this.currentShip(); if (s) { s.docked = null; this.changed(); } return s; }
 
   // ---- navigation ------------------------------------------------------
   goTo(book, section) {
@@ -859,6 +889,7 @@ function sanitizeShip(s) {
   const type = asStr(o.type).trim();
   if (!type) return null;
   return {
+    id: asStr(o.id).trim() || nid(),
     type,
     name: asStr(o.name, 'Ship') || 'Ship',
     crew: asStr(o.crew, 'average') || 'average',
@@ -914,6 +945,7 @@ export function sanitizeData(raw) {
   for (const [k, v] of Object.entries(asObj(d.vars))) { const n = asNum(v, NaN); if (Number.isFinite(n)) out.vars[k] = n; }
 
   out.ships = asArr(d.ships).map(sanitizeShip).filter(Boolean);
+  out.location = d.location == null || d.location === '' ? null : asStr(d.location);
   out.resurrections = asArr(d.resurrections).map((r) => {
     const o = asObj(r);
     return { book: asNum(o.book, out.book, { min: 1, int: true }), section: o.section == null ? null : asStr(o.section), text: asStr(o.text), god: o.god == null ? null : asStr(o.god) };

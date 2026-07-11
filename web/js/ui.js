@@ -208,7 +208,8 @@ export function renderSheet(state, container, opts = {}) {
       const label = SHIP_TYPES[type]?.label || titleCase(type);
       const cargo = (s.cargo || []).map(titleCase).join(', ');
       const cargoTxt = `cargo ${(s.cargo || []).length}/${cap}${cargo ? `: ${cargo}` : ''}`;
-      li.appendChild(el('span', 'item-txt', `${titleCase(s.name || type)} — ${label}, ${titleCase(s.crew)} crew · ${cargoTxt}`));
+      const where = s.docked ? `docked at ${titleCase(s.docked)}` : 'at large'; // (task 73)
+      li.appendChild(el('span', 'item-txt', `${titleCase(s.name || type)} — ${label}, ${titleCase(s.crew)} crew · ${where} · ${cargoTxt}`));
       ul.appendChild(li);
     });
     container.appendChild(ul);
