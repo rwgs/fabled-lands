@@ -1466,6 +1466,81 @@ async function run() {
     // evalExpression mode plumbing directly.
     ok('evalExpression(rank, natural) reads the Rank, not 0', eng.evalExpression('rank', gset, 'natural') === 4);
 
+    // --- task 77: selector-aware <set item|weapon|armour|tool|cache> value resolution ---
+    // value="matches" counts items matching the selector (JaFL SetVarNode.resolveIdentifier),
+    // so a reusable lantern (light) plus a candle (light,useonce) give lights=2 > candles=1 —
+    // the candle is NOT burned; with candles only, lights == candles and one is crossed off.
+    const gm77 = GameState.create({ name:'M77', gender:'m', profession:'Warrior', book:1, adv });
+    gm77.data.items = [];
+    gm77.addItem(makeItem('item', 'lantern', 0, null, ['light']));
+    gm77.addItem(makeItem('item', 'candle', 0, null, ['light', 'useonce']));
+    eng.applyEffect(parse('<set var="lights" item="?" tags="light" value="matches"/>'), gm77, {});
+    eng.applyEffect(parse('<set var="candles" item="?" tags="light,useonce" value="matches"/>'), gm77, {});
+    ok('§1.164 value="matches" counts light items (lantern+candle → lights=2)', gm77.getVar('lights') === 2, `lights=${gm77.getVar('lights')}`);
+    ok('§1.164 value="matches" counts useonce candles (→ candles=1)', gm77.getVar('candles') === 1, `candles=${gm77.getVar('candles')}`);
+    ok('§1.164 a reusable light ⇒ candles ≠ lights (candle survives)', gm77.getVar('candles') !== gm77.getVar('lights'));
+    const gc77 = GameState.create({ name:'C77', gender:'m', profession:'Warrior', book:1, adv });
+    gc77.data.items = [];
+    gc77.addItem(makeItem('item', 'candle', 0, null, ['light', 'useonce']));
+    eng.applyEffect(parse('<set var="lights" item="?" tags="light" value="matches"/>'), gc77, {});
+    eng.applyEffect(parse('<set var="candles" item="?" tags="light,useonce" value="matches"/>'), gc77, {});
+    ok('§1.164 candles-only ⇒ candles == lights (a candle must be crossed off)', gc77.getVar('candles') === gc77.getVar('lights') && gc77.getVar('candles') === 1, `l=${gc77.getVar('lights')} c=${gc77.getVar('candles')}`);
+    // §1.164 render integration: the "[If you're using a candle, cross it off]" block is
+    // gated by <if var="candles" equals="lights">. A false <if> still renders its prose but
+    // as an inactive (.cond-inactive) span, so assert on activeness, not mere text presence.
+    const crossInactive = (root) => Array.from(root.querySelectorAll('.cond-inactive')).some((s) => /cross it off/i.test(s.textContent));
+    const c164 = document.createElement('div');
+    new Story(c164, gm77, { navigate(){}, onDeath(){}, notify(){} }).begin(await data.getSection(1, '164'), 1, '164');
+    ok('§1.164 lantern+candle: the "cross it off" prompt is inactive (candle not burned)', /cross it off/i.test(c164.textContent) && crossInactive(c164));
+    const c164b = document.createElement('div');
+    new Story(c164b, gc77, { navigate(){}, onDeath(){}, notify(){} }).begin(await data.getSection(1, '164'), 1, '164');
+    ok('§1.164 candles-only: the "cross it off" prompt is active', /cross it off/i.test(c164b.textContent) && !crossInactive(c164b));
+
+    // §5.386 value="weapon" reads the single SELECTED weapon's bonus (weapon="?" tags="Tz"),
+    // not the wielded/best weapon — proven by making the wielded sword outrank the Tz blade.
+    const gw386 = GameState.create({ name:'W386', gender:'m', profession:'Warrior', book:5, adv });
+    gw386.data.items = [];
+    gw386.addItem(makeItem('weapon', 'plain sword', 5));               // the best/wielded weapon
+    gw386.addItem(makeItem('weapon', 'targ blade', 2, null, ['Tz']));  // the tagged one, lower bonus
+    eng.applyEffect(parse('<set var="bonus" weapon="?" tags="Tz" value="weapon"/>'), gw386, {});
+    ok('§5.386 value="weapon" reads the Tz-tagged weapon (2), not the wielded sword (5)', gw386.getVar('bonus') === 2, `bonus=${gw386.getVar('bonus')} wielded=${gw386.wieldedWeapon()?.bonus}`);
+
+    // §2.665 smithy: shards= reads the named cache (money left as payment), and item="?"
+    // cache="…" value="weapon|armour" reads the single deposited item's bonus.
+    const g665 = GameState.create({ name:'S665', gender:'m', profession:'Warrior', book:2, adv });
+    g665.data.shards = 5; // purse — must NOT be read
+    g665.setCacheMoney('2.617', 900);
+    g665.cacheAddItem('2.617', makeItem('weapon', 'left blade', 3));
+    eng.applyEffect(parse('<set var="MoneyBonus" value="shards/300" cache="2.617"/>'), g665, {});
+    ok('§2.665 shards= reads the cache money (900/300=3), not the purse (5)', g665.getVar('MoneyBonus') === 3, `mb=${g665.getVar('MoneyBonus')}`);
+    eng.applyEffect(parse('<set var="weaponbonus" item="?" cache="2.617" value="weapon"/>'), g665, {});
+    eng.applyEffect(parse('<set var="armourbonus" item="?" cache="2.617" value="armour"/>'), g665, {});
+    ok('§2.665 value="weapon" reads the cached weapon bonus (3)', g665.getVar('weaponbonus') === 3, `wb=${g665.getVar('weaponbonus')}`);
+    ok('§2.665 value="armour" = 0 for a cached weapon (no worn-armour fallback on a cache)', g665.getVar('armourbonus') === 0, `ab=${g665.getVar('armourbonus')}`);
+    eng.applyEffect(parse('<set var="bonus" value="6-weaponbonus"/>'), g665, {});
+    ok('§2.665 upgrade cap bonus = 6 − cached weapon bonus = 3', g665.getVar('bonus') === 3, `cap=${g665.getVar('bonus')}`);
+    // Mirror: a cached ARMOUR feeds armourbonus, weaponbonus stays 0.
+    const g665b = GameState.create({ name:'S665b', gender:'m', profession:'Warrior', book:2, adv });
+    g665b.cacheAddItem('2.617', makeItem('armour', 'left mail', 2));
+    eng.applyEffect(parse('<set var="wb" item="?" cache="2.617" value="weapon"/>'), g665b, {});
+    eng.applyEffect(parse('<set var="ab" item="?" cache="2.617" value="armour"/>'), g665b, {});
+    ok('§2.665 cached armour → armourbonus=2, weaponbonus=0', g665b.getVar('ab') === 2 && g665b.getVar('wb') === 0, `ab=${g665b.getVar('ab')} wb=${g665b.getVar('wb')}`);
+
+    // §2.322 risk modifier: RandomPlus = (900 − cache shards)/100 — the treasure TAKEN, read
+    // from the cache, not the purse. After collecting 250, 650 remain → (900−650)/100 = 2.
+    const g322 = GameState.create({ name:'R322', gender:'m', profession:'Warrior', book:2, adv });
+    g322.data.shards = 0;
+    g322.setCacheMoney('2.322.t', 900);
+    g322.withdrawCacheMoney('2.322.t', 250); // collect 250 of the treasure into the purse
+    eng.applyEffect(parse('<set var="RandomPlus" value="(900-shards)/100" cache="2.322.t"/>'), g322, {});
+    ok('§2.322 risk reads cache treasure taken ((900−650)/100 = 2), not purse', g322.getVar('RandomPlus') === 2, `rp=${g322.getVar('RandomPlus')} cache=${g322.cacheMoney('2.322.t')} purse=${g322.data.shards}`);
+
+    // Regression: a value= with an item selector but NO cache still reads the purse for shards.
+    const greg77 = GameState.create({ name:'REG77', gender:'m', profession:'Warrior', book:2, adv });
+    greg77.data.shards = 600;
+    eng.applyEffect(parse('<set var="q" item="?" tags="light" value="shards/300"/>'), greg77, {});
+    ok('regression: shards= with a selector but no cache still reads the purse (600/300=2)', greg77.getVar('q') === 2, `q=${greg77.getVar('q')}`);
+
     // --- task 47: <choice item="?" tags="light"> gates on a light source ---
     const g291 = GameState.create({ name:'C291', gender:'m', profession:'Warrior', book:2, adv });
     const c291 = document.createElement('div');

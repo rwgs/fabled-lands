@@ -775,6 +775,52 @@ function setValueMode(mod) {
   return (m === 'natural' || m === 'affected') ? m : null;
 }
 
+// A <set item|weapon|armour|tool … tags=… cache=…> node selects a possession (or a
+// cache's stored item) so the value= identifiers resolve against *it*, not the global
+// sheet (JaFL SetVarNode.resolveIdentifier, task 77): value="matches" counts the
+// selection, value="weapon|armour|tool" reads the single selected item's bonus, and an
+// expression's `shards` reads the named cache when cache= is set. Returns null when the
+// node has neither an item selector nor a cache (ordinary sheet resolution — unchanged).
+function setSelector(el) {
+  let kind = null, pattern = null, hasItemSel = false;
+  for (const k of ['weapon', 'armour', 'tool']) {
+    if (el.getAttribute(k) != null) { kind = k; pattern = el.getAttribute(k); hasItemSel = true; break; }
+  }
+  if (!hasItemSel && el.getAttribute('item') != null) { pattern = el.getAttribute('item'); hasItemSel = true; }
+  const cache = el.getAttribute('cache');
+  if (!hasItemSel && cache == null) return null;
+  return { kind, pattern, tags: el.getAttribute('tags'), bonus: el.getAttribute('bonus'), cache, hasItemSel };
+}
+
+// Items matching a set-node selector, drawn from the selected pool (a named cache or the
+// sheet), narrowed by the selector's kind (weapon/armour/tool), name/tag pattern (reusing
+// the shared matchItemQuery) and an optional bonus filter ("N" / "N+").
+function setSelectorMatches(state, sel) {
+  if (!sel || !sel.hasItemSel) return [];
+  const pool = sel.cache != null ? state.cacheItems(sel.cache) : state.data.items;
+  let items = sel.kind ? pool.filter((it) => it.kind === sel.kind) : pool;
+  items = matchItemQuery(items, sel.pattern, sel.tags);
+  if (sel.bonus != null) {
+    const m = String(sel.bonus).match(/^(-?\d+)(\+)?$/);
+    if (m) { const b = parseInt(m[1], 10); items = m[2] ? items.filter((it) => (it.bonus || 0) >= b) : items.filter((it) => (it.bonus || 0) === b); }
+  }
+  return items;
+}
+
+// The bonus of the single selected weapon/armour/tool for value="weapon|armour|tool".
+// JaFL getSingleItem only resolves when exactly one item matches; when the selection is
+// missing, ambiguous or the wrong kind, fall back to the wielded weapon / worn armour —
+// but ONLY for a sheet lookup. A cache lookup that misses reads 0 (no equipment fallback).
+function setSelectorBonus(state, sel, kind) {
+  const items = setSelectorMatches(state, sel);
+  const it = items.length === 1 ? items[0] : null;
+  if (it && it.kind === kind) return it.bonus || 0;
+  if (sel.cache != null) return 0;
+  if (kind === 'weapon') return state.wieldedWeapon()?.bonus || 0;
+  if (kind === 'armour') return state.wornArmour()?.bonus || 0;
+  return 0;
+}
+
 function applySet(el, state) {
   const get = (a) => el.getAttribute(a);
   const name = get('var');
@@ -782,7 +828,7 @@ function applySet(el, state) {
   if (!name) return '';
   const mode = setValueMode(get('modifier'));
   let val;
-  if (get('value') != null) val = evalExpression(get('value'), state, mode);
+  if (get('value') != null) val = evalExpression(get('value'), state, mode, setSelector(el));
   else if (get('codeword') != null) val = state.codewordValue(get('codeword'));
   else val = 0;
   state.setVar(name, val);
@@ -909,9 +955,18 @@ export function useItemEffect(state, item, effect, bodyNode = null) {
 // the WRITTEN score / unwounded max; affected = the item-boosted score / affected
 // max. With no mode the historical behaviour holds — abilities read the boosted
 // score and a bare `stamina` reads *current* Stamina.
-export function evalExpression(expr, state, mode = null) {
+export function evalExpression(expr, state, mode = null, sel = null) {
   const resolve = (word) => {
     const w = word.toLowerCase();
+    // Selector-aware identifiers when the <set> node carries an item/cache selector
+    // (SetVarNode.resolveIdentifier, task 77). These override the plain sheet reads below:
+    // `matches` counts the selection, weapon/armour/tool read the selected item's bonus,
+    // and `shards` reads the cache when one is named.
+    if (sel) {
+      if (w === 'matches') return setSelectorMatches(state, sel).length;
+      if (w === 'weapon' || w === 'armour' || w === 'tool') return setSelectorBonus(state, sel, w);
+      if (w === 'shards' && sel.cache != null) return state.cacheMoney(sel.cache);
+    }
     // stamina: natural/affected → the unwounded max (incl. aura/affliction); no modifier → current.
     if (w === 'stamina') return mode ? state.effectiveStaminaMax() : state.data.stamina;
     if (w === 'shards') return state.data.shards;

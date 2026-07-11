@@ -62,7 +62,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 "choose one" cycle (43).
 
 **HIGH**
-- [ ] 77. Selector-aware `<set item|cache …>` expressions read the sheet instead of the selected item/cache (21 nodes)
+- [x] 77. Selector-aware `<set item|cache …>` expressions read the sheet instead of the selected item/cache (21 nodes)
 - [ ] 76. Blessings are stored as inert labels — ability/Luck/travel/Defence/Wrath benefits cannot be used
 - [ ] 74. Standalone `force="f"` effects auto-apply — missions/initiations cannot be declined; choose-one losses over-apply
 - [ ] 73. Ship dock/current-vessel state is not maintained — any owned ship can sail or trade from anywhere
@@ -2674,6 +2674,36 @@ Add direct tests for item/tag match counts and cached Shards/equipment, plus
 integration tests for book1/164 (lantern + candle does not burn the candle),
 book2/322's risk modifier, book2/665's upgrade cap and book5/386's selected
 weapon. Re-run all sections.
+
+**Done (2026-07-10).** Implemented the checked-in SetNode selector semantics in
+`engine.js`. `applySet` now builds a selector context (`setSelector`) from the
+node's `item`/`weapon`/`armour`/`tool` + `tags`/`bonus` + `cache` and threads it
+into `evalExpression(value, state, mode, sel)`. A new `sel` branch in the
+identifier resolver mirrors JaFL `SetVarNode.resolveIdentifier`:
+- `matches` → count of items matching the selector in the selected pool
+  (`setSelectorMatches`, drawn from the named cache or the sheet, narrowed by
+  kind/name/tag/bonus and reusing the shared `matchItemQuery`);
+- `weapon`/`armour`/`tool` → the single selected possession's bonus
+  (`setSelectorBonus`); when the selection is missing, ambiguous or the wrong
+  kind it falls back to the wielded weapon / worn armour, **but only for a sheet
+  lookup** — a cache lookup that misses reads 0 (no equipment fallback);
+- `shards` → the named cache's money when `cache=` is set, else the purse.
+
+When the node carries neither an item selector nor a cache, `setSelector`
+returns `null` and resolution is unchanged (existing `<set>` behaviour and the
+`resolveValue → evalExpression(str, state)` 2-arg callers are untouched).
+
+The sixteen light counters now compare correctly (a reusable lantern gives
+`lights > candles`, so §1.164's candle is not burned); §2.322's risk reads the
+cache treasure taken; §2.665's `MoneyBonus`/`weaponbonus`/`armourbonus` read the
+cache and the deposited item, capping the upgrade at `6 − bonus`; and §5.386
+reads the `Tz`-tagged weapon rather than the wielded one. Added 14 `_test.html`
+assertions (match counts; §5.386 selected-vs-wielded weapon; §2.665 cached
+money/weapon/armour + upgrade cap + armour mirror; §2.322 risk modifier; §1.164
+render — the "cross it off" block active only when candles == lights; a
+no-cache-shards regression) covering the direct and integration cases the filing
+asked for. Web-only change — stamped `26.07.10.fdc8a51`. Suite green:
+`RESULT ALL PASS pass=663 fail=0`.
 
 ---
 
