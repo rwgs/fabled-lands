@@ -91,12 +91,26 @@ export class Story {
   constructor(rootEl, state, opts) {
     this.root = rootEl;
     this.state = state;
-    this.navigate = opts.navigate;         // (book, section) => void
+    // Wrap navigation so leaving a section honours its todock= before the transition —
+    // the single "leaving" hook. A sail exit marks the ship being taken (this._sailExempt)
+    // so only the OTHER at-large ships relocate and the voyage continues; a non-sail exit
+    // (gone ashore) exempts nothing, so every at-large ship docks and the voyage ends. (task 81)
+    const rawNavigate = opts.navigate;
+    this.navigate = (book, section) => {
+      if (this.sectionTodock) {
+        this.state.applyTodock(this.sectionTodock, this._sailExempt != null ? this._sailExempt : null);
+        if (this._sailExempt == null) this.state.data.sailingShipId = null;
+      }
+      this._sailExempt = null;
+      rawNavigate(book, section);
+    };
     this.onDeath = opts.onDeath || (() => {});
     this.notify = opts.notify || (() => {});
     this.onRender = opts.onRender || (() => {}); // called after each (re)render
     this.ctx = null;
     this.sectionEl = null;
+    this.sectionTodock = null;  // current section's todock= (task 81)
+    this._sailExempt = null;    // ship id exempted from todock on a sail exit (task 81)
   }
 
   /** Begin a fresh visit of a section element. */
@@ -114,6 +128,8 @@ export class Story {
     // at-large ship here (it was sailed in); a section without dock= is inland/at sea,
     // so the location clears and no ship is "here" unless it is at large. (task 73)
     this.state.arriveAtDock(sectionEl.getAttribute('dock'));
+    // Remember this section's todock= so the wrapped navigate applies it on leaving. (task 81)
+    this.sectionTodock = sectionEl.getAttribute('todock') || null;
     this.ctx = { applied: new Set(), rolls: new Map(), fights: new Map(), buys: new Map(), groupLimits: new Map(), groupPicks: new Map(), wroteVars: new Set(), rolledVars: new Set(), pathNodes: new Map(), rollLockCaches: new Set(), forcedChosen: new Map() };
     // Gambling-bet lock (task 38): a <tick special="lock" cache="X"> bundled inside
     // a roll <group> means "freeze the bet once you roll" (book1/91, book2/134) — as
@@ -1431,7 +1447,10 @@ export class Story {
   // otherwise sail the single ship here. (task 73)
   sailThenGo(container, link, targetBook, section) {
     const here = this.state.shipsHere();
-    if (here.length <= 1) { this.state.sailShip(here[0] && here[0].id); this.navigate(targetBook, section); return; }
+    // Sail the chosen ship, exempt it from this section's todock (it leaves with you),
+    // then navigate. (tasks 73, 81)
+    const go = (ship) => { const s = this.state.sailShip(ship && ship.id); this._sailExempt = s ? s.id : null; this.navigate(targetBook, section); };
+    if (here.length <= 1) { go(here[0]); return; }
     link.disabled = true;
     const box = document.createElement('div');
     box.className = 'ship-choice';
@@ -1440,7 +1459,7 @@ export class Story {
       const b = document.createElement('button');
       b.className = 'btn-mini';
       b.textContent = (s.name && s.name !== 'Ship') ? `${s.name} (${s.type})` : String(s.type);
-      b.addEventListener('click', () => { this.state.sailShip(s.id); this.navigate(targetBook, section); });
+      b.addEventListener('click', () => go(s));
       box.appendChild(b);
     });
     container.appendChild(box);

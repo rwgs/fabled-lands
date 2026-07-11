@@ -1752,6 +1752,59 @@ async function run() {
     Array.from(cMulti.querySelectorAll('.ship-choice button')).find((b) => /Kraken/.test(b.textContent)).click();
     ok('§TSAIL choosing sails exactly that ship and navigates', m2.docked === null && m1.docked === 'Kunrir' && navM && String(navM.sec) === '10');
 
+    // --- task 81: todock= + the sailing-ship pointer ---------------------------------
+    // applyTodock moves at-large ships except the exempt (sailed) one.
+    const gtd = GameState.create({ name:'TD', gender:'m', profession:'Warrior', book:1, adv });
+    const t1td = gtd.addShip({ type:'barque', crew:'average', cargo:[], docked:null });
+    const t2td = gtd.addShip({ type:'galleon', crew:'good', cargo:[], docked:null });
+    gtd.applyTodock('Yarimura', t1td.id);
+    ok('§81 applyTodock docks the non-sailed ship, keeps the exempt one at large', t2td.docked === 'Yarimura' && t1td.docked === null);
+    // sailShip marks the vessel; arriving berths only it and ends the voyage.
+    const gav = GameState.create({ name:'AV', gender:'m', profession:'Warrior', book:1, adv });
+    const v1av = gav.addShip({ type:'barque', crew:'average', cargo:[], docked:null });
+    const v2av = gav.addShip({ type:'galleon', crew:'good', cargo:[], docked:null });
+    gav.sailShip(v1av.id);
+    ok('§81 sailShip records the sailing ship', gav.data.sailingShipId === v1av.id);
+    gav.arriveAtDock('Aku');
+    ok('§81 arriving berths only the sailed ship; the other stays at large + voyage ends', v1av.docked === 'Aku' && v2av.docked === null && gav.data.sailingShipId === null);
+    // Migration: sailingShipId kept only when it names an at-large ship.
+    const mig81 = sanitizeData({ abilities:{combat:5}, stamina:9, ships:[{ id:'shipX', type:'barque', docked:null }], sailingShipId:'shipX' });
+    ok('§81 migrate: sailingShipId kept when the ship is at large', mig81.sailingShipId === 'shipX');
+    const mig81b = sanitizeData({ abilities:{combat:5}, stamina:9, ships:[{ id:'shipY', type:'barque', docked:'Aku' }], sailingShipId:'shipY' });
+    ok('§81 migrate: sailingShipId dropped when the ship is docked', mig81b.sailingShipId === null);
+
+    // DOM §4.114 (todock=Yarimura): two at-large ships; sailing takes one, the OTHER → Yarimura.
+    const g114t = GameState.create({ name:'T114', gender:'m', profession:'Warrior', book:4, adv });
+    const own114 = g114t.addShip({ type:'barque', name:'Old Salt', crew:'average', cargo:[], docked:null });
+    g114t.sailShip(own114.id);
+    const cen114 = g114t.addShip({ type:'galleon', name:'Sea Centaur', crew:'poor', cargo:[], docked:null });
+    let nav114 = null;
+    const c114t = document.createElement('div');
+    new Story(c114t, g114t, { navigate(bk, sec){ nav114 = { bk, sec }; }, onDeath(){}, notify(){} }).begin(await data.getSection(4, '114'), 4, '114');
+    ok('§4.114 both ships are at large on entry (no dock=, only todock=)', g114t.shipsHere().length === 2 && g114t.data.location === null);
+    Array.from(c114t.querySelectorAll('.goto')).find((g) => /\b236\b/.test(g.textContent)).click();
+    ok('§4.114 sailing with two ships prompts which to take (no navigation yet)', !!c114t.querySelector('.ship-choice') && nav114 === null);
+    Array.from(c114t.querySelectorAll('.ship-choice button')).find((b) => /Centaur/.test(b.textContent)).click();
+    ok('§4.114 the chosen ship stays at large; the other sails to Yarimura', cen114.docked === null && own114.docked === 'Yarimura' && nav114 && String(nav114.sec) === '236');
+
+    // DOM §1.176 (todock=Yellowport): going ashore docks the ship; sailing keeps it at large.
+    const g176a = GameState.create({ name:'A176', gender:'m', profession:'Warrior', book:1, adv });
+    const sh176a = g176a.addShip({ type:'barque', crew:'average', cargo:[], docked:null });
+    g176a.sailShip(sh176a.id);
+    let nav176a = null;
+    const c176a = document.createElement('div');
+    new Story(c176a, g176a, { navigate(bk, sec){ nav176a = { bk, sec }; }, onDeath(){}, notify(){} }).begin(await data.getSection(1, '176'), 1, '176');
+    Array.from(c176a.querySelectorAll('.goto')).find((g) => /\b32\b/.test(g.textContent)).click();
+    ok('§1.176 going ashore docks the ship at Yellowport (non-sail exit → all ships)', sh176a.docked === 'Yellowport' && g176a.data.sailingShipId === null && nav176a && String(nav176a.sec) === '32');
+    const g176b = GameState.create({ name:'B176', gender:'m', profession:'Warrior', book:1, adv });
+    const sh176b = g176b.addShip({ type:'barque', crew:'average', cargo:[], docked:null });
+    g176b.sailShip(sh176b.id);
+    let nav176b = null;
+    const c176b = document.createElement('div');
+    new Story(c176b, g176b, { navigate(bk, sec){ nav176b = { bk, sec }; }, onDeath(){}, notify(){} }).begin(await data.getSection(1, '176'), 1, '176');
+    Array.from(c176b.querySelectorAll('.goto')).find((g) => /\b85\b/.test(g.textContent)).click();
+    ok('§1.176 sailing on keeps the ship at large and goes to 85', sh176b.docked === null && nav176b && String(nav176b.sec) === '85');
+
     // --- task 47: <choice item="?" tags="light"> gates on a light source ---
     const g291 = GameState.create({ name:'C291', gender:'m', profession:'Warrior', book:2, adv });
     const c291 = document.createElement('div');

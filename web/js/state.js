@@ -60,6 +60,7 @@ function freshData() {
     vars: {},             // name -> number
     ships: [],            // {id, type, name, crew, cargo:[], docked}
     location: null,       // the current dock (section dock=); null = inland / at sea (task 73)
+    sailingShipId: null,  // the ship the player is currently sailing (at large); null = none (task 81)
     resurrections: [],    // {book, section, text, god}
     effects: [],          // {ability, bonus, type, uses, text}
     abilityFlags: {},     // ability -> {fixed?:true, cursed?:true} (effect="+fixed|+cursed")
@@ -734,14 +735,28 @@ export class GameState {
   // ---- ship location (task 73) -----------------------------------------
   // A ship's `docked` is its own location: a dock name, or null = "at large" (at sea).
   // `data.location` is where the PLAYER is (a section's dock=), or null (inland/at sea).
-  // Arrive at a dock: record it and berth any at-large ship here — the player is
-  // presumed to have just sailed it in (JaFL ShipList.setAtDock). A null dock (a land
-  // or sea section) clears the location and berths nothing.
+  // Arrive at a dock: record it and berth the arriving ship here — the player is
+  // presumed to have just sailed it in (JaFL ShipList.setAtDock). While a voyage is
+  // active (sailingShipId set), only that ship berths and the voyage ends; otherwise
+  // every at-large ship berths (the single-ship common case + loaded saves). A null
+  // dock (a land or sea section) clears the location and berths nothing. (tasks 73, 81)
   arriveAtDock(dock) {
     this.data.location = dock == null || dock === '' ? null : String(dock);
-    let moved = false;
-    if (this.data.location != null) for (const s of this.data.ships) if (s.docked == null) { s.docked = this.data.location; moved = true; }
-    if (moved) this.changed();
+    if (this.data.location == null) return; // inland / still at sea — nothing docks
+    const sailing = this.data.sailingShipId;
+    let changed = false;
+    for (const s of this.data.ships) if (s.docked == null && (sailing == null || s.id === sailing)) { s.docked = this.data.location; changed = true; }
+    if (sailing != null) { this.data.sailingShipId = null; changed = true; } // reached port — voyage over
+    if (changed) this.changed();
+  }
+  // todock="X": on leaving a section, move at-large ships to dock X — except the one the
+  // player sails away in (exemptId). Leaving by sail keeps that ship at large (book4/114);
+  // going ashore exempts nothing, so every at-large ship docks (book1/176). (task 81)
+  applyTodock(dock, exemptId = null) {
+    if (!dock) return;
+    let changed = false;
+    for (const s of this.data.ships) if (s.docked == null && s.id !== exemptId) { s.docked = String(dock); changed = true; }
+    if (changed) this.changed();
   }
   // Ships at the player's current location (docked === location; both null ⇒ at large).
   shipsHere() { const loc = this.data.location ?? null; return this.data.ships.filter((s) => sameDock(s.docked ?? null, loc)); }
@@ -749,8 +764,9 @@ export class GameState {
   currentShip() { return this.shipsHere()[0] || this.data.ships[0] || null; }
   // True if the player owns a ship berthed at dock X (JaFL <if docked="X">).
   shipDockedAt(dock) { return this.data.ships.some((s) => s.docked != null && sameDock(s.docked, dock)); }
-  // Sail a ship out of port: it becomes "at large" (docked = null). Returns the ship.
-  sailShip(id) { const s = (id != null && this.data.ships.find((x) => x.id === id)) || this.currentShip(); if (s) { s.docked = null; this.changed(); } return s; }
+  // Sail a ship out of port: it becomes "at large" (docked = null) and is marked as the
+  // ship being sailed (so a later todock/arrival moves only the others). (tasks 73, 81)
+  sailShip(id) { const s = (id != null && this.data.ships.find((x) => x.id === id)) || this.currentShip(); if (s) { s.docked = null; this.data.sailingShipId = s.id; this.changed(); } return s; }
 
   // ---- navigation ------------------------------------------------------
   goTo(book, section) {
@@ -946,6 +962,8 @@ export function sanitizeData(raw) {
 
   out.ships = asArr(d.ships).map(sanitizeShip).filter(Boolean);
   out.location = d.location == null || d.location === '' ? null : asStr(d.location);
+  // Keep the sailing-ship pointer only if it names a ship that is actually at large. (task 81)
+  out.sailingShipId = (d.sailingShipId != null && out.ships.some((s) => s.id === asStr(d.sailingShipId) && s.docked == null)) ? asStr(d.sailingShipId) : null;
   out.resurrections = asArr(d.resurrections).map((r) => {
     const o = asObj(r);
     return { book: asNum(o.book, out.book, { min: 1, int: true }), section: o.section == null ? null : asStr(o.section), text: asStr(o.text), god: o.god == null ? null : asStr(o.god) };

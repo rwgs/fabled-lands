@@ -79,7 +79,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 71. `<lose staminato="N">` never applies — the handler is gated on a `stamina=` attr it lacks (16 sections)
 
 **MEDIUM**
-- [ ] 81. Ships: honour `todock=` and track which at-large ship is being sailed *(split from task 73)*
+- [x] 81. Ships: honour `todock=` and track which at-large ship is being sailed *(split from task 73)*
 - [ ] 80. Combat blessings: expose Defence through Faith (+3, one fight) and Divine Wrath (1d pre-damage) as fight-widget buttons *(split from task 76)*
 - [ ] 75. Live `<tick>` forms for equipment, profession changes and patterned titles are incomplete/inert
 - [ ] 79. Keeping a preview or importing a save reports success when persistence fails
@@ -2908,3 +2908,21 @@ to move other at-large ships. Keep it headless in `state.js`; thread only the
 gain a ship at sea, sail one, arrive at a dock — only the sailed ship berths there and
 `todock=` sends the other to the named port; a single-ship voyage is unaffected. Stamp
 and re-run all sections.
+
+**Done (2026-07-11).** Added `data.sailingShipId` (set by `sailShip`, cleared when the
+ship reaches a dock). `arriveAtDock` now berths **only** the sailed ship while a voyage
+is active (else every at-large ship — the single-ship case + loaded saves), and ends
+the voyage on landfall. `applyTodock(dock, exemptId)` moves at-large ships to the dock
+except the exempted one; `sanitizeData` keeps `sailingShipId` only when it names an
+at-large ship.
+
+The exit type drives the exemption, which the two `todock` sections need to differ on:
+`Story.begin` records `sectionTodock`, and navigation is wrapped once in the
+constructor — a **sail exit** (`sailThenGo`) sets `_sailExempt` to the ship taken, so
+`todock` relocates only the OTHERS and the voyage continues (book4/114: pick one of two
+ships, the other sails to Yarimura); a **non-sail exit** (gone ashore) exempts nothing,
+so every at-large ship docks and the voyage ends (book1/176: go ashore → your ship is
+noted at Yellowport; or sail on → it stays at large). Added 10 assertions (applyTodock
+exemption, sail-marks/arrive-clears, save migration, and DOM §4.114 two-ship split +
+§1.176 ashore-vs-sail). Web-only — stamped `26.07.11.05cddc7`. Suite green:
+`RESULT ALL PASS pass=733 fail=0`.
