@@ -110,7 +110,7 @@ export class Story {
     // Likewise a per-fight attack/Defence bonus from <tick special="attack|defence">
     // (task 49) applies only to the current section's fight — clear it on entry.
     this.state.clearFightBonuses();
-    this.ctx = { applied: new Set(), rolls: new Map(), fights: new Map(), buys: new Map(), groupLimits: new Map(), groupPicks: new Map(), wroteVars: new Set(), rolledVars: new Set(), pathNodes: new Map(), rollLockCaches: new Set() };
+    this.ctx = { applied: new Set(), rolls: new Map(), fights: new Map(), buys: new Map(), groupLimits: new Map(), groupPicks: new Map(), wroteVars: new Set(), rolledVars: new Set(), pathNodes: new Map(), rollLockCaches: new Set(), forcedChosen: new Map() };
     // Gambling-bet lock (task 38): a <tick special="lock" cache="X"> bundled inside
     // a roll <group> means "freeze the bet once you roll" (book1/91, book2/134) — as
     // opposed to a top-level lock, which is stash bookkeeping and must NOT disable
@@ -800,6 +800,16 @@ export class Story {
       }
     }
 
+    // A force="f" action is OPTIONAL (JaFL ActionNode defaults force=true): the player
+    // opts in by clicking, rather than it applying on entry — so an optional mission
+    // codeword / Tyrnai initiation can be declined, and a "choose one" (a dock, or
+    // "cross off one of these") does not apply every option. Render it as a once-per-
+    // visit button; specialised gates above (price/flag/hidden/payment) still win, so
+    // only a plain optional effect reaches here. (task 74)
+    if (!hidden && this.isOptionalForce(node)) {
+      return this.renderForcedOptional(container, node, path);
+    }
+
     // Economic payment (Shards/item/cargo/ship) in a section with an escape route:
     // follows JaFL's forced-action model — click-to-apply, and blocks the rest of
     // the section until resolved, so the optional exit shown before it (e.g. "turn
@@ -1034,6 +1044,59 @@ export class Story {
         applyEffect(node, this.state, {});
         rewards.forEach((r) => applyEffect(r, this.state, {}));
         if (!repeatable) this.ctx.applied.add(memo);
+        this.rerender();
+      });
+    }
+    container.appendChild(btn);
+    return btn;
+  }
+
+  // force="f" marks an OPTIONAL action (JaFL ActionNode defaults force=true); "f"/false
+  // means the player may skip it (task 74).
+  isOptionalForce(node) {
+    const f = node.getAttribute('force');
+    return f != null && !boolAttr(f);
+  }
+
+  // A stable "choose one" token for a force="f" node whose siblings are mutually
+  // exclusive, else null (an independent optional action). A ship docks at ONE place,
+  // so every force="f" <set dock=> in a section is one choice (book3/405); a "cross off
+  // one of the following" is two+ force="f" <lose> under a single parent (book6/160).
+  forcedChoiceGroup(node) {
+    const tag = node.tagName.toLowerCase();
+    if (tag === 'set' && node.getAttribute('dock') != null) return 'dock';
+    if (tag === 'lose' && node.parentElement) {
+      const kin = Array.from(node.parentElement.children)
+        .filter((c) => c.tagName.toLowerCase() === 'lose' && this.isOptionalForce(c));
+      if (kin.length >= 2) return node.parentElement; // key the group by its shared parent node
+    }
+    return null;
+  }
+
+  // Render a force="f" optional effect as a once-per-visit opt-in button (task 74). When
+  // it belongs to a choose-one group, taking any member locks the untaken ones so exactly
+  // one option is applied. The effect fires only on click — never on entry.
+  renderForcedOptional(container, node, path) {
+    const memo = 'force@' + path;
+    const done = this.ctx.applied.has(memo);
+    const token = this.forcedChoiceGroup(node);
+    const chosen = token != null ? this.ctx.forcedChosen.get(token) : null;
+    const lockedByGroup = chosen != null && chosen !== memo;
+    const label = document.createElement('span');
+    this.appendChildren(label, node, path);
+    const btn = document.createElement('button');
+    btn.className = 'btn-mini pay-action' + (done ? ' done' : '');
+    btn.textContent = (done ? '☑ ' : '') + (label.textContent.trim() || 'Do this');
+    if (done) {
+      btn.disabled = true;
+    } else if (lockedByGroup) {
+      btn.disabled = true; btn.title = 'You may choose only one.';
+    } else {
+      btn.addEventListener('click', () => {
+        const note = applyEffect(node, this.state, {});
+        this.ctx.applied.add(memo);
+        if (token != null) this.ctx.forcedChosen.set(token, memo);
+        if (note) this.notify(note);
         this.rerender();
       });
     }

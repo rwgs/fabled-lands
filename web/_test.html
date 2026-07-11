@@ -1603,6 +1603,70 @@ async function run() {
     ok('§T76 the THIEVERY blessing is consumed by the reroll (Luck kept)', !gdr76.hasBlessing('thievery') && gdr76.hasBlessing('luck'));
     ok('§T76 the reroll now succeeds and offers no further reroll', !cdr76.querySelector('.blessing-reroll') && /Success/.test(cdr76.textContent));
 
+    // --- task 74: standalone force="f" effects are opt-in, not auto-applied ----------
+    // book1/25: an optional mission codeword is a button; NOT recorded on entry.
+    const g25 = GameState.create({ name:'M25', gender:'m', profession:'Warrior', book:1, adv });
+    const c25 = document.createElement('div');
+    new Story(c25, g25, { navigate(){}, onDeath(){}, notify(){} }).begin(await data.getSection(1, '25'), 1, '25');
+    ok('§1.25 the mission codeword is NOT recorded on entry', !g25.hasCodeword('Ambuscade'));
+    const amb25 = Array.from(c25.querySelectorAll('button')).find((b) => /Ambuscade/.test(b.textContent));
+    ok('§1.25 shows an opt-in button to accept the mission', !!amb25 && !amb25.disabled);
+    amb25.click();
+    ok('§1.25 accepting the mission records the codeword', g25.hasCodeword('Ambuscade'));
+
+    // book1/636: an optional Tyrnai initiation is a button; the god is NOT auto-joined.
+    const g636 = GameState.create({ name:'T636', gender:'m', profession:'Warrior', book:1, adv });
+    const c636 = document.createElement('div');
+    new Story(c636, g636, { navigate(){}, onDeath(){}, notify(){} }).begin(await data.getSection(1, '636'), 1, '636');
+    ok('§1.636 does NOT auto-initiate Tyrnai on entry', !g636.hasGod('Tyrnai'));
+    const tyr636 = Array.from(c636.querySelectorAll('button')).find((b) => /Tyrnai/.test(b.textContent));
+    ok('§1.636 shows an opt-in Tyrnai initiation button', !!tyr636 && !tyr636.disabled);
+    tyr636.click();
+    ok('§1.636 choosing to initiate joins Tyrnai', g636.hasGod('Tyrnai'));
+
+    // book6/163: an optional item surrender is a button; the katana is NOT auto-removed.
+    const g163 = GameState.create({ name:'K163', gender:'m', profession:'Warrior', book:6, adv });
+    g163.addItem(makeItem('item', 'ivory-handled katana'));
+    const c163 = document.createElement('div');
+    new Story(c163, g163, { navigate(){}, onDeath(){}, notify(){} }).begin(await data.getSection(6, '163'), 6, '163');
+    ok('§6.163 does NOT auto-surrender the katana on entry', g163.hasItemMatch('ivory-handled katana'));
+    const kat163 = Array.from(c163.querySelectorAll('button')).find((b) => /Cross it off/i.test(b.textContent));
+    ok('§6.163 shows an opt-in surrender button', !!kat163 && !kat163.disabled);
+    kat163.click();
+    ok('§6.163 surrendering removes the katana', !g163.hasItemMatch('ivory-handled katana'));
+
+    // book6/160: two protections, choose ONE — neither auto-removed; taking one locks the other.
+    const g160 = GameState.create({ name:'P160', gender:'m', profession:'Warrior', book:6, adv });
+    g160.addBlessing('storm'); g160.addItem(makeItem('item', 'catastrophe certificate'));
+    const c160 = document.createElement('div');
+    new Story(c160, g160, { navigate(){}, onDeath(){}, notify(){} }).begin(await data.getSection(6, '160'), 6, '160');
+    ok('§6.160 removes neither protection on entry', g160.hasBlessing('storm') && g160.hasItemMatch('catastrophe certificate'));
+    const storm160 = Array.from(c160.querySelectorAll('button')).find((b) => /Safety from Storms/.test(b.textContent));
+    const cert160 = Array.from(c160.querySelectorAll('button')).find((b) => /certificate/i.test(b.textContent));
+    ok('§6.160 shows both cross-off buttons enabled', !!storm160 && !!cert160 && !storm160.disabled && !cert160.disabled);
+    storm160.click();
+    ok('§6.160 crossing off Safety from Storms keeps the certificate', !g160.hasBlessing('storm') && g160.hasItemMatch('catastrophe certificate'));
+    const cert160b = Array.from(c160.querySelectorAll('button')).find((b) => /certificate/i.test(b.textContent));
+    ok('§6.160 the other protection is now locked (choose one)', !!cert160b && cert160b.disabled);
+
+    // book3/405: a successful CHARISMA roll reveals twelve dock choices; NONE auto-apply
+    // (the old bug always ended at Yellowport). Picking one docks there and locks the rest.
+    const g405 = GameState.create({ name:'D405', gender:'m', profession:'Warrior', book:3, adv });
+    g405.data.abilities.charisma = 12;
+    g405.addShip({ type: 'barque', docked: 'Testport', crew: 'average', cargo: [] });
+    const c405 = document.createElement('div');
+    new Story(c405, g405, { navigate(){}, onDeath(){}, notify(){} }).begin(await data.getSection(3, '405'), 3, '405');
+    const rnd405 = Math.random; Math.random = () => 0.99; // 6+6=12, +CHA 12 = 24 > 13 → success
+    c405.querySelector('.btn-roll').click(); await settle42();
+    Math.random = rnd405;
+    ok('§3.405 a successful roll does NOT auto-dock the ship (was: Yellowport)', g405.ships[0].docked === 'Testport', `docked=${g405.ships[0].docked}`);
+    const aku405 = Array.from(c405.querySelectorAll('button')).find((b) => b.textContent.trim() === 'Aku');
+    ok('§3.405 reveals the dock choices as buttons', !!aku405);
+    aku405.click();
+    ok('§3.405 picking a dock docks the ship there (Aku, not Yellowport)', g405.ships[0].docked === 'Aku', `docked=${g405.ships[0].docked}`);
+    const yellow405 = Array.from(c405.querySelectorAll('button')).find((b) => b.textContent.trim() === 'Yellowport');
+    ok('§3.405 the other docks lock after choosing (choose one)', !!yellow405 && yellow405.disabled);
+
     // --- task 47: <choice item="?" tags="light"> gates on a light source ---
     const g291 = GameState.create({ name:'C291', gender:'m', profession:'Warrior', book:2, adv });
     const c291 = document.createElement('div');

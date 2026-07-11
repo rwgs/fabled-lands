@@ -64,7 +64,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 **HIGH**
 - [x] 77. Selector-aware `<set item|cache …>` expressions read the sheet instead of the selected item/cache (21 nodes)
 - [x] 76. Blessings are stored as inert labels — ability/Luck/travel benefits cannot be used *(core rerolls done; combat Defence/Wrath split → task 80)*
-- [ ] 74. Standalone `force="f"` effects auto-apply — missions/initiations cannot be declined; choose-one losses over-apply
+- [x] 74. Standalone `force="f"` effects auto-apply — missions/initiations cannot be declined; choose-one losses over-apply
 - [ ] 73. Ship dock/current-vessel state is not maintained — any owned ship can sail or trade from anywhere
 - [x] 45. Multi-fight sections: the fight gate & death-deferral track only the *last* `<fight>`
 - [x] 46. `<set var … modifier="natural">` discards the value — book-2 rank ceremonies auto-succeed
@@ -2578,6 +2578,30 @@ Forced/default narrative effects should keep the current automatic behaviour.
 Add DOM/state tests for declining/accepting a mission, optional Tyrnai
 initiation, choosing exactly one book6/160 protection, and selecting a non-final
 dock in book3/405. Re-run all sections.
+
+**Done (2026-07-10).** `renderPassive` now checks `force=` before the auto-apply
+path: a visible `force="f"` passive node (`tick`/`gain`/`lose`/`set`/`adjustmoney`)
+routes to a new `renderForcedOptional`, which renders it as a **once-per-visit opt-in
+button** (`applyEffect` fires only on click, memoised by a `force@path` key) instead
+of applying on entry. The check sits **after** the price/flag/hidden/payment gates so
+the specialised controls still win; a survey confirmed no `force="f"` passive node
+carries `hidden`/`price`/`flag`/`ability="?"`, so none are mis-routed. This fixes the
+19 single opt-ins (mission codewords, the three Tyrnai initiations, the katana
+surrender, book4/263's win/loss payouts) — they are no longer applied when declined.
+
+Choose-one enforcement (`forcedChoiceGroup` + a per-visit `ctx.forcedChosen` map):
+`<set dock=…>` `force="f"` siblings share one `'dock'` token (a ship docks at ONE
+place — book3/405), and two-or-more `force="f"` `<lose>` under a shared parent form a
+group keyed by that parent (book6/160's "cross off one"). Taking any member records
+the choice and disables the untaken members ("You may choose only one"), so exactly
+one option applies — book3/405 no longer runs all twelve docks to Yellowport, and
+book6/160 no longer strips both protections. Forced/default effects (no `force=`, or
+`force="t"`) keep auto-applying.
+
+Pure render-layer change (no engine/state edits). Added 17 DOM assertions
+(§1.25 accept/record + not-on-entry, §1.636 optional Tyrnai, §6.163 katana,
+§6.160 choose-one + lock, §3.405 no auto-dock + pick-one + lock). Web-only — stamped
+`26.07.10.1ab77d7`. Suite green: `RESULT ALL PASS pass=701 fail=0`.
 
 ---
 
