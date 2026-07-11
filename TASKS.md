@@ -111,6 +111,9 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 70. Visit box renders unticked on the visit it ticks; bare `<tick/>` prints "If not, , and read on" (§496 + widespread)
 
 **LOW**
+- [ ] 87. Fight widget "Your Combat" omits the per-fight attack bonus (`special="attack"`), unlike the Defence line
+- [ ] 86. Add a full-section render integration test for book5/386 (currently covered only by synthetic ticks)
+- [ ] 85. book6/135 source: `tag="keep"` is a stray/misnamed attribute (likely meant `tags=`); harmless but should be cleaned
 - [ ] 84. De-flake the "fight attack produces a log line" test (timing-dependent on the 900 ms dice animation)
 - [ ] 83. Combat blessings (Wrath/Defence) buttons appear only on the single-fight widget, not group fights *(split from task 80)*
 - [ ] 82. Test harness: a duplicate top-level `const` in `run()` silently aborts the whole suite (reads as a hang, not a failure)
@@ -3049,3 +3052,48 @@ Make it deterministic: either stub/short-circuit `animateDice` in the test envir
 resolved state instead — e.g. after the click settles, check `fight.log.length` /
 `state` directly rather than polling the DOM after a timeout. Confirm the assertion
 passes on repeated headless runs. No engine change; test-only.
+
+---
+
+## 85. book6/135 source: `tag="keep"` is a stray/misnamed attribute  — LOW (data)
+
+*(Filed 2026-07-11 from task 75.)* `book6/135.xml` has
+`<tick weapon="?" using="t" tag="keep" removetag="keep"/>`. `tag=` is not a recognised
+tick attribute (the item-tag filter is `tags=`), so the engine ignores it. The effect
+is nonetheless correct — `using="t"` already selects the wielded weapon and
+`removetag="keep"` strips its `keep` tag — so this is cosmetic, not a bug. Clean it up
+for clarity: drop `tag="keep"` (redundant with `using="t"`) or, if a filter was
+intended, change it to `tags="keep"` (which would narrow to a keep-tagged wielded
+weapon — verify that matches the section's intent before changing semantics). Since it
+edits source XML, fold it into task 78's rebuild pass rather than a standalone build.
+Confirm §6.135 still renders and removes the tag after the change.
+
+---
+
+## 86. Add a full-section render integration test for book5/386  — LOW (test coverage)
+
+*(Filed 2026-07-11 from task 75.)* Task 75's equipment-tick tests exercise the
+tag→+bonus→−bonus→removetag cycle with **synthetic** `<tick weapon="?" …>` nodes, which
+covers the engine mechanics §386 depends on. It does not render the actual §386 section
+end-to-end (tag one weapon → roll 2d vs the tagged weapon's bonus → the outcome table's
+addbonus/removetag/destroy branches → the final `removetag="Tz"` cleanup). Add a DOM
+integration test that begins §5.386 with a known weapon and drives the roll (stubbed
+RNG) through a representative outcome, asserting the weapon's bonus/tags and the Shard
+refund at bonus ≥ 6. This guards the wiring (visible vs hidden ticks, the `tags="Tz"`
+selection after the first tag) that the synthetic tests don't. Test-only; re-run all
+sections.
+
+---
+
+## 87. Fight widget "Your Combat" omits the per-fight attack bonus  — LOW (render)
+
+*(Filed 2026-07-11 from task 80.)* `drawFight`'s "you" line shows
+`Your Combat ${state.ability('combat')}` but combat resolution adds
+`state.fightAttackBonus()` (the `special="attack"` per-fight bonus — task 49; e.g.
+book1/42's rat poison +3). Task 80 made the sibling Defence display accurate
+(`state.defence() + state.fightDefenceBonus()`) but left Combat showing only the base,
+so a player with an attack bonus sees a "Your Combat" value lower than what their rolls
+actually use. Cosmetic — the resolution already uses the bonus (`playerCombat` in
+`combat.js`). For parity, show `Your Combat ${state.ability('combat') + state.fightAttackBonus()}`
+in both `drawFight` and `drawGroupFight`. Add/extend a DOM assertion that the displayed
+Combat reflects a `special="attack"` bonus. Web-only; stamp and re-run all sections.
