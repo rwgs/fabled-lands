@@ -35,6 +35,17 @@ bespoke ones). The suite is green at HEAD: `RESULT ALL PASS pass=597 fail=0`
 (the reviewer's environment couldn't launch Chrome, so no result was claimed
 there).
 
+Reviewed 2026-07-10: a fresh corpus-to-engine audit found seven gaps that the
+render-every-section smoke scan cannot detect because every affected section
+still builds valid DOM. Filed tasks **73–79**: ship-location metadata is not
+maintained; standalone `force="f"` effects auto-apply; several live `<tick>`
+forms are inert; blessings cannot be spent on their rule-defined rerolls/combat
+benefits; selector-aware `<set>` expressions ignore their item/cache selectors;
+five numeric source files have mismatched `<section name>` metadata; and the
+preview/import persistence paths report success after a failed write. Each
+finding was checked against the source XML and `JaFL-XML-Tags.html`. Baseline
+suite at HEAD is green: `RESULT ALL PASS pass=649 fail=0`.
+
 Worked 2026-07-08: all eight HIGH items (45–52) implemented, each with focused
 headless tests and the full render-every-section scan green after every step
 (suite grew 381 → 440 assertions, `RESULT ALL PASS fail=0`). Notable shared
@@ -51,6 +62,10 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 "choose one" cycle (43).
 
 **HIGH**
+- [ ] 77. Selector-aware `<set item|cache …>` expressions read the sheet instead of the selected item/cache (21 nodes)
+- [ ] 76. Blessings are stored as inert labels — ability/Luck/travel/Defence/Wrath benefits cannot be used
+- [ ] 74. Standalone `force="f"` effects auto-apply — missions/initiations cannot be declined; choose-one losses over-apply
+- [ ] 73. Ship dock/current-vessel state is not maintained — any owned ship can sail or trade from anywhere
 - [x] 45. Multi-fight sections: the fight gate & death-deferral track only the *last* `<fight>`
 - [x] 46. `<set var … modifier="natural">` discards the value — book-2 rank ceremonies auto-succeed
 - [x] 47. `<choice item="?" tags=…>` is never enabled — light-gated passages hard-locked
@@ -64,6 +79,8 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 71. `<lose staminato="N">` never applies — the handler is gated on a `stamina=` attr it lacks (16 sections)
 
 **MEDIUM**
+- [ ] 75. Live `<tick>` forms for equipment, profession changes and patterned titles are incomplete/inert
+- [ ] 79. Keeping a preview or importing a save reports success when persistence fails
 - [x] 5. Implement `<items group … limit="N">` "choose up to N" pickup
 - [x] 6. Harden save import and migration
 - [x] 7. Surface persistence failures to the player
@@ -92,6 +109,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 70. Visit box renders unticked on the visit it ticks; bare `<tick/>` prints "If not, , and read on" (§496 + widespread)
 
 **LOW**
+- [ ] 78. Validate numeric `<section name>` against its filename; fix five mismatched source files
 - [x] 9. Centralise tag dispatch into a registry
 - [x] 10. Dice RNG quality / reproducibility
 - [x] 11. Harden the per-visit memoization assumption
@@ -2490,3 +2508,217 @@ state write and `did` unchanged. Suite green over three runs: `RESULT ALL PASS
 pass=649 fail=0` (the one intermittent "fight attack produces a log line" failure
 is the pre-existing 900 ms animation-timing flake, confirmed present on the
 stashed pristine build too).
+
+---
+
+## 73. Ship dock/current-vessel state is not maintained — any owned ship can sail or trade from anywhere  — HIGH (state/market/navigation)
+
+*(Filed 2026-07-10 from the repository review.)* The corpus has **94** numeric
+sections with `dock=`, **15** sailing gotos and **2** `todock=` sections, but
+`Story.begin` ignores both section attributes. A bought ship is created with
+`docked: null`; `renderGoto` enables `sail="t"` when `state.ships.length > 0`
+without checking the section's dock; clicking it neither chooses a ship nor
+marks one as the current vessel/"at large". Cargo grants/losses, crew changes,
+ship losses, cargo markets and `<if cargo|crew|ship>` likewise use the first or
+any owned ship rather than a vessel present at the current location. A ship left
+at Smogmaw can therefore sail from Kunrir, and a newly purchased vessel never
+acquires its purchase port for the three working `docked="Smogmaw"` conditions.
+This contradicts the checked-in tag specification: section `dock=` enables only
+ships at that dock, `sail="t"` selects one and puts it at large, and `todock=`
+moves other at-large ships when leaving.
+
+Implement explicit current-vessel/location rules in a DOM-free module/state API:
+
+1. Give ships stable identities and track which one is currently being sailed.
+   Buying/receiving a ship at a `dock=` section must berth it there.
+2. A sail action must offer only ships at the current dock (or the current ship
+   while already at sea); choose one when several qualify, then mark it at large.
+   Reaching a dock with the current ship berths that ship there. Honour `todock=`
+   for other at-large vessels.
+3. Route cargo/crew/ship transactions and location-sensitive conditions through
+   the current/local ship instead of `ships[0]`/`ships.some(...)`. Preserve rules
+   that genuinely mean any owned ship.
+4. Thread only location/selection data through `render.js`; keep the mutations
+   and eligibility checks headless in `state.js`/`market.js`/`engine.js`.
+
+Add focused tests: two ships at different docks cannot sail/trade from the wrong
+port; buying at a dock records that dock; sailing one of two ships changes only
+the chosen ship; arrival re-docks it; `todock=` moves the other at-large ship;
+book3/53's Smogmaw condition follows the actual berth. Re-run all sections.
+
+---
+
+## 74. Standalone `force="f"` effects auto-apply — optional missions/initiations cannot be declined  — HIGH (render)
+
+*(Filed 2026-07-10 from the repository review.)* `renderPassive` auto-applies
+every standalone `lose`/`tick`/`gain`/`set`/`adjustmoney` unless it happens to
+match a price gate, chooser, fight deferral or economic-decline heuristic. It
+never reads `force=`. The XML corpus has **35** non-transfer standalone effects
+with `force="f"` (the three optional transfers already have a proper button in
+`renderTransfer`). Concrete failures:
+
+- book1/25, 75, 191, 256, 290, 331, 411, 471, 472 and others grant mission
+  codewords on entry even when the player declines;
+- book1/636, book2/135 and book5/435 automatically initiate every qualifying
+  visitor into Tyrnai;
+- book6/160 removes both Safety from Storms and the catastrophe certificate when
+  the player owns both, although its prose says to choose one;
+- book3/405 executes all twelve optional `<set dock=…>` actions in sequence, so
+  the successful ship always ends at Yellowport; and
+- book6/163 automatically surrenders the ivory-handled katana.
+
+Render a standalone `force="f"` action as an explicit, once-per-visit action
+instead of applying it on entry. Preserve conditional/roll gating and the
+existing specialised transfer/payment controls. For sibling actions that form a
+single choice (book6/160 and book3/405), enforce one selection; either add a
+small generic choice controller or make the choice explicit in the source XML.
+Forced/default narrative effects should keep the current automatic behaviour.
+
+Add DOM/state tests for declining/accepting a mission, optional Tyrnai
+initiation, choosing exactly one book6/160 protection, and selecting a non-final
+dock in book3/405. Re-run all sections.
+
+---
+
+## 75. Live `<tick>` forms for equipment, profession changes and patterned titles are incomplete/inert  — MEDIUM (engine/render/state)
+
+*(Filed 2026-07-10 from the repository review.)* `applyTick` only modifies
+equipment when `item=` is present with `addbonus`/`addtag`. It does not recognise
+`weapon=`/`armour=`/`tool=`, `removetag`, `profession`, `titlePattern` or
+`titleAdjust`; a recognized-looking tick with none of its handled attributes
+falls through to the bare visit-box tick. Live effects broken by this include:
+
+- six equipment ticks: book5/386 cannot select/tag/upgrade/clean up Targdaz's
+  weapon, book6/731's +1 weapon boon is inert, and book6/135 cannot remove a
+  `keep` tag from the weapon it breaks;
+- book6/118 cannot make a former Priest choose a new profession and book6/731's
+  Priest reward does nothing; and
+- the three bokh mastery grants (book5/119, 172, 235) increment an internal
+  `bokh` value only by coincidence (`titleValue=1`) and display `bokh (N)` rather
+  than `titlePattern="Circle {0} Master of bokh"`. Book5/235 also misspells
+  `titleAdjust` as `titalAdjust` in the source.
+
+Extend the headless effect API to select the correct equipment kind using
+`?`/name/tags/`using`, apply `addbonus`/`addtag`/`removetag`, and return a chooser
+request when several possessions qualify. Support a single profession and a
+pipe-list profession picker. Persist enough title pattern/value metadata to
+render the current formatted title and honour `titleAdjust`; fix the XML typo.
+Do not put these mutations in `render.js`.
+
+Add focused tests for book5/386's full tag→bonus→cleanup cycle, book6/731's
+weapon/profession outcomes, the five-way former-Priest choice in book6/118, and
+two successive bokh grants displaying Circle 2. Rebuild data and run all sections.
+
+---
+
+## 76. Blessings are stored as inert labels — their reroll/combat benefits cannot be used  — HIGH (engine/combat/render/state)
+
+*(Filed 2026-07-10 from the repository review.)* The corpus grants **95**
+blessings and repeatedly defines their use, but the state stores only strings
+and the sheet renders non-interactive chips. Roll/combat widgets never consult
+them. As a result:
+
+- CHARISMA/COMBAT/MAGIC/SANCTITY/SCOUTING/THIEVERY blessings cannot reroll a
+  failed roll (e.g. book1/107, book2/13, book6/171/587/690);
+- Luck cannot reroll any dice result, and Safe Travel cannot reroll a
+  `random type="travel"` encounter (explicitly required by
+  `JaFL-XML-Tags.html`);
+- Defence through Faith cannot add +3 Defence for one chosen combat, and Divine
+  Wrath cannot inflict its 1d pre-fight damage (book5/248/692/89, book6/94);
+- ordinary blessings are never consumed by those uses; and
+- book6/159's `permanent="true"` Safety from Storms is indistinguishable from an
+  ordinary one, so permanence cannot be honoured when the blessing is used.
+
+Model blessing metadata/consumption headlessly and migrate existing string-only
+saves. After a failed relevant roll, offer a one-click blessing reroll that
+replaces the result and consumes the blessing unless permanent; Luck applies to
+all player dice and Safe Travel to travel rolls. Before/during combat, expose
+the Defence and Wrath choices and consume them exactly once. Keep the existing
+XML-driven storm/disease avoidance paths working and distinguish using a
+permanent blessing from punitive "lose all blessings" effects. The view should
+only render choices and dice, with eligibility/consumption in engine/combat/state.
+
+Add unit/DOM tests for an ability reroll success/failure replacement, Luck on a
+random roll, Safe Travel, +3 Defence for one fight, Wrath pre-damage, ordinary
+consumption, permanent storm retention, save migration and duplicate prevention.
+Re-run all sections.
+
+---
+
+## 77. Selector-aware `<set item|cache …>` expressions ignore their selected item/cache  — HIGH (engine)
+
+*(Filed 2026-07-10 from the repository review.)* `applySet` reads only `dock`,
+`var`, `modifier`, `value` and `codeword`, then evaluates `value=` against the
+player's global sheet. It ignores `item`/`weapon`/`armour`/`tool`, `tags` and
+`cache` selectors. All **21** selector-aware set nodes therefore compute the
+wrong value:
+
+- sixteen light-source counters use `<set item="?" tags="…"
+  value="matches">` across eight sewer/cave sections. `matches` resolves as an
+  unset variable (0), so both counters compare equal and a candle is consumed
+  even when a reusable light is available;
+- book2/322's treasure risk reads purse Shards instead of cache `2.322.t`, so
+  the vampire-bat roll does not reflect how much treasure was taken;
+- book2/665's smithy payment and cached weapon/armour bonuses read the purse and
+  currently equipped gear, producing the wrong roll modifier/upgrade cap; and
+- book5/386 reads the wielded weapon bonus rather than the weapon tagged `Tz`.
+
+Implement the checked-in SetNode selector semantics in `engine.js`: `matches`
+counts matching items in the selected inventory/cache, `weapon`/`armour`/`tool`
+resolve the selected possession's bonus, and sheet identifiers such as `shards`
+resolve against `cache=` when supplied. Reuse `matchItemQuery`/the shared item
+matcher and define deterministic/chooser behaviour for `?`; keep expression
+parsing itself unchanged.
+
+Add direct tests for item/tag match counts and cached Shards/equipment, plus
+integration tests for book1/164 (lantern + candle does not burn the candle),
+book2/322's risk modifier, book2/665's upgrade cap and book5/386's selected
+weapon. Re-run all sections.
+
+---
+
+## 78. Validate numeric `<section name>` against its filename; fix five mismatched source files  — LOW (data/build)
+
+*(Filed 2026-07-10 from the repository review.)* `build-data.ps1` validates that
+each numeric source is well-formed and rooted at `<section>`, but does not check
+the root's `name=` against the filename used as the JSON/navigation key. Five
+ordinary numeric files currently disagree:
+
+- `book4/461.xml` says `name="451"`;
+- `book5/119.xml` says `name="172"`;
+- `book5/270.xml` says `name="406"`;
+- `book5/276.xml` says `name="137"`; and
+- `book6/288.xml` says `name="287"`.
+
+The contents are distinct from each namesake file, so these are metadata copy
+errors, not intentional duplicates. The app currently labels sections from the
+JSON key, masking the problem. Correct the five source attributes and extend the
+build validator so a purely numeric filename must match `section@name`. Allow a
+lettered continuation to use its printed parent number (`book5/609a.xml` has
+`name="609"`) or document/validate that convention explicitly. Add a build-time
+assertion, rebuild data and run all sections.
+
+---
+
+## 79. Keeping a preview or importing a save reports success when persistence fails  — MEDIUM (state/app)
+
+*(Filed 2026-07-10 from the repository review.)* Task 7 made `save()` return
+`false` and set `lastSaveError`, and new-game/save-and-quit callers surface it.
+Two later entry points ignore that contract:
+
+- `GameState.keep()` clears `ephemeral`, assigns a slot, calls `save()` and
+  returns the slot even when the write failed. `keepDemo()` then toasts
+  "Adventure saved."; because no `changed()` event fires, the existing save-error
+  modal is not shown. The preview is also no longer ephemeral, so retrying is
+  awkward.
+- `importSave()` calls `gs.save()` without checking the result and returns
+  `{slot, meta: loadSlotMeta()[slot]}`. The UI toasts `Imported “undefined”.`
+  even though no save exists.
+
+Make both operations transactional with respect to persistence: on failure,
+preserve/revert the preview's ephemeral state and slot, and throw or return a
+failure that the existing modal can display; an import must not claim a slot or
+success without both save data and metadata. Reuse `lastSaveError`'s player-facing
+message. Add tests with a throwing `localStorage.setItem` for keep/import, plus
+recovery/retry tests. No app stamp is needed for the TASKS-only filing; when the
+fix is implemented, stamp and run the full suite.
