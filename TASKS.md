@@ -25,9 +25,9 @@ the tasks were filed, not work order).
 - [x] 71. `<lose staminato="N">` never applies — the handler is gated on a `stamina=` attr it lacks (16 sections)
 
 **MEDIUM**
-- [ ] 91. COMBAT blessing cannot reroll an attack, and Defence blessing leaks between fights
-- [x] 90. Permanent Safety from Storms is deleted by storm-avoidance `<lose blessing>` nodes
 - [ ] 92. Eight live `<adjust>` variants are ignored or applied unconditionally
+- [x] 91. COMBAT blessing cannot reroll an attack, and Defence blessing leaks between fights
+- [x] 90. Permanent Safety from Storms is deleted by storm-avoidance `<lose blessing>` nodes
 - [ ] 93. Item group provenance and rolled `itemAt=` losses are not represented
 - [ ] 94. `quantity=` is ignored on rewards, cargo ticks and market stock
 - [ ] 95. Item `replace=` rewards add a duplicate instead of transforming the possession
@@ -3307,6 +3307,32 @@ duplicating the enemy turn or damage, and store the Defence blessing bonus on th
 relevant fight/encounter (a simultaneous group remains one encounter), not the
 whole section. Test failed/successful attack behaviour, permanent versus ordinary
 COMBAT blessings, sequential fights, and group combat. Stamp and run all sections.
+
+**Done (2026-07-12).** Two changes, both headless in `combat.js`:
+- **COMBAT retry** — `playerStrike` flags a miss (`fight.lastStrikeMissed`); a new
+  exported `rerollAttack(state, fight)` retries that strike once per round
+  (`fight.attackRerolled`, both flags reset at the top of `fightRound`/
+  `groupFightRound`) with NO repeated enemy reply, consuming the blessing via
+  `useBlessing('combat')` (a permanent one survives and re-arms next round). The
+  fight widgets offer "Use COMBAT blessing (retry your attack)" after a miss —
+  in a group, against the foe that was missed.
+- **Defence scoping** — `useDefenceBlessing` now stores the +3 on the fight
+  itself (`fight.defenceBonus`, read by `playerDefenceFor` and the widget
+  display) instead of the section-global `_fightBonus`, so sequential fights in
+  one section no longer inherit a blessing promised for "THIS fight only". A
+  simultaneous group stays one encounter: the view passes the members, each
+  carries the bonus, and the members' stored bonus doubles as the durable
+  once-per-combat guard (the group proxy is rebuilt every rerender).
+  `<tick special="defence">` bonuses keep the per-section store (task 49) —
+  unchanged.
+
+Tests: +12 and three §80/§83 assertions updated to the per-fight model (the
+global store now asserted UNtouched) — miss→retry (enemy stamina falls, the
+player's does not, blessing spent), no second retry per round, a hit is not
+retryable, a permanent blessing re-arms across rounds, +3 lands on the blessed
+fight only (a same-section second fight takes the unblocked blow), and DOM
+single + group retry flows. Web-only — stamped `26.07.12.e91b370`. Suite green:
+`RESULT ALL PASS pass=848 fail=0`.
 
 ---
 

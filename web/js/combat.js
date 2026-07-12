@@ -84,10 +84,13 @@ function startFight(fight, node, state) {
  *  value/variable — §Chimerical Beast "s", §Talanexor "d") wins; otherwise the
  *  sheet Defence, minus the armour bonus when modifiers="noarmour" (Water Drake). */
 function playerDefenceFor(state, fight) {
-  // A <tick special="defence"> blessing raises Defence for this fight only (§4.434
+  // A <tick special="defence"> bonus raises Defence for the section's fight (§4.434
   // ring of defence, §6.183 Thunder Beast). It applies even over a playerDefence=
-  // override so a granted Defence boon isn't lost to a fixed-Defence fight.
-  const defBonus = state.fightDefenceBonus ? state.fightDefenceBonus() : 0;
+  // override so a granted Defence boon isn't lost to a fixed-Defence fight. The
+  // Defence-through-Faith blessing lives on the FIGHT itself (fight.defenceBonus),
+  // so "+3 for THIS fight only" never leaks into a later fight in the same
+  // section (task 91).
+  const defBonus = (state.fightDefenceBonus ? state.fightDefenceBonus() : 0) + (fight.defenceBonus || 0);
   if (fight.playerDefence != null && fight.playerDefence !== '') return resolveValue(state, fight.playerDefence) + defBonus;
   let def = state.defence();
   if (fight.noArmour) def = Math.max(0, def - state.armourBonus());
@@ -119,8 +122,23 @@ function playerStrike(state, fight) {
     fight.stamina -= dmg;
     if (fight.staminaLost) state.adjustCodewordValue(fight.staminaLost, dmg);
   }
+  fight.lastStrikeMissed = dmg === 0; // a failed COMBAT roll — rerollable via the blessing (task 91)
   fight.log.push(`You roll ${r.total}+${combat}=${total} vs Def ${fight.defence} → ${dmg ? '−' + dmg + ' enemy Stamina' : 'miss'}`);
   if (fight.stamina <= fight.winThreshold) fight.outcome = 'win';
+}
+
+/** COMBAT blessing (§4.324 "try again when you fail a COMBAT roll"): retry the
+ *  player's MISSED strike, once per round, without the enemy replying again.
+ *  Consumes the blessing unless permanent. Returns true when the retry was made
+ *  (its result lands on the fight as usual). Headless. (task 91) */
+export function rerollAttack(state, fight) {
+  if (!fight || fight.outcome || state.isDead()) return false;
+  if (!fight.lastStrikeMissed || fight.attackRerolled) return false;
+  if (!state.useBlessing('combat')) return false;
+  fight.attackRerolled = true; // once per round, even for a permanent blessing
+  fight.log.push('COMBAT blessing: you try the blow again');
+  playerStrike(state, fight);
+  return true;
 }
 
 /** One enemy strike against the player (2 dice + Combat vs the player's Defence),
@@ -162,6 +180,7 @@ function runRoundNode(state, fight, roundNode) {
  * the player (Stamina damage) or record a fight.roundGoto redirect (§5.689).
  */
 export function fightRound(state, fight, dmgNode, roundNode = null) {
+  fight.attackRerolled = false; fight.lastStrikeMissed = false; // fresh round, fresh reroll (task 91)
   const pre = roundNode != null && boolAttr(roundNode.getAttribute('pre'));
   if (roundNode && pre) {
     runRoundNode(state, fight, roundNode);
@@ -197,12 +216,15 @@ export function useWrathBlessing(state, fight) {
 }
 
 /** Defence through Faith blessing (book5/248/692/89): +bonus (default 3) to Defence for
- *  THIS fight only. Adds a transient per-fight Defence bonus (cleared on leaving the
- *  section), marks the fight, and consumes the blessing unless permanent. Returns the
- *  bonus applied (0 if unavailable). Headless. (task 80) */
-export function useDefenceBlessing(state, fight, bonus = 3) {
+ *  THIS fight only. The bonus is stored on the fight itself (fight.defenceBonus) —
+ *  not the section-global store — so a later fight in the same section never
+ *  inherits it (task 91). A simultaneous group is ONE encounter: pass its members
+ *  so every foe's strikes meet the boosted Defence while the once-per-combat mark
+ *  lives on the shared proxy. Consumes the blessing unless permanent. Returns the
+ *  bonus applied (0 if unavailable). Headless. (tasks 80, 91) */
+export function useDefenceBlessing(state, fight, bonus = 3, members = null) {
   if (!fight || fight.defenceUsed || !state.hasBlessing('defence')) return 0;
-  state.addFightBonus('defence', bonus);
+  for (const f of (members && members.length ? members : [fight])) f.defenceBonus = (f.defenceBonus || 0) + bonus;
   fight.defenceUsed = true;
   state.useBlessing('defence');
   return bonus;
@@ -217,6 +239,7 @@ export function useDefenceBlessing(state, fight, bonus = 3) {
  * shared `state`. (task 48)
  */
 export function groupFightRound(state, fights, dmgNode, target = null) {
+  fights.forEach((f) => { f.attackRerolled = false; f.lastStrikeMissed = false; }); // task 91
   const chosen = (target && !isDefeated(target)) ? target : fights.find((f) => !isDefeated(f));
   if (chosen) playerStrike(state, chosen);
   for (const f of fights) {

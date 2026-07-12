@@ -22,7 +22,7 @@
 import * as data from './js/data.js';
 import { GameState, readSlotData, importSave, loadSlotMeta, deleteSlot, makeItem, nextFreeSlot, sanitizeData, currencyAward, splitItemName } from './js/state.js';
 import * as eng from './js/engine.js';
-import { fightRound, makeFight, groupFightRound, isDefeated, useWrathBlessing, useDefenceBlessing } from './js/combat.js';
+import { fightRound, makeFight, groupFightRound, isDefeated, useWrathBlessing, useDefenceBlessing, rerollAttack } from './js/combat.js';
 import { goodsFrom, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo, canUpgradeCrew, payChoiceCost } from './js/market.js';
 import { Story } from './js/render.js';
 import { Narrator } from './js/tts.js';
@@ -2103,6 +2103,96 @@ async function run() {
       ok('§1.586 an ordinary blessing is used up by the first storm', !g90o.hasBlessing('storm'));
     }
 
+    // --- task 91: COMBAT blessing retries a missed strike; Defence stays per-fight -----
+    { // block-scoped (task 82)
+      const rnd91 = Math.random;
+      // A missed strike is retryable once — the enemy never replies to the retry.
+      const g91 = GameState.create({ name:'CB91', gender:'m', profession:'Warrior', book:4, adv });
+      g91.data.stamina = 30; g91.data.staminaMax = 30; g91.addBlessing('combat');
+      const f91 = makeFight(parse('<fight name="Duellist" combat="2" defence="15" stamina="12"/>'), g91);
+      Math.random = () => 0; // player 8 vs 15 miss; duellist 4 vs 8 miss
+      fightRound(g91, f91, null);
+      Math.random = rnd91;
+      ok('§91 a failed strike is flagged for the blessing retry', f91.lastStrikeMissed === true && f91.stamina === 12);
+      Math.random = () => 0.99; // retry: 18 vs 15 → −3
+      const did91 = rerollAttack(g91, f91);
+      Math.random = rnd91;
+      ok('§91 the COMBAT blessing retries the strike (12→9), consumed, no enemy reply', did91 === true && f91.stamina === 9 && !g91.hasBlessing('combat') && g91.data.stamina === 30, `en=${f91.stamina} st=${g91.data.stamina}`);
+      ok('§91 no second retry in the same round', rerollAttack(g91, f91) === false);
+      // A HIT is not retryable, blessing or not.
+      const g91h = GameState.create({ name:'CB91h', gender:'m', profession:'Warrior', book:4, adv });
+      g91h.data.stamina = 30; g91h.data.staminaMax = 30; g91h.addBlessing('combat');
+      const f91h = makeFight(parse('<fight name="Duellist" combat="2" defence="10" stamina="12"/>'), g91h);
+      Math.random = () => 0.99; // player 18 vs 10 → −8: a hit
+      fightRound(g91h, f91h, null);
+      Math.random = rnd91;
+      ok('§91 a successful strike offers no retry', f91h.lastStrikeMissed === false && rerollAttack(g91h, f91h) === false && g91h.hasBlessing('combat'));
+      // A permanent COMBAT blessing survives its use but is still once per round.
+      const g91p = GameState.create({ name:'CB91p', gender:'m', profession:'Warrior', book:4, adv });
+      g91p.data.stamina = 30; g91p.data.staminaMax = 30; g91p.addBlessing('combat', true);
+      const f91p = makeFight(parse('<fight name="Wall" combat="1" defence="30" stamina="12"/>'), g91p);
+      Math.random = () => 0;
+      fightRound(g91p, f91p, null);
+      const r1p = rerollAttack(g91p, f91p); // retry also misses (Def 30)
+      const r2p = rerollAttack(g91p, f91p);
+      fightRound(g91p, f91p, null); // a NEW round re-arms the retry
+      const r3p = rerollAttack(g91p, f91p);
+      Math.random = rnd91;
+      ok('§91 a permanent COMBAT blessing survives and re-arms next round (not twice a round)', r1p === true && r2p === false && r3p === true && g91p.hasBlessing('combat'));
+
+      // Defence through Faith stays on the blessed fight: a second fight in the same
+      // section (same state, no section change) meets the UNBOOSTED Defence.
+      const gsq = GameState.create({ name:'SQ91', gender:'m', profession:'Warrior', book:5, adv });
+      gsq.data.stamina = 30; gsq.data.staminaMax = 30; gsq.addBlessing('defence');
+      const fA91 = makeFight(parse('<fight name="First" combat="9" defence="30" stamina="20"/>'), gsq);
+      const fB91 = makeFight(parse('<fight name="Second" combat="9" defence="30" stamina="20"/>'), gsq);
+      useDefenceBlessing(gsq, fA91);
+      ok('§91 the +3 lands on the blessed fight only', fA91.defenceBonus === 3 && !fB91.defenceBonus && gsq.fightDefenceBonus() === 0);
+      Math.random = () => 0; // enemy 2+9=11 vs Def 8+3=11 → miss in fight A…
+      fightRound(gsq, fA91, null);
+      const afterA91 = gsq.data.stamina;
+      fightRound(gsq, fB91, null); // …but vs Def 8 in fight B → −3
+      Math.random = rnd91;
+      ok('§91 the blessed fight blocks the blow; the NEXT fight does not inherit it', afterA91 === 30 && gsq.data.stamina === 27, `a=${afterA91} b=${gsq.data.stamina}`);
+
+      // DOM: the retry button appears only after a miss; clicking retries the strike.
+      const secR91 = '<section name="TR91"><p><fight name="Duellist" combat="2" defence="15" stamina="12"/></p></section>';
+      const gdr91 = GameState.create({ name:'DR91', gender:'m', profession:'Warrior', book:4, adv });
+      gdr91.data.stamina = 30; gdr91.data.staminaMax = 30; gdr91.addBlessing('combat');
+      const cdr91 = document.createElement('div');
+      new Story(cdr91, gdr91, { navigate(){}, onDeath(){}, notify(){} }).begin(parse(secR91), 4, 'TR91');
+      const retryBtn91 = () => Array.from(cdr91.querySelectorAll('button')).find((b) => /retry your attack/.test(b.textContent));
+      ok('§91 no retry button before any strike', !retryBtn91());
+      Math.random = () => 0; // miss
+      Array.from(cdr91.querySelectorAll('.fight .btn-roll')).find((b) => b.textContent === 'Attack').click();
+      await settle42();
+      Math.random = rnd91;
+      ok('§91 a missed attack offers the COMBAT-blessing retry', !!retryBtn91());
+      Math.random = () => 0.99; // retry hits: 12→9
+      retryBtn91().click();
+      Math.random = rnd91;
+      ok('§91 the retry strikes again (12→9), no extra enemy blow, blessing spent', /Stamina 9\/12/.test(cdr91.querySelector('.en-stam').textContent) && gdr91.data.stamina === 30 && !gdr91.hasBlessing('combat') && !retryBtn91(), cdr91.querySelector('.en-stam').textContent);
+
+      // DOM group fight: the retry targets the foe you missed.
+      const secG91 = '<section name="TG91"><p><fight group="g" name="Orc" combat="5" defence="15" stamina="12"/><fight group="g" name="Goblin" combat="4" defence="14" stamina="10"/></p></section>';
+      const gdg91 = GameState.create({ name:'DG91', gender:'m', profession:'Warrior', book:6, adv });
+      gdg91.data.stamina = 40; gdg91.data.staminaMax = 40; gdg91.addBlessing('combat');
+      const cdg91 = document.createElement('div');
+      new Story(cdg91, gdg91, { navigate(){}, onDeath(){}, notify(){} }).begin(parse(secG91), 6, 'TG91');
+      Math.random = () => 0; // player 8 vs 15 misses the Orc; both foes miss back
+      Array.from(cdg91.querySelectorAll('button')).find((b) => b.textContent === 'Attack Orc').click();
+      await settle42();
+      Math.random = rnd91;
+      const gRetry91 = Array.from(cdg91.querySelectorAll('button')).find((b) => /retry your attack on Orc/.test(b.textContent));
+      ok('§91 a missed group strike offers the retry against that foe', !!gRetry91);
+      Math.random = () => 0.99; // retry: 18 vs 15 → Orc 12→9; Goblin untouched
+      gRetry91.click();
+      Math.random = rnd91;
+      const orc91 = Array.from(cdg91.querySelectorAll('.fight-stats:not(.you)')).find((x) => /Orc/.test(x.textContent));
+      const gob91 = Array.from(cdg91.querySelectorAll('.fight-stats:not(.you)')).find((x) => /Goblin/.test(x.textContent));
+      ok('§91 the group retry strikes only the missed foe (Orc 12→9, Goblin 10/10)', /Stamina 9\/12/.test(orc91.textContent) && /Stamina 10\/10/.test(gob91.textContent) && gdg91.data.stamina === 40, `${orc91.textContent} | ${gob91.textContent}`);
+    }
+
     // --- task 80: combat blessings (Divine Wrath / Defence through Faith) --------------
     // Headless: Divine Wrath deals 1d to the enemy, once, and is consumed.
     const gw80 = GameState.create({ name:'W80', gender:'m', profession:'Warrior', book:6, adv });
@@ -2127,7 +2217,9 @@ async function run() {
     gd80.addBlessing('defence');
     const fd80 = makeFight(parse('<fight name="Knight" combat="8" defence="14" stamina="20"/>'), gd80);
     const defBase80 = gd80.fightDefenceBonus();
-    ok('§80 Defence through Faith adds +3 for the fight', useDefenceBlessing(gd80, fd80) === 3 && gd80.fightDefenceBonus() === defBase80 + 3);
+    // The +3 lives on the FIGHT (task 91) — the section-global store is untouched,
+    // so a later fight in the same section can't inherit it.
+    ok('§80 Defence through Faith adds +3 for the fight', useDefenceBlessing(gd80, fd80) === 3 && fd80.defenceBonus === 3 && gd80.fightDefenceBonus() === defBase80);
     ok('§80 Defence through Faith is consumed and marked used', !gd80.hasBlessing('defence') && fd80.defenceUsed === true);
     ok('§80 Defence through Faith cannot be used twice', useDefenceBlessing(gd80, fd80) === 0);
     const gn80 = GameState.create({ name:'N80', gender:'m', profession:'Warrior', book:5, adv });
@@ -2144,7 +2236,7 @@ async function run() {
     const defBtn80 = () => Array.from(cdom80.querySelectorAll('button')).find((b) => /Defence through Faith/.test(b.textContent));
     ok('§80 the fight widget shows both blessing buttons when held', !!wrathBtn80() && !!defBtn80());
     defBtn80().click();
-    ok('§80 using Defence through Faith: +3 fight defence, button gone, blessing consumed', gdom80.fightDefenceBonus() === 3 && !defBtn80() && !gdom80.hasBlessing('defence'));
+    ok('§80 using Defence through Faith: button gone, blessing consumed, no global leak', gdom80.fightDefenceBonus() === 0 && !defBtn80() && !gdom80.hasBlessing('defence'));
     ok('§80 the widget shows the boosted Defence', new RegExp('Your Defence ' + (gdom80.defence() + 3) + '(?!\\d)').test(cdom80.querySelector('.you').textContent), cdom80.querySelector('.you').textContent);
     const rndDom80 = Math.random; Math.random = () => 0.5; // 1d → 4; 16−4 = 12
     wrathBtn80().click();
@@ -2177,7 +2269,7 @@ async function run() {
     const defBtn83 = () => Array.from(cd83.querySelectorAll('button')).find((b) => /Defence through Faith/.test(b.textContent));
     ok('§83 group fight shows the Defence through Faith button when held', !!defBtn83());
     defBtn83().click();
-    ok('§83 Defence through Faith adds +3 for the group and is consumed', gd83.fightDefenceBonus() === 3 && !gd83.hasBlessing('defence') && !defBtn83());
+    ok('§83 Defence through Faith adds +3 for the group and is consumed (no global leak)', gd83.fightDefenceBonus() === 0 && !gd83.hasBlessing('defence') && !defBtn83());
     ok('§83 the group widget shows the boosted Defence', new RegExp('Your Defence ' + (gd83.defence() + 3) + '(?!\\d)').test(cd83.querySelector('.you').textContent), cd83.querySelector('.you').textContent);
     // A blessing-less character (the every-section scan) sees no combat-blessing buttons.
     const gn83 = GameState.create({ name:'GN83', gender:'m', profession:'Warrior', book:6, adv });

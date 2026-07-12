@@ -11,7 +11,7 @@ import {
   rollDifficulty, rollRankCheck, rollTraining, rollDice, matchRange, childAdjustment,
   applyRest, buyResurrectionDeal, abilityChoiceOptions, readItemEffects,
 } from './engine.js';
-import { makeFight, fightRound, groupFightRound, isDefeated, useWrathBlessing, useDefenceBlessing } from './combat.js';
+import { makeFight, fightRound, groupFightRound, isDefeated, useWrathBlessing, useDefenceBlessing, rerollAttack } from './combat.js';
 import { shopKind, goodsFrom, ownsGoods, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo, canUpgradeCrew, payChoiceCost } from './market.js';
 import { normalize, makeItem, parseTags, currencyAward, splitItemName, isShardsCurrency } from './state.js';
 import { ABILITY_LABEL } from './rules.js';
@@ -2398,10 +2398,10 @@ export class Story {
     const you = document.createElement('div');
     you.className = 'fight-stats you';
     // Show the per-fight attack/Defence bonuses (special="attack"/"defence", Defence
-    // through Faith) so the displayed values match what resolution uses (playerCombat /
-    // playerDefenceFor, which both fold in the bonus in a group too). (tasks 49, 83, 87)
+    // through Faith — stored on the members, one encounter, task 91) so the displayed
+    // values match what resolution uses (playerCombat / playerDefenceFor). (tasks 49, 83, 87)
     const shownCombat = this.state.ability('combat') + this.state.fightAttackBonus();
-    const shownDef = this.state.defence() + this.state.fightDefenceBonus();
+    const shownDef = this.state.defence() + this.state.fightDefenceBonus() + (fights[0] ? (fights[0].defenceBonus || 0) : 0);
     you.innerHTML = `<span>Your Combat ${shownCombat}</span><span>Your Defence ${shownDef}</span><span>Your Stamina ${this.state.data.stamina}/${this.state.effectiveStaminaMax()}</span>`;
     box.appendChild(you);
 
@@ -2469,6 +2469,21 @@ export class Story {
       controls.appendChild(flee);
     }
 
+    // COMBAT blessing (§4.324, task 91): retry the missed strike against the same
+    // target — the foe struck last round carries the missed flag.
+    const missed = fights.find((f) => f.lastStrikeMissed && !f.attackRerolled && !isDefeated(f));
+    if (missed && this.state.hasBlessing('combat')) {
+      const rr = document.createElement('button');
+      rr.className = 'btn-secondary blessing-combat';
+      rr.textContent = `Use COMBAT blessing (retry your attack${living.length > 1 ? ` on ${missed.name}` : ''})`;
+      rr.addEventListener('click', () => {
+        if (!rerollAttack(this.state, missed)) return;
+        if (fights.every((f) => isDefeated(f)) || this.state.isDead()) { this.rerender(); return; }
+        this.drawGroupFight(box, fights, dmgNode, group, fleeNode);
+      });
+      controls.appendChild(rr);
+    }
+
     // Combat blessings in a group fight (task 83): usable once per COMBAT (the whole
     // group), only while unresolved and only when held. Divine Wrath needs a target,
     // so render one button per living foe; Defence through Faith is target-agnostic.
@@ -2489,12 +2504,15 @@ export class Story {
         controls.appendChild(w);
       });
     }
-    if (this.state.hasBlessing('defence') && !this.sectionFight.defenceUsed) {
+    // The proxy is rebuilt on a full rerender, so also gate on the members' stored
+    // bonus — the durable once-per-combat mark. (task 91)
+    if (this.state.hasBlessing('defence') && !this.sectionFight.defenceUsed && !fights.some((f) => f.defenceBonus)) {
       const d = document.createElement('button');
       d.className = 'btn-secondary blessing-combat';
       d.textContent = 'Use Defence through Faith (+3 Defence)';
       d.addEventListener('click', () => {
-        useDefenceBlessing(this.state, this.sectionFight); // marks the group proxy
+        // One encounter: the mark lives on the group proxy, the +3 on every member. (task 91)
+        useDefenceBlessing(this.state, this.sectionFight, 3, fights);
         this.drawGroupFight(box, fights, dmgNode, group, fleeNode);
       });
       controls.appendChild(d);
@@ -2524,11 +2542,11 @@ export class Story {
 
     const you = document.createElement('div');
     you.className = 'fight-stats you';
-    // Include any per-fight attack/Defence bonus (special="attack"/"defence",
-    // Defence through Faith) so the displayed values match what combat resolution
-    // uses (playerCombat / defence). (tasks 49, 80, 87)
+    // Include any per-fight attack/Defence bonus (special="attack"/"defence", plus
+    // Defence through Faith which lives on the fight itself — task 91) so the
+    // displayed values match what combat resolution uses. (tasks 49, 80, 87)
     const shownCombat = this.state.ability('combat') + this.state.fightAttackBonus();
-    const shownDef = this.state.defence() + this.state.fightDefenceBonus();
+    const shownDef = this.state.defence() + this.state.fightDefenceBonus() + (fight.defenceBonus || 0);
     you.innerHTML = `<span>Your Combat ${shownCombat}</span><span>Your Defence ${shownDef}</span><span>Your Stamina ${this.state.data.stamina}/${this.state.effectiveStaminaMax()}</span>`;
     box.appendChild(you);
 
@@ -2603,6 +2621,20 @@ export class Story {
         }
       });
       controls.appendChild(flee);
+    }
+
+    // COMBAT blessing (§4.324, task 91): a MISSED strike may be retried once per
+    // round — the player alone strikes again; the enemy's reply is never repeated.
+    if (fight.lastStrikeMissed && !fight.attackRerolled && this.state.hasBlessing('combat')) {
+      const rr = document.createElement('button');
+      rr.className = 'btn-secondary blessing-combat';
+      rr.textContent = 'Use COMBAT blessing (retry your attack)';
+      rr.addEventListener('click', () => {
+        if (!rerollAttack(this.state, fight)) return;
+        if (fight.outcome || this.state.isDead()) { this.rerender(); return; }
+        this.drawFight(box, fight, node, dmgNode, fleeNode, key, false, roundNode);
+      });
+      controls.appendChild(rr);
     }
 
     // Combat blessings (task 80): usable once per fight while it is unresolved, and only
