@@ -6,6 +6,8 @@ stable IDs pointing at the detail sections below (sections are in the order
 the tasks were filed, not work order).
 
 **HIGH**
+- [ ] 89. Ship actions still use remote vessels, and `<choice sail>` does not sail one
+- [ ] 99. `<fightround>` effects are detached manual widgets instead of combat-round rules
 - [x] 77. Selector-aware `<set item|cache …>` expressions read the sheet instead of the selected item/cache (21 nodes)
 - [x] 76. Blessings are stored as inert labels — ability/Luck/travel benefits cannot be used *(core rerolls done; combat Defence/Wrath split → task 80)*
 - [x] 74. Standalone `force="f"` effects auto-apply — missions/initiations cannot be declined; choose-one losses over-apply
@@ -23,6 +25,15 @@ the tasks were filed, not work order).
 - [x] 71. `<lose staminato="N">` never applies — the handler is gated on a `stamina=` attr it lacks (16 sections)
 
 **MEDIUM**
+- [ ] 90. Permanent Safety from Storms is deleted by storm-avoidance `<lose blessing>` nodes
+- [ ] 91. COMBAT blessing cannot reroll an attack, and Defence blessing leaks between fights
+- [ ] 92. Eight live `<adjust>` variants are ignored or applied unconditionally
+- [ ] 93. Item group provenance and rolled `itemAt=` losses are not represented
+- [ ] 94. `quantity=` is ignored on rewards, cargo ticks and market stock
+- [ ] 95. Item `replace=` rewards add a duplicate instead of transforming the possession
+- [ ] 96. Hidden item rewards inside `<group>` choices are never granted
+- [ ] 98. Resurrection arrangements ignore replacement, supplemental and hidden semantics
+- [ ] 100. The two live `<while>` loops execute only one rendered pass
 - [x] 81. Ships: honour `todock=` and track which at-large ship is being sailed *(split from task 73)*
 - [x] 80. Combat blessings: expose Defence through Faith (+3, one fight) and Divine Wrath (1d pre-damage) as fight-widget buttons *(split from task 76)*
 - [x] 75. Live `<tick>` forms for equipment, profession changes and patterned titles are incomplete/inert
@@ -56,6 +67,9 @@ the tasks were filed, not work order).
 
 **LOW**
 - [ ] 88. book5/386: the hidden `removetag="Tz"` cleanup fires on entry, so Targdaz's weapon-enchant roll/outcomes never land (weapon never changes)
+- [ ] 97. Molhern's `itemcache` ignores its `<include>` / `<exclude>` filters
+- [ ] 101. §5.114's `<sectionview>` oracle cannot display its referenced section
+- [ ] 102. §1.338's standalone `<price>` does not charge for or complete the poison cure
 - [x] 87. Fight widget "Your Combat" omits the per-fight attack bonus (`special="attack"`), unlike the Defence line
 - [x] 86. Add a full-section render integration test for book5/386 (currently covered only by synthetic ticks) *(added; surfaced the §386 enchant-cycle bug → task 88)*
 - [x] 85. book6/135 source: `tag="keep"` is a stray/misnamed attribute (likely meant `tags=`); harmless but should be cleaned
@@ -3183,23 +3197,6 @@ Then update `_test.html`'s §5.386 part (c) to expect the enchant/outcome to lan
 
 ---
 
-### Full-review checklist additions (2026-07-12)
-
-- [ ] 89. Ship actions still use remote vessels, and `<choice sail>` does not sail one
-- [ ] 90. Permanent Safety from Storms is deleted by storm-avoidance `<lose blessing>` nodes
-- [ ] 91. COMBAT blessing cannot reroll an attack, and Defence blessing leaks between fights
-- [ ] 92. Eight live `<adjust>` variants are ignored or applied unconditionally
-- [ ] 93. Item group provenance and rolled `itemAt=` losses are not represented
-- [ ] 94. `quantity=` is ignored on rewards, cargo ticks and market stock
-- [ ] 95. Item `replace=` rewards add a duplicate instead of transforming the possession
-- [ ] 96. Hidden item rewards inside `<group>` choices are never granted
-- [ ] 97. Molhern's `itemcache` ignores its `<include>` / `<exclude>` filters
-- [ ] 98. Resurrection arrangements ignore replacement, supplemental and hidden semantics
-- [ ] 99. `<fightround>` effects are detached manual widgets instead of combat-round rules
-- [ ] 100. The two live `<while>` loops execute only one rendered pass
-- [ ] 101. §5.114's `<sectionview>` oracle cannot display its referenced section
-- [ ] 102. §1.338's standalone `<price>` does not charge for or complete the poison cure
-
 ## 89. Ship actions still use remote vessels, and `<choice sail>` does not sail one  — HIGH (state/engine/market/render)
 
 *(Filed 2026-07-12 from a full repository review.)* Tasks 73 and 81 added dock
@@ -3498,3 +3495,19 @@ branch binding (51); and `removeCodeword` clearing the counter value (52, feeds
 task 43). Left for their own tasks: `<fightround>` per-round rolls (32), the
 hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 "choose one" cycle (43).
+
+Reviewed 2026-07-12: a full repository review filed tasks **89–102** — the
+current-vessel invariant left incomplete by tasks 73/81 (89), blessing
+semantics (permanent Safety from Storms, the COMBAT reroll in combat, per-fight
+Defence scoping — 90/91), the remaining live `<adjust>` variants (92), item
+provenance / `quantity=` / `replace=` / hidden-group rewards (93–96), the
+filtered `itemcache` (97), resurrection-arrangement semantics (98), and the
+`<fightround>`/`<while>`/`<sectionview>`/`<price>` passthroughs (99–102). A
+follow-up pass the same day merged those items into the contents checklist
+under their priorities (they had been left in a separate mid-file block) and
+re-verified a sample of premises at HEAD: `<choice sail="t">` still bypasses
+the dock gate/`sailThenGo` (goto-only); `applyLose` still routes named blessing
+losses through `removeBlessing()`, which strips the `permanentBlessings`
+marker; the group-choice collector still gathers only
+`lose, tick, gain, set, curse`; and §1.338's `<price>` remains an unhandled
+element. Suite green at HEAD: `RESULT ALL PASS pass=785 fail=0`.
