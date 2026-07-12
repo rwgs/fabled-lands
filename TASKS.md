@@ -82,7 +82,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 81. Ships: honour `todock=` and track which at-large ship is being sailed *(split from task 73)*
 - [x] 80. Combat blessings: expose Defence through Faith (+3, one fight) and Divine Wrath (1d pre-damage) as fight-widget buttons *(split from task 76)*
 - [x] 75. Live `<tick>` forms for equipment, profession changes and patterned titles are incomplete/inert
-- [ ] 79. Keeping a preview or importing a save reports success when persistence fails
+- [x] 79. Keeping a preview or importing a save reports success when persistence fails
 - [x] 5. Implement `<items group … limit="N">` "choose up to N" pickup
 - [x] 6. Harden save import and migration
 - [x] 7. Surface persistence failures to the player
@@ -2877,6 +2877,30 @@ success without both save data and metadata. Reuse `lastSaveError`'s player-faci
 message. Add tests with a throwing `localStorage.setItem` for keep/import, plus
 recovery/retry tests. No app stamp is needed for the TASKS-only filing; when the
 fix is implemented, stamp and run the full suite.
+
+**Done (2026-07-11).** Both entry points are now transactional with respect to
+persistence, reusing `save()`'s `lastSaveError` contract (task 7):
+- **`GameState.keep()`** (`state.js`) captures the previous slot, promotes the
+  game, then checks `save()`'s result. On failure it **reverts** (`slot` back to
+  the old value, `ephemeral` back to `true` so the preview can be retried or
+  exported) and **throws** `lastSaveError`. It only returns the new slot on a
+  confirmed write.
+- **`importSave()`** (`state.js`) now checks `gs.save()`; on failure it rolls back
+  any partial write (`deleteSlot`, guarded) so no slot is half-claimed and
+  **throws** `lastSaveError`, instead of returning `{slot, meta: undefined}` and
+  letting the UI toast `Imported "undefined"`. It reads `meta` only after a
+  successful save.
+- **`app.js`** — `keepDemo()`'s existing catch now shows the storage message with
+  a one-click **Export now** (the reverted game is still in memory, so export
+  works); `importSaveFile()` already routed the throw to its "Import failed"
+  modal.
+
+Added 9 headless assertions (`_test.html`): with a throwing `localStorage.setItem`,
+`keep()` throws, reverts to an ephemeral preview on its old slot, raises the "full"
+message and writes nothing, then recovers once storage works; `importSave()` throws,
+raises the message, claims no slot / writes nothing, then recovers with a real slot
+and named meta. Web-only — stamped `26.07.11.27bfd95`. Suite green:
+`RESULT ALL PASS pass=770 fail=0`.
 
 ---
 

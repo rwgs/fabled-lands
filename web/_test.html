@@ -2772,6 +2772,42 @@ async function run() {
     ok('keep() persists the game', !!readSlotData(keptSlot) && readSlotData(keptSlot).shards === 4242);
     deleteSlot(keptSlot); // cleanup
 
+    // --- task 79: keep()/importSave() must not report success when the write fails ---
+    {
+      // keep(): a failed write leaves the game an ephemeral preview on its old slot.
+      const gkf = GameState.create({ name: 'KeepFail', gender: 'm', profession: 'Warrior', book: 1, adv });
+      gkf.slot = 0; gkf.ephemeral = true; gkf.data.shards = 777;
+      const beforeMeta = JSON.stringify(loadSlotMeta());
+      localStorage.setItem = () => { const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e; };
+      let keepThrew = false, keepMsg = '';
+      try { gkf.keep(); } catch (e) { keepThrew = true; keepMsg = e.message; }
+      delete localStorage.setItem; // revert to Storage.prototype.setItem
+      ok('keep() throws when the write fails', keepThrew === true);
+      ok('keep() reverts to an ephemeral preview on failure', gkf.ephemeral === true && gkf.slot === 0);
+      ok('keep() failure raises the storage message', /full/i.test(keepMsg), keepMsg);
+      ok('keep() failure writes nothing to storage', JSON.stringify(loadSlotMeta()) === beforeMeta);
+      const recSlot = gkf.keep(); // recovery: now succeeds and persists
+      ok('keep() recovers once storage works', recSlot != null && gkf.ephemeral === false && !!readSlotData(recSlot));
+      deleteSlot(recSlot);
+
+      // importSave(): a failed write must not claim a slot or report success.
+      const impData = { abilities: { COMBAT: 5, MAGIC: 4, SANCTITY: 3, SCOUTING: 4, THIEVERY: 3, CHARISMA: 4 }, stamina: 10, staminaMax: 10, name: 'ImpFail', profession: 'Warrior', book: 1, section: 1, rank: 2, shards: 0 };
+      const beforeMeta2 = JSON.stringify(loadSlotMeta());
+      const targetSlot = nextFreeSlot();
+      localStorage.setItem = () => { const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e; };
+      let impThrew = false, impMsg = '';
+      try { importSave(impData); } catch (e) { impThrew = true; impMsg = e.message; }
+      delete localStorage.setItem;
+      ok('importSave() throws when the write fails', impThrew === true);
+      ok('importSave() failure raises the storage message', /full/i.test(impMsg), impMsg);
+      ok('importSave() failure claims no slot and writes nothing',
+        JSON.stringify(loadSlotMeta()) === beforeMeta2 && readSlotData(targetSlot) === null);
+      const { slot: impOkSlot, meta: impOkMeta } = importSave(impData); // recovery
+      ok('importSave() recovers with a real slot and named meta',
+        impOkSlot != null && impOkMeta && impOkMeta.name === 'ImpFail');
+      deleteSlot(impOkSlot);
+    }
+
     // --- task 12: focused unit tests for the extracted rules --------------
     // The every-section scan catches throws; these assert combat/economy/rest
     // OUTCOMES on the DOM-free modules. Scoped to the gaps not already covered

@@ -73,7 +73,13 @@ function keepDemo() {
     state.keep();
     toast('Adventure saved.');
   } catch (e) {
-    modal({ title: 'Could not save', body: escapeHtml(e && e.message ? e.message : String(e)), buttons: [{ label: 'OK', value: null, primary: true }] });
+    // keep() reverts to an ephemeral preview on failure, so the adventure is
+    // still in memory and can be exported; offer that alongside the message.
+    modal({
+      title: 'Could not save',
+      body: `<p>${escapeHtml(e && e.message ? e.message : String(e))}</p>`,
+      buttons: [{ label: 'Export now', value: 'export', primary: true }, { label: 'Continue', value: null }],
+    }).then((v) => { if (v === 'export') exportSave(null, null); });
   }
 }
 

@@ -837,13 +837,21 @@ export class GameState {
   }
 
   /** Promote an ephemeral (preview) game to a real, persisted save slot.
-   *  Returns the slot number, or throws if all slots are full. */
+   *  Returns the slot number, or throws if all slots are full or the write
+   *  fails. Transactional: on a failed write the game stays an ephemeral
+   *  preview on its old slot (so the player can retry or export) and the
+   *  storage error is raised. */
   keep() {
     const slot = nextFreeSlot();
     if (slot == null) throw new Error('All save slots are full. Delete or export a save first.');
+    const prevSlot = this.slot;
     this.slot = slot;
     this.ephemeral = false;
-    this.save();
+    if (!this.save()) {
+      this.slot = prevSlot;
+      this.ephemeral = true;
+      throw new Error(this.lastSaveError || 'Could not save this adventure.');
+    }
     return slot;
   }
 }
@@ -1151,8 +1159,15 @@ export function importSave(data) {
   const slot = nextFreeSlot();
   if (slot == null) throw new Error('All 20 save slots are full. Delete or export a save before importing.');
   const gs = new GameState(migrate(data), slot);
-  gs.save();
-  return { slot, meta: loadSlotMeta()[slot] };
+  if (!gs.save()) {
+    // The write failed (storage full/blocked). Don't claim the slot or report
+    // success: roll back any partial write and raise the storage error so the
+    // UI shows it instead of toasting `Imported "undefined"`.
+    try { deleteSlot(slot); } catch (_) {}
+    throw new Error(gs.lastSaveError || 'Could not save the imported adventure.');
+  }
+  const meta = loadSlotMeta()[slot];
+  return { slot, meta };
 }
 
 /** First unoccupied save slot (0..19), or null if all 20 are full. Callers must
