@@ -324,7 +324,13 @@ export class Story {
       }
       if (node.nodeType === Node.TEXT_NODE) {
         this.appendText(container, node.nodeValue);
-        if (/\S/.test(node.nodeValue || '')) { chainActive = false; chainDone = false; }
+        // Prose between branches does NOT break an if/elseif/else chain: the books
+        // join them with connector text ("</if>, <elseif>…, or <else>…" — the §1.586
+        // storm idiom), and JaFL binds each elseif/else to the nearest preceding if
+        // regardless of interleaved text. The old reset here re-armed the <else>
+        // after a MATCHED <if>, offering both the barque's 1-die roll and the
+        // galleon's 3-dice roll at once. Only another element breaks the chain
+        // (below); a fresh <if> always starts one. (task 89)
         return;
       }
       if (node.nodeType !== Node.ELEMENT_NODE) return;
@@ -1712,9 +1718,14 @@ export class Story {
     const emptyvar = node.getAttribute('emptyvar');
     const bookNum = node.getAttribute('book');
     const isFlee = boolAttr(node.getAttribute('flee')); // "flee at any time" option
+    // A sail="t" choice is a sail action exactly like a sail goto (task 89): it needs
+    // a ship at THIS dock and, on click, sets the chosen vessel at large (prompting
+    // when several are here) before navigating — so the voyage tracks a real ship.
+    const isSail = boolAttr(node.getAttribute('sail'));
 
     // gating
     const reasons = [];
+    if (isSail && this.state.shipsHere().length === 0) reasons.push('you need a ship here');
     const cost = shards != null ? resolveValue(this.state, shards) : 0;
     if (shards != null && wallet < cost) reasons.push(`needs ${cost} ${coinLabel}`);
     // item= gate: "?" (+ optional tags=) means "any possession carrying these tags"
@@ -1761,6 +1772,8 @@ export class Story {
         }
         payChoiceCost(this.state, { pay, cost, currency, foreignCoin, item: itemReq }); // transaction lives in market.js (task 34)
         if (section == null) return;
+        // Sail exit: same chooser/action as a sail goto (task 89).
+        if (isSail) { this.sailThenGo(btn.parentElement || this.root, btn, targetBook, section); return; }
         this.navigate(targetBook, section);
       });
     }
@@ -2804,7 +2817,7 @@ export class Story {
     if (done) reason = 'done';
     else if (price > 0 && this.state.data.shards < price) reason = 'Not enough Shards';
     else if ((kind === 'tool' || kind === 'item') && this.state.freeSlots() <= 0) reason = 'No room (12-item limit)';
-    else if (kind === 'cargo' && this.state.ships.length === 0) reason = 'You need a ship to carry cargo.';
+    else if (kind === 'cargo' && this.state.shipsHere().length === 0) reason = 'You need a ship here to carry cargo.';
     btn.disabled = !!reason;
     if (reason && reason !== 'done') btn.title = reason;
 
@@ -2877,11 +2890,12 @@ export class Story {
     const btn = document.createElement('button');
     btn.className = 'btn-mini';
     btn.textContent = label;
-    const shipWithCargo = this.state.ships.find((s) => (s.cargo || []).length > 0);
+    // Only a hold that is HERE (with you at sea / berthed at this dock) can trade (task 89).
+    const shipWithCargo = this.state.shipsHere().find((s) => (s.cargo || []).length > 0);
     btn.disabled = !shipWithCargo;
-    btn.title = shipWithCargo ? '' : 'You have no cargo to give.';
+    btn.title = shipWithCargo ? '' : 'You have no cargo here to give.';
     btn.addEventListener('click', async () => {
-      const ship = this.state.ships.find((s) => (s.cargo || []).length > 0);
+      const ship = this.state.shipsHere().find((s) => (s.cargo || []).length > 0);
       if (!ship) return;
       let type = cargo;
       if (cargo === '?') { // give any one commodity — let the player choose which

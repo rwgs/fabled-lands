@@ -53,11 +53,13 @@ export function goodsFrom(node, kind, name, bonus) {
   };
 }
 
-/** Does the player own an item matching this goods descriptor (for selling)? */
+/** Does the player own an item matching this goods descriptor (for selling)?
+ *  Ship/cargo sales need the vessel HERE (at this dock / sailing with you) — a ship
+ *  or hold berthed at another port cannot be sold remotely (task 89). */
 export function ownsGoods(state, goods) {
   const { kind, name, bonus, named, shipType, cargoName } = goods;
-  if (kind === 'ship') return state.ships.some((s) => canonShipType(s.type) === canonShipType(shipType));
-  if (kind === 'cargo') return state.ships.some((s) => (s.cargo || []).includes(cargoName || name));
+  if (kind === 'ship') return state.shipsHere().some((s) => canonShipType(s.type) === canonShipType(shipType));
+  if (kind === 'cargo') return state.shipsHere().some((s) => (s.cargo || []).includes(cargoName || name));
   // Armour is valued purely by its Defence bonus (its tier), so any owned armour of
   // that bonus can be sold at a named row's price — the starting "leather jerkin", a
   // "leather armour", and an armourer's "leather" are all the same bonus-1 leather.
@@ -79,10 +81,11 @@ export function buyTrade(state, goods, price, currency = null) {
     // Berth the new ship at the port it is bought in, so <if docked="…"> sees it (task 73).
     state.addShip({ type: canonShipType(shipType), name: 'Ship', crew: canonCrew(initialCrew), cargo: [], docked: state.data.location ?? null });
   } else if (kind === 'cargo') {
-    // Load onto a ship at the current port (else any owned ship) that has cargo space.
-    const hasSpace = (s) => (s.cargo || []).length < shipCap(s.type);
-    const ship = state.shipsHere().find(hasSpace) || state.ships.find(hasSpace);
-    if (!ship) return { ok: false, note: 'No cargo space.' };
+    // Load onto a ship HERE (berthed at this port / sailing with you) that has cargo
+    // space — never onto a vessel left at another dock (task 89).
+    const here = state.shipsHere();
+    const ship = here.find((s) => (s.cargo || []).length < shipCap(s.type));
+    if (!ship) return { ok: false, note: here.length ? 'No cargo space.' : 'You have no ship here.' };
     walletSpend(state, currency, price);
     (ship.cargo ||= []).push(cargoName);
     state.changed();
@@ -104,12 +107,12 @@ export function buyTrade(state, goods, price, currency = null) {
 export function sellTrade(state, goods, price, currency = null) {
   const { kind, name, bonus, named, shipType, cargoName } = goods;
   if (kind === 'ship') {
-    const i = state.ships.findIndex((s) => canonShipType(s.type) === canonShipType(shipType));
-    if (i < 0) return { ok: false };
-    state.ships.splice(i, 1); walletEarn(state, currency, price); state.changed();
+    // Sell a vessel that is HERE — one berthed at another port can't change hands (task 89).
+    const ship = state.shipsHere().find((s) => canonShipType(s.type) === canonShipType(shipType));
+    if (!ship) return { ok: false };
+    state.ships.splice(state.ships.indexOf(ship), 1); walletEarn(state, currency, price); state.changed();
   } else if (kind === 'cargo') {
-    const hasCargo = (s) => (s.cargo || []).includes(cargoName);
-    const ship = state.shipsHere().find(hasCargo) || state.ships.find(hasCargo);
+    const ship = state.shipsHere().find((s) => (s.cargo || []).includes(cargoName));
     if (!ship) return { ok: false };
     ship.cargo.splice(ship.cargo.indexOf(cargoName), 1); walletEarn(state, currency, price); state.changed();
   } else if (kind === 'armour' || (kind === 'weapon' && !named)) {
@@ -196,10 +199,11 @@ export function sellInlineItem(state, name, gain) {
   return { ok: true };
 }
 
-/** Give up one Cargo Unit of `cargoType` (from any ship carrying it), optionally
- *  for `gain` Shards. The barter-reward side stays in the view. Returns { ok }. */
+/** Give up one Cargo Unit of `cargoType` (from a ship HERE carrying it — the hold
+ *  must be present to trade from, task 89), optionally for `gain` Shards. The
+ *  barter-reward side stays in the view. Returns { ok }. */
 export function sellCargo(state, cargoType, gain) {
-  const ship = state.ships.find((s) => (s.cargo || []).includes(cargoType));
+  const ship = state.shipsHere().find((s) => (s.cargo || []).includes(cargoType));
   if (!ship) return { ok: false };
   ship.cargo.splice(ship.cargo.indexOf(cargoType), 1);
   if (gain) state.adjustMoney(gain);

@@ -1685,15 +1685,18 @@ async function run() {
 
     // book3/405: a successful CHARISMA roll reveals twelve dock choices; NONE auto-apply
     // (the old bug always ended at Yellowport). Picking one docks there and locks the rest.
+    // The real §405 state: Targdaz flew you home MID-VOYAGE, so the ship is at large
+    // and still marked as the vessel being sailed (task 89's current-vessel rule).
     const g405 = GameState.create({ name:'D405', gender:'m', profession:'Warrior', book:3, adv });
     g405.data.abilities.charisma = 12;
-    g405.addShip({ type: 'barque', docked: 'Testport', crew: 'average', cargo: [] });
+    const sh405 = g405.addShip({ type: 'barque', docked: null, crew: 'average', cargo: [] });
+    g405.sailShip(sh405.id);
     const c405 = document.createElement('div');
     new Story(c405, g405, { navigate(){}, onDeath(){}, notify(){} }).begin(await data.getSection(3, '405'), 3, '405');
     const rnd405 = Math.random; Math.random = () => 0.99; // 6+6=12, +CHA 12 = 24 > 13 → success
     c405.querySelector('.btn-roll').click(); await settle42();
     Math.random = rnd405;
-    ok('§3.405 a successful roll does NOT auto-dock the ship (was: Yellowport)', g405.ships[0].docked === 'Testport', `docked=${g405.ships[0].docked}`);
+    ok('§3.405 a successful roll does NOT auto-dock the ship (was: Yellowport)', g405.ships[0].docked === null, `docked=${g405.ships[0].docked}`);
     const aku405 = Array.from(c405.querySelectorAll('button')).find((b) => b.textContent.trim() === 'Aku');
     ok('§3.405 reveals the dock choices as buttons', !!aku405);
     aku405.click();
@@ -1838,6 +1841,115 @@ async function run() {
     new Story(c176b, g176b, { navigate(bk, sec){ nav176b = { bk, sec }; }, onDeath(){}, notify(){} }).begin(await data.getSection(1, '176'), 1, '176');
     Array.from(c176b.querySelectorAll('.goto')).find((g) => /\b85\b/.test(g.textContent)).click();
     ok('§1.176 sailing on keeps the ship at large and goes to 85', sh176b.docked === null && nav176b && String(nav176b.sec) === '85');
+
+    // --- task 89: ONE current-vessel rule (dock / voyage / none) -----------------------
+    { // block-scoped (task 82): local consts cannot collide with the rest of run()
+      // Two ships at different docks: conditions and trade see only the LOCAL vessel.
+      const g89 = GameState.create({ name:'V89', gender:'m', profession:'Warrior', book:1, adv });
+      g89.data.shards = 5000;
+      const loc89 = g89.addShip({ type:'barque', crew:'poor', cargo:[], docked:'Kunrir' });
+      const rem89 = g89.addShip({ type:'galleon', crew:'excellent', cargo:['spices'], docked:'Smogmaw' });
+      g89.arriveAtDock('Kunrir');
+      ok('§89 at a dock the current vessel is the ship berthed here', g89.currentShip() === loc89);
+      ok('§89 remote type cannot satisfy a local <if ship=…>', eng.evaluateCondition(parse('<if ship="galleon"/>'), g89) === false && eng.evaluateCondition(parse('<if ship="barque"/>'), g89) === true);
+      ok('§89 remote crew cannot satisfy a local <if crew=…>', eng.evaluateCondition(parse('<if crew="excellent"/>'), g89) === false && eng.evaluateCondition(parse('<if crew="poor"/>'), g89) === true);
+      ok('§89 remote cargo cannot satisfy a local <if cargo=…>', eng.evaluateCondition(parse('<if cargo="?"/>'), g89) === false);
+      ok('§89 an explicit <if docked=…> still sees the other port', eng.evaluateCondition(parse('<if docked="Smogmaw"/>'), g89) === true);
+      ok('§89 market sell of remote cargo refused', sellTrade(g89, { kind:'cargo', cargoName:'spices', name:'spices' }, 100).ok === false && rem89.cargo.length === 1 && g89.data.shards === 5000);
+      ok('§89 inline sellCargo of remote cargo refused', sellCargo(g89, 'spices', 100).ok === false);
+      ok('§89 a cargo buy loads the local ship', buyTrade(g89, { kind:'cargo', cargoName:'silk', name:'silk' }, 10).ok === true && loc89.cargo.includes('silk') && !rem89.cargo.includes('silk'));
+      ok('§89 local hold full ⇒ buy refused (remote space is no help)', buyTrade(g89, { kind:'cargo', cargoName:'furs', name:'furs' }, 10).ok === false && rem89.cargo.length === 1);
+      ok('§89 selling a ship berthed elsewhere is refused', sellTrade(g89, { kind:'ship', shipType:'galleon' }, 500).ok === false && g89.ships.length === 2);
+      // Inland with the fleet in port: no current vessel at all.
+      g89.arriveAtDock(null);
+      ok('§89 inland there is NO current vessel', g89.currentShip() === null && eng.evaluateCondition(parse('<if ship="barque"/>'), g89) === false && eng.evaluateCondition(parse('<if crew="poor"/>'), g89) === false);
+
+      // Named cargo must match (JaFL Ship.hasCargo): "?" = any, a name = that commodity.
+      const g89n = GameState.create({ name:'N89', gender:'m', profession:'Warrior', book:1, adv });
+      const shn89 = g89n.addShip({ type:'galleon', crew:'average', cargo:['furs'], docked:null });
+      g89n.sailShip(shn89.id);
+      ok('§89 <if cargo="furs"> matches the named commodity aboard', eng.evaluateCondition(parse('<if cargo="furs"/>'), g89n) === true);
+      ok('§89 <if cargo="spices"> does not match furs', eng.evaluateCondition(parse('<if cargo="spices"/>'), g89n) === false);
+      ok('§89 <if cargo="?"> means any Cargo Unit', eng.evaluateCondition(parse('<if cargo="?"/>'), g89n) === true);
+
+      // Mid-voyage the pointer picks the SAILED ship over another at-large prize.
+      const g89v = GameState.create({ name:'VY89', gender:'m', profession:'Warrior', book:4, adv });
+      const sail89 = g89v.addShip({ type:'barque', crew:'good', cargo:[], docked:null });
+      g89v.sailShip(sail89.id);
+      g89v.addShip({ type:'galleon', crew:'poor', cargo:[], docked:null }); // captured prize
+      ok('§89 during a voyage the current vessel is the sailed ship, not the prize', g89v.currentShip() === sail89 && eng.evaluateCondition(parse('<if ship="barque"/>'), g89v) === true && eng.evaluateCondition(parse('<if ship="galleon"/>'), g89v) === false);
+
+      // §4.658 wreck recovery: the sailed ship is lost at sea, the replacement bought at
+      // sea becomes the current vessel (stale pointer tolerated), and landfall berths it.
+      const g89w = GameState.create({ name:'WR89', gender:'m', profession:'Warrior', book:4, adv });
+      g89w.data.shards = 100;
+      const wreck89 = g89w.addShip({ type:'brigantine', crew:'good', cargo:[], docked:null });
+      g89w.sailShip(wreck89.id);
+      eng.applyEffect(parse('<lose ship="t"/>'), g89w, {});
+      ok('§89 the sailed ship can be wrecked at sea', g89w.ships.length === 0);
+      applyInlineBuy(g89w, { price: 0, ship: 'barque', shipName: 'Scavenger', initialCrew: 'poor' });
+      ok('§89 a replacement bought at sea is the current vessel (§4.658)', g89w.currentShip() === g89w.ships[0] && eng.evaluateCondition(parse('<if crew="poor"/>'), g89w) === true);
+      g89w.arriveAtDock('Aku');
+      ok('§89 landfall berths the replacement despite the stale voyage pointer', g89w.ships[0].docked === 'Aku' && g89w.data.sailingShipId === null);
+
+      // DOM §1.586: the storm follows the ship being SAILED. Sailing the galleon while
+      // a barque sits at another port must roll the galleon branch's 3 dice…
+      const g586a = GameState.create({ name:'ST586a', gender:'m', profession:'Warrior', book:1, adv });
+      g586a.addShip({ type:'barque', crew:'poor', cargo:[], docked:'Smogmaw' });
+      const gal586 = g586a.addShip({ type:'galleon', crew:'average', cargo:[], docked:null });
+      g586a.sailShip(gal586.id);
+      const c586a = document.createElement('div');
+      new Story(c586a, g586a, { navigate(){}, onDeath(){}, notify(){} }).begin(await data.getSection(1, '586'), 1, '586');
+      const live586a = Array.from(c586a.querySelectorAll('.btn-roll')).filter((b) => !b.closest('.cond-inactive') && !b.disabled);
+      ok('§1.586 sailing the galleon rolls 3 dice, not the remote barque\'s 1 die', live586a.length === 1 && /3 dice/.test(live586a[0].textContent), live586a.map((b) => b.textContent).join('|') || 'no live roll');
+      // …and the crew bonus comes from the SAILED ship's poor crew (none), not the
+      // excellent crew berthed elsewhere: a die of 2 + 0 → §182 (1-3), not §530.
+      const g586b = GameState.create({ name:'ST586b', gender:'m', profession:'Warrior', book:1, adv });
+      const bq586 = g586b.addShip({ type:'barque', crew:'poor', cargo:[], docked:null });
+      g586b.addShip({ type:'galleon', crew:'excellent', cargo:[], docked:'Smogmaw' });
+      g586b.sailShip(bq586.id);
+      const c586b = document.createElement('div');
+      new Story(c586b, g586b, { navigate(){}, onDeath(){}, notify(){} }).begin(await data.getSection(1, '586'), 1, '586');
+      const live586b = Array.from(c586b.querySelectorAll('.btn-roll')).filter((b) => !b.closest('.cond-inactive') && !b.disabled);
+      ok('§1.586 the sailed barque rolls 1 die', live586b.length === 1 && /1 die/.test(live586b[0].textContent), live586b.map((b) => b.textContent).join('|') || 'no live roll');
+      const rnd586 = Math.random; Math.random = () => 0.2; // d6 → 2; the poor crew adds nothing
+      live586b[0].click(); await settle42();
+      Math.random = rnd586;
+      ok('§1.586 the remote excellent crew adds NO bonus (2 → ship sinks §182)', /Continue → 182/.test(c586b.textContent) && !/Continue → 530/.test(c586b.textContent), (c586b.textContent.match(/Continue → \d+/g) || ['none']).join('|'));
+
+      // DOM §2.33 <choice sail>: gated without a local ship; sails + berths only that ship.
+      const g33a = GameState.create({ name:'C33a', gender:'m', profession:'Warrior', book:2, adv });
+      g33a.addShip({ type:'barque', crew:'average', cargo:[], docked:'Wishport' }); // berthed elsewhere
+      const c33a = document.createElement('div');
+      new Story(c33a, g33a, { navigate(){}, onDeath(){}, notify(){} }).begin(await data.getSection(2, '33'), 2, '33');
+      const sail33a = Array.from(c33a.querySelectorAll('.choice')).find((b) => /Go aboard your ship/.test(b.textContent));
+      ok('§2.33 the sail choice is gated without a ship at Metriciens', !!sail33a && sail33a.disabled && /ship here/.test(sail33a.title), sail33a && (sail33a.disabled + ':' + sail33a.title));
+      const g33b = GameState.create({ name:'C33b', gender:'m', profession:'Warrior', book:2, adv });
+      const met33 = g33b.addShip({ type:'barque', crew:'average', cargo:[], docked:'Metriciens' });
+      const wp33 = g33b.addShip({ type:'galleon', crew:'good', cargo:[], docked:'Wishport' });
+      let nav33 = null;
+      const c33b = document.createElement('div');
+      new Story(c33b, g33b, { navigate(bk, sec){ nav33 = { bk, sec }; }, onDeath(){}, notify(){} }).begin(await data.getSection(2, '33'), 2, '33');
+      const sail33b = Array.from(c33b.querySelectorAll('.choice')).find((b) => /Go aboard your ship/.test(b.textContent));
+      ok('§2.33 the sail choice is live with a ship berthed here', !!sail33b && !sail33b.disabled);
+      sail33b.click();
+      ok('§2.33 taking the sail choice sails THAT ship and navigates', met33.docked === null && g33b.data.sailingShipId === met33.id && wp33.docked === 'Wishport' && nav33 && String(nav33.sec) === '164');
+      g33b.arriveAtDock('Aku');
+      ok('§2.33 landfall berths only the sailed ship (the Wishport one stays)', met33.docked === 'Aku' && wp33.docked === 'Wishport' && g33b.data.sailingShipId === null);
+
+      // Two ships at THIS dock: a sail choice prompts which to take (same chooser as goto).
+      const secCS = '<section name="TCS" dock="Kunrir"><choices><choice section="10" sail="t">Put to sea</choice></choices></section>';
+      const gcs89 = GameState.create({ name:'CS89', gender:'m', profession:'Warrior', book:5, adv });
+      const csA = gcs89.addShip({ type:'barque', name:'Gull', crew:'average', cargo:[], docked:'Kunrir' });
+      const csB = gcs89.addShip({ type:'galleon', name:'Kraken', crew:'good', cargo:[], docked:'Kunrir' });
+      let navCS = null;
+      const cCS = document.createElement('div');
+      new Story(cCS, gcs89, { navigate(bk, sec){ navCS = { bk, sec }; }, onDeath(){}, notify(){} }).begin(parse(secCS), 5, 'TCS');
+      Array.from(cCS.querySelectorAll('.choice')).find((b) => /Put to sea/.test(b.textContent)).click();
+      ok('§89 a sail choice with two local ships prompts a choice (no navigation yet)', navCS === null && !!cCS.querySelector('.ship-choice'));
+      Array.from(cCS.querySelectorAll('.ship-choice button')).find((b) => /Kraken/.test(b.textContent)).click();
+      ok('§89 choosing sails exactly that ship and navigates', csB.docked === null && gcs89.data.sailingShipId === csB.id && csA.docked === 'Kunrir' && navCS && String(navCS.sec) === '10');
+    }
 
     // --- task 80: combat blessings (Divine Wrath / Defence through Faith) --------------
     // Headless: Divine Wrath deals 1d to the enemy, once, and is consumed.

@@ -6,8 +6,8 @@ stable IDs pointing at the detail sections below (sections are in the order
 the tasks were filed, not work order).
 
 **HIGH**
-- [ ] 89. Ship actions still use remote vessels, and `<choice sail>` does not sail one
 - [ ] 99. `<fightround>` effects are detached manual widgets instead of combat-round rules
+- [x] 89. Ship actions still use remote vessels, and `<choice sail>` does not sail one
 - [x] 77. Selector-aware `<set item|cache …>` expressions read the sheet instead of the selected item/cache (21 nodes)
 - [x] 76. Blessings are stored as inert labels — ability/Luck/travel benefits cannot be used *(core rerolls done; combat Defence/Wrath split → task 80)*
 - [x] 74. Standalone `force="f"` effects auto-apply — missions/initiations cannot be declined; choose-one losses over-apply
@@ -70,6 +70,7 @@ the tasks were filed, not work order).
 - [ ] 97. Molhern's `itemcache` ignores its `<include>` / `<exclude>` filters
 - [ ] 101. §5.114's `<sectionview>` oracle cannot display its referenced section
 - [ ] 102. §1.338's standalone `<price>` does not charge for or complete the poison cure
+- [ ] 103. §4.658: `initialCrew="oldcrew"` ignores the `oldcrew` variable — the salvaged barque's crew resets to average
 - [x] 87. Fight widget "Your Combat" omits the per-fight attack bonus (`special="attack"`), unlike the Defence line
 - [x] 86. Add a full-section render integration test for book5/386 (currently covered only by synthetic ticks) *(added; surfaced the §386 enchant-cycle bug → task 88)*
 - [x] 85. book6/135 source: `tag="keep"` is a stray/misnamed attribute (likely meant `tags=`); harmless but should be cleaned
@@ -3224,6 +3225,44 @@ remote cargo cannot be bought/sold, remote crew/cargo/type cannot satisfy a loca
 condition, the named cargo must match, the sailed ship drives §1.586, and both
 choice/goto sailing set and later berth only that ship. Stamp and run all sections.
 
+**Done (2026-07-12).** One rule, in `state.currentShip()`: at a dock → the first
+vessel *berthed there* or **null** (the `ships[0]` fallback is gone); away from a
+dock → the sailed ship (`sailingShipId`), else the first at-large ship (JaFL's
+at-sea default — covers §4.658's replacement bought after a wreck and pre-pointer
+saves), else null. `shipsHere()` keeps its JaFL shape (at a dock = berthed here;
+at sea = the at-large flotilla, which §4.114's chooser needs) — the leak was the
+*fallbacks*, not the flotilla. `arriveAtDock` now tolerates a stale voyage pointer
+(sailed ship wrecked mid-voyage) by berthing all at-large ships. Routed through
+the rule: `<if ship|crew|cargo>` (with `cargo` now matching the **named**
+commodity, JaFL `Ship.hasCargo`; also added `cargo` to `KNOWN_IF_ATTRS` — it
+warned as unrecognized), `<adjust ship|crew>`, `<tick crew|cargo>` (a recognized
+attr with no vessel is inert, no box-tick fallthrough), and in `market.js` the
+cargo buy/sell, ship sale, `ownsGoods` and inline `sellCargo` all scope to
+`shipsHere()` — no any-owned-ship fallback. `<choice sail="t">` (29 live) now
+gates on a ship here ("you need a ship here") and routes through the same
+`sailThenGo` chooser/action as `<goto sail>`, so a real vessel is set at large,
+`todock=` exemption applies, and landfall berths only it. Explicit `<if docked=>`
+checks other ports as before.
+
+Found while testing: **prose between branches broke the if/elseif/else chain** —
+`appendChildren` reset the chain on any non-whitespace text, so §1.586's
+"`</if>, <elseif>…, or <else>`" idiom re-armed the `<else>` after a *matched*
+`<if>`, offering the barque's 1-die storm roll AND the galleon's 3-dice roll at
+once (day-one bug, invisible to the shipless smoke scan). JaFL binds each
+elseif/else to the nearest preceding if regardless of interleaved text; the
+reset is removed (elements still break the chain). Also filed **task 103**
+(§4.658 `initialCrew="oldcrew"` resets the salvaged crew to average).
+
+Tests: +27 assertions (block-scoped) — two-dock isolation (conditions, market
+buy/sell, ship sale, inline sellCargo), local-hold-full refusal, inland
+no-vessel, named-cargo match, voyage-vs-prize pointer, §4.658 wreck→replacement→
+landfall, DOM §1.586 both directions (sailed galleon rolls 3 dice; sailed poor
+barque rolls 1 die and the remote excellent crew adds no bonus), DOM §2.33
+choice-sail gate/sail/berth-only-that-ship, and a two-ship choice-sail chooser.
+§3.405's setup modernised (the ship is mid-voyage there, not berthed at a third
+port). Web-only — stamped `26.07.12.d70c943`. Suite green:
+`RESULT ALL PASS pass=812 fail=0`.
+
 ---
 
 ## 90. Permanent Safety from Storms is deleted by storm-avoidance `<lose blessing>` nodes  — MEDIUM (engine/state)
@@ -3431,6 +3470,26 @@ project's supported payment/flag nodes (prefer an XML correction over a one-off
 view rule if `<price>` is invalid legacy markup). Add an end-to-end test for
 insufficient funds, one successful 25-Shard payment and poison removal exactly
 once. Rebuild, stamp, and run all sections.
+
+---
+
+## 103. §4.658: `initialCrew="oldcrew"` ignores the `oldcrew` variable — the salvaged barque's crew resets to average  — LOW (market)
+
+*(Filed 2026-07-12 while implementing task 89.)* §4.658 (the Disaster Bay wreck)
+stores the lost ship's crew with `<set var="oldcrew" value="crew"/>` — the `crew`
+expression keyword yields a 1-based `CREW_LEVELS` index — and then buys the
+replacement with `<buy ship="barque" initialCrew="oldcrew" …>`. But
+`market.canonCrew()` treats any string that is not a literal crew grade as a
+keyword and maps `"oldcrew"` (and blanks) straight to `'average'`, so a poor,
+good or excellent crew is silently reset to average, and the section's follow-up
+one-grade upgrade (`<if crew="poor">…` / `<elseif crew="average">…`) then starts
+from the wrong grade. This is the only `initialCrew="oldcrew"` in the corpus.
+Fix: in `canonCrew` (or at the `applyInlineBuy`/`goodsFrom` call sites), resolve
+the value as a variable/number first — `resolveValue` → `CREW_LEVELS[n-1]` —
+and only then fall back to the keyword mapping (`none`→poor, blank→average).
+Add a headless §4.658 end-to-end test: wreck a GOOD-crew brigantine at sea, buy
+the barque, assert it starts with a good crew and that the upgrade offer shown
+is good→excellent. Web-only; stamp and run all sections.
 
 ---
 

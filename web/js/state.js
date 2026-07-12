@@ -760,10 +760,14 @@ export class GameState {
   arriveAtDock(dock) {
     this.data.location = dock == null || dock === '' ? null : String(dock);
     if (this.data.location == null) return; // inland / still at sea — nothing docks
-    const sailing = this.data.sailingShipId;
+    const sid = this.data.sailingShipId;
+    // A voyage pointer that no longer names an owned at-large ship (the sailed vessel
+    // was wrecked/seized and replaced at sea — book4/658) berths ALL at-large ships,
+    // like the no-pointer case, instead of stranding the replacement at sea. (task 89)
+    const sailing = sid != null && this.data.ships.some((s) => s.id === sid && s.docked == null) ? sid : null;
     let changed = false;
     for (const s of this.data.ships) if (s.docked == null && (sailing == null || s.id === sailing)) { s.docked = this.data.location; changed = true; }
-    if (sailing != null) { this.data.sailingShipId = null; changed = true; } // reached port — voyage over
+    if (sid != null) { this.data.sailingShipId = null; changed = true; } // reached port — voyage over
     if (changed) this.changed();
   }
   // todock="X": on leaving a section, move at-large ships to dock X — except the one the
@@ -775,10 +779,23 @@ export class GameState {
     for (const s of this.data.ships) if (s.docked == null && s.id !== exemptId) { s.docked = String(dock); changed = true; }
     if (changed) this.changed();
   }
-  // Ships at the player's current location (docked === location; both null ⇒ at large).
+  // Ships at the player's current location. At a dock (location set): those berthed
+  // there. Away from a dock: the at-large ships — the player's flotilla at sea (JaFL
+  // isHere matches null==null; book4/114 needs both at-large ships offered). A ship
+  // berthed at another port is never "here".
   shipsHere() { const loc = this.data.location ?? null; return this.data.ships.filter((s) => sameDock(s.docked ?? null, loc)); }
-  // The ship the current section acts on: one at this location, else the sole/first owned.
-  currentShip() { return this.shipsHere()[0] || this.data.ships[0] || null; }
+  // The one vessel the current section's rules act on (task 89): at a dock, a ship
+  // berthed there; during a voyage, the ship being sailed (sailingShipId — so a second
+  // at-large prize doesn't hijack §1.586's storm dice); otherwise the first at-large
+  // ship (the JaFL at-sea default — covers §4.658's replacement bought after a wreck
+  // and pre-pointer saves). NO fallback to a vessel berthed elsewhere: inland with the
+  // fleet in port there is no current vessel.
+  currentShip() {
+    const here = this.shipsHere();
+    if (this.data.location != null) return here[0] || null;
+    const sid = this.data.sailingShipId;
+    return (sid != null && here.find((s) => s.id === sid)) || here[0] || null;
+  }
   // True if the player owns a ship berthed at dock X (JaFL <if docked="X">).
   shipDockedAt(dock) { return this.data.ships.some((s) => s.docked != null && sameDock(s.docked, dock)); }
   // Sail a ship out of port: it becomes "at large" (docked = null) and is marked as the

@@ -249,9 +249,12 @@ export function evaluateCondition(el, state) {
   add(get('tool'), () => matchEquipment(itemPool, state, 'tool', get('tool'), el));
   add(get('disease'), () => state.hasDisease(get('disease')));
   add(get('poison'), () => state.hasPoison(get('poison')));
+  // ship/crew/cargo conditions read the CURRENT vessel (JaFL getSingleShip): the ship
+  // berthed at this dock, or the one being sailed — never a vessel left at another
+  // port. §1.586's storm follows the ship under you, not the fleet. (task 89)
   add(get('ship'), () => matchShipType(state, get('ship')));
-  add(get('crew'), () => state.ships.some((s) => s.crew === get('crew')));
-  add(get('cargo'), () => state.ships.some((s) => (s.cargo || []).length > 0));
+  add(get('crew'), () => { const s = state.currentShip(); return !!s && s.crew === get('crew'); });
+  add(get('cargo'), () => matchCargo(state.currentShip(), get('cargo')));
   // docked="<place>" needs a ship berthed there; docked="t" means berthed anywhere.
   add(get('docked'), () => { const d = get('docked'); return boolAttr(d) ? state.ships.some((s) => s.docked != null) : state.shipDockedAt(d); });
 
@@ -276,7 +279,7 @@ export function evaluateCondition(el, state) {
 const KNOWN_IF_ATTRS = new Set([
   'codeword', 'ticks', 'item', 'shards', 'god', 'var', 'blessing', 'title', 'ship',
   'profession', 'safeAddGod', 'book', 'dead', 'ability', 'weapon',
-  'crew', 'cache', 'resurrection', 'armour', 'name', 'gender', 'docked', 'curse',
+  'crew', 'cargo', 'cache', 'resurrection', 'armour', 'name', 'gender', 'docked', 'curse',
   'poison', 'tool', 'disease',
   'not', 'greaterthan', 'equals', 'lessthan', 'tags', 'bonus', 'using', 'dice',
   'modifier', 'hidden', 'group',
@@ -340,15 +343,27 @@ function selectEquipment(el, state, eqAttr, cacheN, opts = {}) {
   return matchItems(items, pat);
 }
 
-/** True if the player owns a ship whose type matches `spec`. A ship condition
- *  may abbreviate the type (brig/gall) or list alternatives (brigantine|galleon);
- *  both the stored type and each listed value are canonicalised so a brigantine
- *  bought under its full name still matches an <elseif ship="brig"> (book4/11,161).
- *  An empty spec means "any ship". */
+/** True if the CURRENT vessel's type matches `spec` (task 89 — the ship at this dock
+ *  or under sail, never one berthed elsewhere: §1.586's storm dice follow the ship
+ *  being sailed). A ship condition may abbreviate the type (brig/gall) or list
+ *  alternatives (brigantine|galleon); both the stored type and each listed value are
+ *  canonicalised so a brigantine bought under its full name still matches an
+ *  <elseif ship="brig"> (book4/11,161). An empty spec means "any ship here". */
 function matchShipType(state, spec) {
+  const ship = state.currentShip();
+  if (!ship) return false;
   const want = String(spec || '').split(/[|,]/).map((t) => canonShipType(t)).filter(Boolean);
-  if (!want.length) return state.ships.length > 0;
-  return state.ships.some((s) => want.includes(canonShipType(s.type)));
+  return !want.length || want.includes(canonShipType(ship.type));
+}
+
+/** True if `ship` carries the named cargo — "?"/"*"/blank = any Cargo Unit at all
+ *  (book3/268/629), a name = that commodity (JaFL Ship.hasCargo). (task 89) */
+function matchCargo(ship, spec) {
+  if (!ship) return false;
+  const list = ship.cargo || [];
+  const c = String(spec ?? '').trim();
+  if (c === '' || c === '?' || c === '*') return list.length > 0;
+  return list.some((x) => normalize(x) === normalize(c));
 }
 
 function matchCodewords(state, spec) {
@@ -637,8 +652,10 @@ function applyTick(el, state, opts) {
   if (get('flag') != null) { state.setFlag(get('flag'), false); did = true; }
   if (get('price') != null) { state.setFlag(get('price'), true); did = true; }
   if (get('special') != null) { applySpecial(el, state); did = true; }
-  if (get('crew') != null && state.currentShip()) { state.currentShip().crew = get('crew'); state.changed(); did = true; }
-  if (get('cargo') != null && state.currentShip()) { (state.currentShip().cargo ||= []).push(get('cargo')); state.changed(); did = true; }
+  // crew=/cargo= act on the current vessel; a recognized attribute with no vessel
+  // present is inert but still sets `did` (no bare-tick box fallthrough). (task 89)
+  if (get('crew') != null) { const s = state.currentShip(); if (s) { s.crew = get('crew'); state.changed(); } did = true; }
+  if (get('cargo') != null) { const s = state.currentShip(); if (s) { (s.cargo ||= []).push(get('cargo')); state.changed(); } did = true; }
   // Enchant one or more possessions in place: addbonus= raises the bonus, addtag=
   // stamps a tag, removetag= strips one. The target is selected by item=/weapon=/
   // armour=/tool= (kind-filtered), narrowed by tags= / using= (the wielded weapon or
@@ -1122,14 +1139,16 @@ function adjustAmount(el, state) {
 /** Does a roll-modifier <adjust> apply in the current state? Modifiers gated on
  *  crew grade / ship type / god / profession / item / codeword count only when
  *  the player meets that condition; an unconditional modifier always counts.
- *  Crew/ship match is exact (a "good crew" bonus does not fire for excellent). */
+ *  Crew/ship match is exact (a "good crew" bonus does not fire for excellent) and
+ *  reads the CURRENT vessel — §1.586's storm bonus follows the crew sailing with
+ *  you, not one berthed at another port (task 89). */
 function adjustApplies(el, state) {
   const get = (a) => el.getAttribute(a);
   if (get('god') != null) return state.hasGod(get('god'));
   if (get('profession') != null) return normalize(state.data.profession) === normalize(get('profession'));
   if (get('item') != null) return get('item').split(/[|,]/).some((n) => state.hasItem(n.trim()));
   if (get('codeword') != null) return get('codeword').split(/[|,]/).some((c) => state.hasCodeword(c.trim()));
-  if (get('crew') != null) return state.ships.some((s) => s.crew === get('crew'));
+  if (get('crew') != null) { const s = state.currentShip(); return !!s && s.crew === get('crew'); }
   if (get('ship') != null) return matchShipType(state, get('ship'));
   return true;
 }
