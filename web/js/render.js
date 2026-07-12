@@ -2380,10 +2380,12 @@ export class Story {
 
     const you = document.createElement('div');
     you.className = 'fight-stats you';
-    // Show the per-fight attack bonus (special="attack") so the displayed Combat
-    // matches what resolution uses (playerCombat). (tasks 49, 87)
+    // Show the per-fight attack/Defence bonuses (special="attack"/"defence", Defence
+    // through Faith) so the displayed values match what resolution uses (playerCombat /
+    // playerDefenceFor, which both fold in the bonus in a group too). (tasks 49, 83, 87)
     const shownCombat = this.state.ability('combat') + this.state.fightAttackBonus();
-    you.innerHTML = `<span>Your Combat ${shownCombat}</span><span>Your Defence ${this.state.defence()}</span><span>Your Stamina ${this.state.data.stamina}/${this.state.effectiveStaminaMax()}</span>`;
+    const shownDef = this.state.defence() + this.state.fightDefenceBonus();
+    you.innerHTML = `<span>Your Combat ${shownCombat}</span><span>Your Defence ${shownDef}</span><span>Your Stamina ${this.state.data.stamina}/${this.state.effectiveStaminaMax()}</span>`;
     box.appendChild(you);
 
     const logEl = document.createElement('div');
@@ -2440,6 +2442,37 @@ export class Story {
         }
       });
       controls.appendChild(flee);
+    }
+
+    // Combat blessings in a group fight (task 83): usable once per COMBAT (the whole
+    // group), only while unresolved and only when held. Divine Wrath needs a target,
+    // so render one button per living foe; Defence through Faith is target-agnostic.
+    // The once-per-combat guard lives on the group proxy (this.sectionFight), not
+    // per-foe, and useWrathBlessing/useDefenceBlessing consume the blessing (task 80).
+    if (this.state.hasBlessing('wrath') && !this.sectionFight.wrathUsed) {
+      living.forEach((target) => {
+        const w = document.createElement('button');
+        w.className = 'btn-secondary blessing-combat';
+        w.textContent = living.length > 1 ? `Divine Wrath on ${target.name} (1d)` : 'Use Divine Wrath (1d damage)';
+        w.addEventListener('click', () => {
+          const dmg = useWrathBlessing(this.state, target);
+          this.sectionFight.wrathUsed = true; // once per combat, across every foe
+          this.notify(`Divine Wrath strikes the ${target.name} for ${dmg}!`);
+          if (fights.every((f) => isDefeated(f)) || this.state.isDead()) { this.rerender(); return; }
+          this.drawGroupFight(box, fights, dmgNode, group, fleeNode);
+        });
+        controls.appendChild(w);
+      });
+    }
+    if (this.state.hasBlessing('defence') && !this.sectionFight.defenceUsed) {
+      const d = document.createElement('button');
+      d.className = 'btn-secondary blessing-combat';
+      d.textContent = 'Use Defence through Faith (+3 Defence)';
+      d.addEventListener('click', () => {
+        useDefenceBlessing(this.state, this.sectionFight); // marks the group proxy
+        this.drawGroupFight(box, fights, dmgNode, group, fleeNode);
+      });
+      controls.appendChild(d);
     }
     box.appendChild(controls);
   }

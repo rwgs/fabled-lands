@@ -1873,6 +1873,36 @@ async function run() {
     new Story(cno80, gno80, { navigate(){}, onDeath(){}, notify(){} }).begin(parse(secF80), 6, 'TF80');
     ok('§80 no blessing → the fight widget shows no combat-blessing buttons', !Array.from(cno80.querySelectorAll('button')).some((b) => /Divine Wrath|Defence through Faith/.test(b.textContent)));
 
+    // --- task 83: combat blessings on a group fight (drawGroupFight) ---
+    const secG83 = '<section name="TG83"><p><fight group="g" name="Orc" combat="5" defence="8" stamina="12"/><fight group="g" name="Goblin" combat="4" defence="7" stamina="10"/></p></section>';
+    const gw83 = GameState.create({ name:'GW83', gender:'m', profession:'Warrior', book:6, adv });
+    gw83.data.stamina = 40; gw83.data.staminaMax = 40; gw83.addBlessing('wrath');
+    const cg83 = document.createElement('div');
+    new Story(cg83, gw83, { navigate(){}, onDeath(){}, notify(){} }).begin(parse(secG83), 6, 'TG83');
+    const wrathBtns83 = () => Array.from(cg83.querySelectorAll('button')).filter((b) => /Divine Wrath/.test(b.textContent));
+    ok('§83 group fight shows a Divine Wrath button per living foe when held', wrathBtns83().length === 2, `n=${wrathBtns83().length}`);
+    const orcStam83 = () => { const r = Array.from(cg83.querySelectorAll('.fight-stats:not(.you)')).find((x) => /Orc/.test(x.textContent)); return r ? r.querySelector('.en-stam').textContent : ''; };
+    const rndG83 = Math.random; Math.random = () => 0.5; // 1d = 4
+    wrathBtns83().find((b) => /Orc/.test(b.textContent)).click();
+    Math.random = rndG83;
+    ok('§83 Divine Wrath damages the chosen foe by 1d (Orc 12→8)', /Stamina 8\/12/.test(orcStam83()), orcStam83());
+    ok('§83 Divine Wrath is consumed and every Wrath button is gone (once per combat)', !gw83.hasBlessing('wrath') && wrathBtns83().length === 0);
+    // Defence through Faith in a group: target-agnostic, once per combat, +3 to Defence.
+    const gd83 = GameState.create({ name:'GD83', gender:'m', profession:'Warrior', book:6, adv });
+    gd83.data.stamina = 40; gd83.data.staminaMax = 40; gd83.addBlessing('defence');
+    const cd83 = document.createElement('div');
+    new Story(cd83, gd83, { navigate(){}, onDeath(){}, notify(){} }).begin(parse(secG83), 6, 'TG83');
+    const defBtn83 = () => Array.from(cd83.querySelectorAll('button')).find((b) => /Defence through Faith/.test(b.textContent));
+    ok('§83 group fight shows the Defence through Faith button when held', !!defBtn83());
+    defBtn83().click();
+    ok('§83 Defence through Faith adds +3 for the group and is consumed', gd83.fightDefenceBonus() === 3 && !gd83.hasBlessing('defence') && !defBtn83());
+    ok('§83 the group widget shows the boosted Defence', new RegExp('Your Defence ' + (gd83.defence() + 3) + '(?!\\d)').test(cd83.querySelector('.you').textContent), cd83.querySelector('.you').textContent);
+    // A blessing-less character (the every-section scan) sees no combat-blessing buttons.
+    const gn83 = GameState.create({ name:'GN83', gender:'m', profession:'Warrior', book:6, adv });
+    const cn83 = document.createElement('div');
+    new Story(cn83, gn83, { navigate(){}, onDeath(){}, notify(){} }).begin(parse(secG83), 6, 'TG83');
+    ok('§83 no blessing → group fight shows no combat-blessing buttons', !Array.from(cn83.querySelectorAll('button')).some((b) => /Divine Wrath|Defence through Faith/.test(b.textContent)));
+
     // --- task 87: the fight widget's "Your Combat" includes the per-fight attack bonus ---
     // A <tick special="attack"> before the <fight> sets the transient bonus on entry
     // (task 49); the displayed Combat must match what resolution uses (base + bonus).

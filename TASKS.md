@@ -116,7 +116,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 86. Add a full-section render integration test for book5/386 (currently covered only by synthetic ticks) *(added; surfaced the §386 enchant-cycle bug → task 88)*
 - [x] 85. book6/135 source: `tag="keep"` is a stray/misnamed attribute (likely meant `tags=`); harmless but should be cleaned
 - [x] 84. De-flake the "fight attack produces a log line" test (timing-dependent on the 900 ms dice animation)
-- [ ] 83. Combat blessings (Wrath/Defence) buttons appear only on the single-fight widget, not group fights *(split from task 80)*
+- [x] 83. Combat blessings (Wrath/Defence) buttons appear only on the single-fight widget, not group fights *(split from task 80)*
 - [ ] 82. Test harness: a duplicate top-level `const` in `run()` silently aborts the whole suite (reads as a hang, not a failure)
 - [x] 78. Validate numeric `<section name>` against its filename; fix five mismatched source files
 - [x] 9. Centralise tag dispatch into a registry
@@ -3071,6 +3071,21 @@ pick. Keep the once-per-combat guard across the whole group (a single `wrathUsed
 `defenceUsed` marker on the group, not per-foe). Add a DOM test: a group fight with a
 Wrath holder shows the option, using it damages the chosen foe once and consumes the
 blessing. Stamp and re-run all sections.
+
+**Done (2026-07-12).** `drawGroupFight` (`render.js`) now renders the combat-blessing
+controls, mirroring `drawFight`: one "Divine Wrath on <foe> (1d)" button per still-living
+foe (target chosen like the per-foe Attack buttons), and one target-agnostic "Use
+Defence through Faith (+3 Defence)". The once-per-combat guard lives on the group proxy
+(`this.sectionFight.wrathUsed`/`defenceUsed`), not per-foe — `useWrathBlessing(state,
+target)` damages the chosen foe while the click sets `sectionFight.wrathUsed`, and
+`useDefenceBlessing(state, this.sectionFight)` marks the proxy; both consume the blessing
+(so a non-permanent one also hides the buttons). Also folded in the task-87 counterpart
+for the group `.you` line: it now shows `defence() + fightDefenceBonus()` (both single
+and group resolution fold the bonus in via `playerDefenceFor`). Added 7 headless DOM
+assertions (Wrath button per living foe; damages the chosen foe by 1d; consumed +
+once-per-combat; Defence +3 + consumed + boosted display; blessing-less character sees
+no buttons). Web-only — stamped `26.07.12.896c1f5`. Suite green on the first run:
+`RESULT ALL PASS pass=785 fail=0`.
 
 ---
 
