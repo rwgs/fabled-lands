@@ -3236,3 +3236,257 @@ survives long enough for its own outcome ticks — likely a shared mechanism for
 "end-of-section cleanup" hidden ticks. Related single-pass ordering limitations:
 task 20 (lock/unlock bracket), task 61 (rerunnable `<set>` clobbers a roll var).
 Then update `_test.html`'s §5.386 part (c) to expect the enchant/outcome to land.
+
+---
+
+### Full-review checklist additions (2026-07-12)
+
+- [ ] 89. Ship actions still use remote vessels, and `<choice sail>` does not sail one
+- [ ] 90. Permanent Safety from Storms is deleted by storm-avoidance `<lose blessing>` nodes
+- [ ] 91. COMBAT blessing cannot reroll an attack, and Defence blessing leaks between fights
+- [ ] 92. Eight live `<adjust>` variants are ignored or applied unconditionally
+- [ ] 93. Item group provenance and rolled `itemAt=` losses are not represented
+- [ ] 94. `quantity=` is ignored on rewards, cargo ticks and market stock
+- [ ] 95. Item `replace=` rewards add a duplicate instead of transforming the possession
+- [ ] 96. Hidden item rewards inside `<group>` choices are never granted
+- [ ] 97. Molhern's `itemcache` ignores its `<include>` / `<exclude>` filters
+- [ ] 98. Resurrection arrangements ignore replacement, supplemental and hidden semantics
+- [ ] 99. `<fightround>` effects are detached manual widgets instead of combat-round rules
+- [ ] 100. The two live `<while>` loops execute only one rendered pass
+- [ ] 101. §5.114's `<sectionview>` oracle cannot display its referenced section
+- [ ] 102. §1.338's standalone `<price>` does not charge for or complete the poison cure
+
+## 89. Ship actions still use remote vessels, and `<choice sail>` does not sail one  — HIGH (state/engine/market/render)
+
+*(Filed 2026-07-12 from a full repository review.)* Tasks 73 and 81 added dock
+state and made `<goto sail="t">` choose a local vessel, but the same invariant is
+not applied consistently. All 29 live `<choice sail="t">` links go through
+`renderChoice`, which neither requires a ship at the current dock nor calls
+`sailThenGo`; a player can therefore leave port without a ship and a real ship is
+not marked as the voyage's `sailingShipId`. `GameState.currentShip()` also falls
+back to `ships[0]`, while `shipsHere()` treats `location === null` as matching every
+at-large ship. As a result, inland/sea sections can act on an unrelated vessel.
+The same leak appears in `market.js` (cargo buy/sell falls back from a local ship
+to any ship; ship sales and inline cargo sales search all ships) and in
+`evaluateCondition` (`ship`, `crew` and `cargo` search all owned ships, and the
+`cargo` test ignores the requested cargo name). This changes rules, not just UI:
+e.g. §1.586's storm dice can follow the type of a ship left elsewhere instead of
+the one being sailed.
+
+Define one current-vessel rule: at a dock use a vessel berthed there; during a
+voyage use `sailingShipId`; inland with no explicit dock/current voyage has no
+current vessel. Route ship/crew/cargo conditions, adjustments, inline actions and
+market transactions through it, while preserving explicit `docked=` checks for
+other ports. Make `<choice sail>` use the same gate/chooser/action as `<goto
+sail>`. Add headless coverage with two ships at different docks and at sea:
+remote cargo cannot be bought/sold, remote crew/cargo/type cannot satisfy a local
+condition, the named cargo must match, the sailed ship drives §1.586, and both
+choice/goto sailing set and later berth only that ship. Stamp and run all sections.
+
+---
+
+## 90. Permanent Safety from Storms is deleted by storm-avoidance `<lose blessing>` nodes  — MEDIUM (engine/state)
+
+*(Filed 2026-07-12 from a full repository review.)* Task 76 preserves a permanent
+blessing only when callers use `state.useBlessing()`. `applyLose`, however, sends
+every named `<lose blessing="…">` to `removeBlessing()`, which also deletes its
+`permanentBlessings` marker. The live storm-avoidance paths (including
+§5.232/502/716 and §6.160) use `<lose blessing="storm">`, so the permanent Safety
+from Storms granted by §6.159 is consumed the first time it protects the player,
+contrary to “you can use it any number of times” / “never used up”. Treat a named
+blessing spent for its benefit as a use (permanent survives), while the explicitly
+punitive `<lose blessing="*">` must still clear everything. Add a direct state
+test plus an end-to-end permanent-storm path; retain coverage that an ordinary
+Storms blessing is consumed. Web-only; stamp and run all sections.
+
+---
+
+## 91. COMBAT blessing cannot reroll an attack, and Defence blessing leaks between fights  — MEDIUM (combat/render/state)
+
+*(Filed 2026-07-12 from a full repository review.)* Ability/training/random roll
+widgets expose task 76's blessing reroll control, but combat attacks are resolved
+inside `fightRound()` and never offer the COMBAT blessing described in §4.324
+(“try again when you fail a COMBAT roll”). Separately,
+`useDefenceBlessing(state, fight)` marks one fight as used but writes +3 to the
+section-global `_fightBonus.defence`; if a section contains sequential fights,
+later enemies inherit a blessing promised for “THIS fight only”. Make failed
+player strikes rerollable exactly once through the COMBAT blessing without
+duplicating the enemy turn or damage, and store the Defence blessing bonus on the
+relevant fight/encounter (a simultaneous group remains one encounter), not the
+whole section. Test failed/successful attack behaviour, permanent versus ordinary
+COMBAT blessings, sequential fights, and group combat. Stamp and run all sections.
+
+---
+
+## 92. Eight live `<adjust>` variants are ignored or applied unconditionally  — MEDIUM (engine/books)
+
+*(Filed 2026-07-12 from a full repository review.)* `adjustAmount()` understands
+only `value`/`amount`, core abilities, rank/stamina and named counters;
+`adjustApplies()` understands only god/profession/item/codeword/crew/ship. The
+remaining live forms therefore produce wrong difficulties:
+
+- §5.343/432 `titleVal="bokh" default="-1"` adds 0 instead of the title value or
+  default;
+- §4.411 and §5.527 rank `greaterthan=` bonuses apply unconditionally (and
+  §4.411's `profession="1"` contradicts its Warrior prose and needs an XML fix);
+- §4.63's `title="Nightstalker"` bonus applies to everyone;
+- §5.79 `modifier="noweapon"` includes the weapon bonus, while §2.579
+  `modifier="natural"` uses the effective rather than natural Stamina value;
+- §6.736 `item="?" tags="light"` looks for a literal item named `?`, so its +2
+  never applies.
+
+Implement the attributes according to `JaFL-XML-Tags.html`, normalize the §4.411
+source typo, and add focused calculation tests plus integration renders for these
+eight nodes. Rebuild generated data, stamp, and run all sections.
+
+---
+
+## 93. Item group provenance and rolled `itemAt=` losses are not represented  — MEDIUM (state/engine/render/books)
+
+*(Filed 2026-07-12 from a full repository review.)* Awarded possessions discard
+their XML `group=`, and item conditions/losses ignore that selector. Thus
+§5.118's `<if item="?" group="5.238" greaterthan="1">` counts unrelated carried
+items, §3.132/413 can consume the wrong same-named treasure map, and §5.578's
+required donation can remove an unrelated possession instead of one of that
+mission's three rewards. The two rolled `<lose itemAt="x">` nodes (§6.63/168) are
+also unsupported; because `itemAt` is absent from the pending-variable check they
+can memoize a no-op before the roll resolves. Finally §5.14 has the lone source
+typo `<lose items="*" shards="*">`, so its total confiscation leaves every item.
+
+Persist award provenance, honor `group=` in possession count/selection/removal,
+defer `itemAt` until its variable exists and remove the one-based Adventure Sheet
+entry, and normalize §5.14 to the supported singular attribute. Add tests for
+same-named items from different groups, group-restricted `?` choice/removal,
+rolled indices including out-of-range values, and §5.14. Rebuild, stamp, and run
+all sections.
+
+---
+
+## 94. `quantity=` is ignored on rewards, cargo ticks and market stock  — MEDIUM (engine/market/render)
+
+*(Filed 2026-07-12 from a full repository review.)* Quantity caps exist for
+inline `<buy>`, but `renderItemAward` grants only one possession and memoizes it
+even on the 14 live item/weapon/armour awards with `quantity=`. This includes
+variable rewards such as §1.561's `x` fish and §4.425's `x` lots of 1000 Shards,
+which currently award only one. §3.569's `<tick cargo="textiles" quantity="2">`
+loads one unit, and §6.655's one available barque can be purchased repeatedly
+because `<trade quantity="1">` does not cap stock.
+
+Resolve numeric/variable quantities consistently: award or load the requested
+number subject to carry/cargo capacity, keep uncollected units available where
+the player must choose capacity, and enforce trade stock per visit. Test fixed
+and rolled item quantities, quantity currency items, partial capacity, two cargo
+units, and a one-ship market row. Stamp and run all sections.
+
+---
+
+## 95. Item `replace=` rewards add a duplicate instead of transforming the possession  — MEDIUM (state/render)
+
+*(Filed 2026-07-12 from a full repository review.)* All five live replacement
+awards are rendered as ordinary additions. §5.118 therefore leaves the bag of
+gold/plain silver flute/plain black axe in inventory while adding their converted
+forms; §6.207 leaves the old royal sceptre; and §6.448a leaves the cursed sword.
+The conversion can also be refused at the 12-item cap even though it should not
+consume an extra slot. Implement JaFL `replace=` atomically: a named value replaces
+that matching possession, while empty `replace=""` replaces the same-named item,
+preserving the new node's kind/bonus/ability/tags and not changing slot count.
+Disable/refuse only when the required source item is absent, and make the action
+visit-safe. Add coverage for all three shapes above and a full-inventory case.
+Stamp and run all sections.
+
+---
+
+## 96. Hidden item rewards inside `<group>` choices are never granted  — MEDIUM (render)
+
+*(Filed 2026-07-12 from a full repository review.)* The group-choice effect
+collector applies `lose`, `tick`, `gain`, `set`, `curse`, `rest` and `goto`, but
+not the item family. Consequently the hidden quest rewards in §1.228 and §1.509
+(`gold chain mail of Tyrnai`) and §4.189 (`mirror of the Sun Goddess`) record the
+group choice/codeword but never enter inventory. Extend group resolution so hidden
+`item`/`weapon`/`armour`/`tool` rewards use the normal award transaction exactly
+once, including capacity handling, without showing a second independent Take
+button. Add end-to-end tests for these three choices. Stamp and run all sections.
+
+---
+
+## 97. Molhern's `itemcache` ignores its `<include>` / `<exclude>` filters  — LOW (render/state)
+
+*(Filed 2026-07-12 from a full repository review.)* §2.617 is the only filtered
+item cache: it should store one weapon or suit of armour for the smith, excluding
+already `Molherned` equipment and items at bonus 6+, before §2.665 returns it.
+`renderItemCache` currently offers every possession and ignores both include and
+exclude children, so ordinary items, already-worked equipment and maxed equipment
+can all enter the flow. Apply the declared type/tag/bonus filters to the eligible
+list while preserving `itemlimit="1"` and the existing return path. Add a focused
+DOM/state test with eligible and rejected possessions. Stamp and run all sections.
+
+---
+
+## 98. Resurrection arrangements ignore replacement, supplemental and hidden semantics  — MEDIUM (state/render)
+
+*(Filed 2026-07-12 from a full repository review.)* Every Arrange click blindly
+pushes another entry. Ordinary arrangements should replace the prior ordinary
+deal, while §6.355's `supplemental="t"` arrangement should append; the attribute is
+currently ignored. The same offer can be clicked repeatedly, buying duplicate
+lives, and §1.616's `hidden="t"` resurrection is rendered as a manual offer rather
+than registered automatically by its death flow. Implement standard-versus-
+supplemental replacement, once-per-visit purchase/registration and hidden auto-
+registration, with costs/effects applied exactly once. Verify revival consumes
+the intended arrangement and leaves valid supplemental deals in order. Stamp and
+run all sections.
+
+---
+
+## 99. `<fightround>` effects are detached manual widgets instead of combat-round rules  — HIGH (combat/engine/render)
+
+*(Filed 2026-07-12 from a full repository review; split from task 32's explicit
+passthrough list.)* The three live `<fightround>` sections (§5.24/383/689) attach
+rolls and conditional effects to each exchange of a fight. The generic recursive
+renderer instead exposes their children as independent widgets, so the player can
+skip, repeat or resolve them at the wrong point; combat outcomes and potentially
+lethal Stamina changes diverge from the book. Parse these nodes into the DOM-free
+combat model and execute their body at the specified phase of every completed
+round, exactly once per round, with variables/branches resolved in that round's
+context. Add deterministic headless tests for all three sections plus a render
+test proving there is no detached manual roll. Stamp and run all sections.
+
+---
+
+## 100. The two live `<while>` loops execute only one rendered pass  — MEDIUM (engine/render)
+
+*(Filed 2026-07-12 from a full repository review; split from task 32's explicit
+passthrough list.)* §5.218 and §6.700 rely on `<while>` to repeat their rules until
+the encoded condition changes. The default recursive renderer walks the body once,
+so repeated damage/roll/escape logic can stop early. Implement loop evaluation in
+the DOM-free engine, advancing effects in order and re-evaluating the condition
+after each iteration; interactive rolls must resume the loop rather than creating
+all iterations at render time. Add deterministic termination tests for both live
+sections and an iteration guard that reports malformed non-progressing content
+instead of freezing the page. Stamp and run all sections.
+
+---
+
+## 101. §5.114's `<sectionview>` oracle cannot display its referenced section  — LOW (render)
+
+*(Filed 2026-07-12 from a full repository review; split from task 32's explicit
+passthrough list.)* The lone `<sectionview>` is currently reduced to its child
+text, so the oracle feature in §5.114 cannot show the requested section while
+keeping the player in place. Implement a read-only section preview that resolves
+the requested book/section, renders its prose in an isolated view, and cannot
+apply effects, mutate navigation/history, expose interactive controls or change
+the current visit. Add a DOM test confirming both preview content and zero state
+mutation. Stamp and run all sections.
+
+---
+
+## 102. §1.338's standalone `<price>` does not charge for or complete the poison cure  — LOW (books/render)
+
+*(Filed 2026-07-12 from a full repository review.)* This is the only `<price>`
+element in the six books and it has no renderer/effect handler; generic recursion
+shows its text but never arms a payment, deducts Shards or activates the linked
+flagged cure. The healer therefore cannot complete the advertised transaction.
+Check the source against the JaFL tag reference and normalize §1.338 to the
+project's supported payment/flag nodes (prefer an XML correction over a one-off
+view rule if `<price>` is invalid legacy markup). Add an end-to-end test for
+insufficient funds, one successful 25-Shard payment and poison removal exactly
+once. Rebuild, stamp, and run all sections.
