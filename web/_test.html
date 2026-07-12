@@ -1938,6 +1938,43 @@ async function run() {
     Array.from(cdp75.querySelectorAll('.ability-pick')).find((b) => /Wayfarer/.test(b.textContent)).click();
     ok('§6.118 picking a profession changes it (→ Wayfarer)', gdp75.data.profession === 'Wayfarer');
 
+    // --- task 86: full-section render integration for book5/386 (Targdaz weaponsmith) ---
+    // The task-75 ticks above cover the engine mechanics in isolation; this drives the
+    // real §5.386 end-to-end. Two behaviours are pinned: (correct) the hidden
+    // <tick shards="150"> refund fires only at bonus>=6; and (known limitation, task 88)
+    // the weapon-enchant cycle never lands, because the section's own hidden
+    // removetag="Tz" cleanup fires on entry and strips the tag before the roll and the
+    // <outcomes> table can target the weapon. When task 88 is fixed, update part (c).
+    const sec386 = await data.getSection(5, '386');
+    // (a) bonus>=6 → 150-Shard refund; the +6 weapon is not enchanted past its cap.
+    const g386r = GameState.create({ name:'T386r', gender:'m', profession:'Warrior', book:5, adv });
+    g386r.data.items = []; const w386r = g386r.addItem(makeItem('weapon', 'targ blade', 6));
+    const before386r = g386r.data.shards;
+    const c386r = document.createElement('div');
+    new Story(c386r, g386r, { navigate(){}, onDeath(){}, notify(){} }).begin(sec386, 5, '386');
+    ok('§5.386 a bonus>=6 weapon grants the 150-Shard refund', g386r.data.shards === before386r + 150, `shards ${before386r}->${g386r.data.shards}`);
+    ok('§5.386 the +6 weapon is not enchanted past the cap of 6', w386r.bonus === 6, `bonus=${w386r.bonus}`);
+    // (b) structure with a bonus<6 weapon: visible "one weapon" tick text, two roll
+    // buttons, the goto to 245, and no refund.
+    const g386 = GameState.create({ name:'T386', gender:'m', profession:'Warrior', book:5, adv });
+    g386.data.items = []; const w386 = g386.addItem(makeItem('weapon', 'targ blade', 2));
+    const before386 = g386.data.shards;
+    const c386 = document.createElement('div');
+    new Story(c386, g386, { navigate(){}, onDeath(){}, notify(){} }).begin(sec386, 5, '386');
+    ok('§5.386 renders the visible tick text + two roll buttons + goto 245',
+      /one weapon/.test(c386.textContent)
+      && c386.querySelectorAll('button.btn-roll').length === 2
+      && !!Array.from(c386.querySelectorAll('button.goto')).find((b) => /245/.test(b.textContent)));
+    ok('§5.386 a bonus<6 weapon gives no Shard refund', g386.data.shards === before386, `shards=${g386.data.shards}`);
+    // (c) drive the roll (stubbed 2d=12) — no crash; CURRENT behaviour is that the
+    // weapon is unchanged (tag cleaned up on entry — task 88).
+    const rnd386 = Math.random; Math.random = () => 0.99;
+    Array.from(c386.querySelectorAll('button.btn-roll'))[0].click();
+    Math.random = rnd386;
+    ok('§5.386 (known limitation, task 88) driving the roll leaves the weapon unchanged',
+      w386.bonus === 2 && !(w386.tags || []).includes('Tz') && g386.hasItem('targ blade'),
+      `bonus=${w386.bonus} tags=${(w386.tags||[]).join(',')}`);
+
     // --- task 47: <choice item="?" tags="light"> gates on a light source ---
     const g291 = GameState.create({ name:'C291', gender:'m', profession:'Warrior', book:2, adv });
     const c291 = document.createElement('div');

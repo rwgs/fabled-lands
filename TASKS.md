@@ -111,8 +111,9 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 70. Visit box renders unticked on the visit it ticks; bare `<tick/>` prints "If not, , and read on" (§496 + widespread)
 
 **LOW**
+- [ ] 88. book5/386: the hidden `removetag="Tz"` cleanup fires on entry, so Targdaz's weapon-enchant roll/outcomes never land (weapon never changes)
 - [x] 87. Fight widget "Your Combat" omits the per-fight attack bonus (`special="attack"`), unlike the Defence line
-- [ ] 86. Add a full-section render integration test for book5/386 (currently covered only by synthetic ticks)
+- [x] 86. Add a full-section render integration test for book5/386 (currently covered only by synthetic ticks) *(added; surfaced the §386 enchant-cycle bug → task 88)*
 - [ ] 85. book6/135 source: `tag="keep"` is a stray/misnamed attribute (likely meant `tags=`); harmless but should be cleaned
 - [ ] 84. De-flake the "fight attack produces a log line" test (timing-dependent on the 900 ms dice animation)
 - [ ] 83. Combat blessings (Wrath/Defence) buttons appear only on the single-fight widget, not group fights *(split from task 80)*
@@ -3094,7 +3095,7 @@ Confirm §6.135 still renders and removes the tag after the change.
 
 ---
 
-## 86. Add a full-section render integration test for book5/386  — LOW (test coverage)
+## 86. Add a full-section render integration test for book5/386  — LOW (test coverage) — **done**
 
 *(Filed 2026-07-11 from task 75.)* Task 75's equipment-tick tests exercise the
 tag→+bonus→−bonus→removetag cycle with **synthetic** `<tick weapon="?" …>` nodes, which
@@ -3106,6 +3107,17 @@ RNG) through a representative outcome, asserting the weapon's bonus/tags and the
 refund at bonus ≥ 6. This guards the wiring (visible vs hidden ticks, the `tags="Tz"`
 selection after the first tag) that the synthetic tests don't. Test-only; re-run all
 sections.
+
+**Done (2026-07-11).** Added a DOM integration test for §5.386 (`_test.html`, five
+assertions) that begins the real section and drives the roll. It pins two things:
+(correct) the hidden `<tick shards="150">` refund fires **only** at bonus ≥ 6 (a +6
+weapon → +150 Shards, and is not enchanted past its cap; a +2 weapon → no refund),
+and the section renders its visible "one weapon" tick, two roll buttons and the goto
+to 245. Driving the roll (stubbed 2d = 12) does **not** throw. It also documented a
+real defect the end-to-end render surfaced that the synthetic ticks could not: the
+weapon-enchant cycle never lands — see **task 88**. The test asserts the current
+(unchanged-weapon) behaviour with a comment to update part (c) once 88 is fixed.
+Test-only (no new stamp). Suite green: `RESULT ALL PASS pass=778 fail=0`.
 
 ---
 
@@ -3130,3 +3142,29 @@ Combat matches `playerCombat` in `combat.js`. Added 3 headless assertions
 sets the bonus on entry and the widget's `.you` line shows base + 3; the group-fight
 widget likewise shows base + 2. Web-only — stamped `26.07.11.4781047`. Suite green:
 `RESULT ALL PASS pass=773 fail=0`.
+
+---
+
+## 88. book5/386: the hidden `removetag="Tz"` cleanup fires on entry, defeating the enchant roll  — LOW (render/engine)
+
+*(Filed 2026-07-11 from task 86's end-to-end render.)* §5.386 (Targdaz the
+weaponsmith) is meant to: tag one weapon (`<tick weapon="?" addtag="Tz">`), roll 2d
+against its current bonus, and on the roll's success/`<outcomes>` branches raise,
+lower or destroy **that tagged weapon** — then a final hidden
+`<tick weapon="?" tags="Tz" removetag="Tz" hidden="t"/>` cleans up the tag. In the
+single-pass render every passive/hidden effect applies **on entry**, so the cleanup
+`removetag="Tz"` runs immediately after the `addtag`, stripping the tag *before* the
+interactive roll resolves. When the roll's `addbonus="1"` (success) and the
+`<outcomes>` `addbonus="-1"` / `<lose weapon>` (destroy) ticks later fire, their
+`weapon="?" tags="Tz"` selector matches **no** weapon, so nothing happens — the
+weapon never changes no matter what is rolled (verified end-to-end: a +2 weapon stays
++2 on a roll of 12 *and* on a roll of 2, and is never destroyed). The `<set var="bonus">`
+and the bonus ≥ 6 Shard refund still work (they run before the strip / don't depend on
+the tag). A secondary quirk seen in the same render: the roll buttons still show for a
+bonus-6 weapon even though `<if var="bonus" lessthan="6">` should hide them (the roll
+does nothing regardless). Fix: defer the hidden cleanup `removetag` until the section
+is actually left (or until after the roll/outcomes resolve) so the tagged weapon
+survives long enough for its own outcome ticks — likely a shared mechanism for
+"end-of-section cleanup" hidden ticks. Related single-pass ordering limitations:
+task 20 (lock/unlock bracket), task 61 (rerunnable `<set>` clobbers a roll var).
+Then update `_test.html`'s §5.386 part (c) to expect the enchant/outcome to land.
