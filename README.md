@@ -117,8 +117,12 @@ whole book in a single request and cache it for offline play.
 
 Before bundling, the build **validates the source XML**: every section is parsed as
 strict XML (well-formed and rooted at `<section>`), along with each `Adventurers.xml`
-and the rules files. A malformed file **aborts the build** — naming the file — instead
-of shipping broken JSON that would only throw when the browser renders that section.
+and the rules files. It also checks that each section's `<section name>` **matches its
+filename** — a purely numeric file must match exactly, while a lettered continuation
+(e.g. `448a`, `609a`) may use either its full name or its printed parent number. Any
+malformed file or filename/name mismatch **aborts the build** — naming the file —
+instead of shipping broken JSON that would only throw when the browser renders that
+section.
 
 ### Build stamp / version
 

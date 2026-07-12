@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<section name="137">
+<section name="276">
 	You need <i>Lords of the Rising Sun</i> to travel to Chambara. If you haven't got it,
 	<if codeword="5.Aku.leaving">
 		<goto section="225" force="f">turn back to 225</goto> (if in Aku)

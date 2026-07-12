@@ -39,7 +39,7 @@ function Read-Xml([string]$path) {
 # valid, or an error string. `$expectRoot` (e.g. 'section') also checks the root
 # element. NOTE: use .get_Name() — PowerShell's XML type adapter overrides plain
 # .Name to return the `name` ATTRIBUTE, not the element's tag name.
-function Test-XmlDoc([string]$xml, [string]$label, [string]$expectRoot) {
+function Test-XmlDoc([string]$xml, [string]$label, [string]$expectRoot, [string[]]$expectNames) {
     if (-not $xml) { return $null }   # an absent optional file is not an error
     try {
         $doc = New-Object System.Xml.XmlDocument
@@ -49,6 +49,17 @@ function Test-XmlDoc([string]$xml, [string]$label, [string]$expectRoot) {
     }
     if ($expectRoot -and $doc.DocumentElement.get_Name() -ne $expectRoot) {
         return "$label : root is <$($doc.DocumentElement.get_Name())>, expected <$expectRoot>"
+    }
+    # A section file's <section name> must match its filename key (task 78). A purely
+    # numeric file must match exactly; a lettered continuation may use either its full
+    # name (448a → "448a") or its printed parent number (609a → "609"), so both are
+    # passed in $expectNames. `.GetAttribute` is used deliberately — the plain .Name
+    # property is overridden by PowerShell's XML adapter to return the `name` attribute.
+    if ($expectNames -and $expectNames.Count -gt 0) {
+        $actual = $doc.DocumentElement.GetAttribute('name')
+        if ($expectNames -notcontains $actual) {
+            return "$label : section name=`"$actual`", expected `"$($expectNames -join '" or "')`" (does not match filename)"
+        }
     }
     return $null
 }
@@ -125,7 +136,11 @@ for ($b = 1; $b -le 6; $b++) {
         Where-Object { $_.BaseName -match '^\d+[a-z]?$' } |
         ForEach-Object {
             $xmlChecked++
-            $e = Test-XmlDoc (Read-Xml $_.FullName) ("book{0}/{1}" -f $b, $_.Name) 'section'
+            # Accepted names: the full filename, and its numeric prefix for a lettered
+            # continuation (609a → "609" or "609a"). For a purely numeric file both are
+            # the same, so the match is exact. (task 78)
+            $expectNames = @($_.BaseName, ($_.BaseName -replace '[a-z]+$', '')) | Select-Object -Unique
+            $e = Test-XmlDoc (Read-Xml $_.FullName) ("book{0}/{1}" -f $b, $_.Name) 'section' $expectNames
             if ($e) { $xmlErrors += $e }
         }
     $advPath = Join-Path $dir 'Adventurers.xml'

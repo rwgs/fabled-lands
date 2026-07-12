@@ -114,11 +114,11 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [ ] 88. book5/386: the hidden `removetag="Tz"` cleanup fires on entry, so Targdaz's weapon-enchant roll/outcomes never land (weapon never changes)
 - [x] 87. Fight widget "Your Combat" omits the per-fight attack bonus (`special="attack"`), unlike the Defence line
 - [x] 86. Add a full-section render integration test for book5/386 (currently covered only by synthetic ticks) *(added; surfaced the §386 enchant-cycle bug → task 88)*
-- [ ] 85. book6/135 source: `tag="keep"` is a stray/misnamed attribute (likely meant `tags=`); harmless but should be cleaned
+- [x] 85. book6/135 source: `tag="keep"` is a stray/misnamed attribute (likely meant `tags=`); harmless but should be cleaned
 - [ ] 84. De-flake the "fight attack produces a log line" test (timing-dependent on the 900 ms dice animation)
 - [ ] 83. Combat blessings (Wrath/Defence) buttons appear only on the single-fight widget, not group fights *(split from task 80)*
 - [ ] 82. Test harness: a duplicate top-level `const` in `run()` silently aborts the whole suite (reads as a hang, not a failure)
-- [ ] 78. Validate numeric `<section name>` against its filename; fix five mismatched source files
+- [x] 78. Validate numeric `<section name>` against its filename; fix five mismatched source files
 - [x] 9. Centralise tag dispatch into a registry
 - [x] 10. Dice RNG quality / reproducibility
 - [x] 11. Harden the per-visit memoization assumption
@@ -2854,6 +2854,20 @@ lettered continuation to use its printed parent number (`book5/609a.xml` has
 `name="609"`) or document/validate that convention explicitly. Add a build-time
 assertion, rebuild data and run all sections.
 
+**Done (2026-07-11).** Corrected the five source `<section name>` attributes to match
+their filenames (`book4/461` 451→461, `book5/119` 172→119, `book5/270` 406→270,
+`book5/276` 137→276, `book6/288` 287→288). Extended the `build-data.ps1` validation
+pre-pass: `Test-XmlDoc` now takes `$expectNames` and, for every bundled section file,
+asserts `<section name>` matches its filename key. A purely numeric file must match
+exactly; a lettered continuation may use **either** its full name or its numeric
+prefix — the corpus is inconsistent (`book5/609a` uses `name="609"`, `book6/448a`
+uses `name="448a"`), so both are accepted rather than rewriting those intentional
+continuations. The gate caught `448a` on the first run, which is how the two-convention
+split was found. Rebuild under **pwsh 7** left book1–3 JSON byte-identical (only
+book4/5/6 changed, in the five sections + task 85's tag). `XML OK: 4377 files`;
+suite green: `RESULT ALL PASS pass=778 fail=0`. README's "Regenerating the data" gate
+note updated.
+
 ---
 
 ## 79. Keeping a preview or importing a save reports success when persistence fails  — MEDIUM (state/app)
@@ -3092,6 +3106,15 @@ intended, change it to `tags="keep"` (which would narrow to a keep-tagged wielde
 weapon — verify that matches the section's intent before changing semantics). Since it
 edits source XML, fold it into task 78's rebuild pass rather than a standalone build.
 Confirm §6.135 still renders and removes the tag after the change.
+
+**Done (2026-07-11, folded into task 78's rebuild).** Dropped the stray `tag="keep"`
+from `book6/135.xml`, leaving `<tick weapon="?" using="t" removetag="keep"/>`. The
+section comment ("modified so that even 'kept' weapons can be broken") confirms the
+intent is to strip `keep` from the *wielded* weapon so the sibling
+`<lose weapon="?" using="t"/>` can take it — which `using="t"` + `removetag="keep"`
+already do; `tag=` was never a recognised attribute, so this is purely cosmetic. The
+existing `§6.135 <tick weapon="?" using="t" removetag="keep">` assertion still passes.
+Rebuilt with task 78; suite green (`RESULT ALL PASS pass=778 fail=0`).
 
 ---
 

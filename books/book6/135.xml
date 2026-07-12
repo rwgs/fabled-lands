@@ -7,7 +7,7 @@
 	slight shrug of the shoulders, he snaps it in two.
 	<group force="t">
 		<text>Remove that weapon</text>
-		<tick weapon="?" using="t" tag="keep" removetag="keep"/>
+		<tick weapon="?" using="t" removetag="keep"/>
 		<lose weapon="?" using="t"/>
 	</group>
 	from your list of possessions and <goto section="719"/>.
