@@ -513,12 +513,28 @@ async function run() {
     ok('choice click navigates', navd && String(navd.b)==='1', 'navd='+JSON.stringify(navd));
 
     // --- interaction: fight Attack click advances the fight ---
-    const s105 = await data.getSection(1,'105'); story3.begin(s105,1,'105');
-    const atk = container.querySelector('.fight .btn-roll');
-    atk.click();
-    await new Promise(r => setTimeout(r, 900));
-    ok('fight attack produces a log line', container.querySelectorAll('.fight-log div').length >= 1,
-       'log='+container.querySelectorAll('.fight-log div').length);
+    // This flaked ~half the runs (task 84). Two causes, both removed here:
+    //   1. The attack handler awaits animateDice (a setInterval(70ms)×8) before
+    //      fightRound writes the log; Chrome's --virtual-time-budget occasionally
+    //      starves that interval. → use the built-in __FL_INSTANT_DICE__ hook so
+    //      animateDice resolves immediately with no timer.
+    //   2. On a round that KILLS the player, the handler rerenders the section and the
+    //      running .fight-log is gone (log=0). The shared `gs` was drained by earlier
+    //      tests, so an unlucky roll sometimes killed it. → use a fresh, high-stamina
+    //      state that cannot die in one round (a won fight still shows the log).
+    window.__FL_INSTANT_DICE__ = true;
+    const gFight = GameState.create({ name:'FL', gender:'m', profession:'Warrior', book:1, adv });
+    gFight.data.stamina = 99; gFight.data.staminaMax = 99;
+    const cFight = document.createElement('div');
+    const storyF = new Story(cFight, gFight, { navigate(){}, onDeath(){}, notify(){} });
+    const s105 = await data.getSection(1,'105'); storyF.begin(s105,1,'105');
+    cFight.querySelector('.fight .btn-roll').click();
+    for (let i = 0; i < 100 && cFight.querySelectorAll('.fight-log div').length === 0; i++) {
+      await new Promise(r => setTimeout(r, 10));
+    }
+    ok('fight attack produces a log line', cFight.querySelectorAll('.fight-log div').length >= 1,
+       'log='+cFight.querySelectorAll('.fight-log div').length);
+    window.__FL_INSTANT_DICE__ = false; // restore for the following tests (re-enabled later where needed)
 
     // combat terminates
     const fgEl = await data.getSection(1,'105');

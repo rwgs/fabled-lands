@@ -115,7 +115,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 87. Fight widget "Your Combat" omits the per-fight attack bonus (`special="attack"`), unlike the Defence line
 - [x] 86. Add a full-section render integration test for book5/386 (currently covered only by synthetic ticks) *(added; surfaced the §386 enchant-cycle bug → task 88)*
 - [x] 85. book6/135 source: `tag="keep"` is a stray/misnamed attribute (likely meant `tags=`); harmless but should be cleaned
-- [ ] 84. De-flake the "fight attack produces a log line" test (timing-dependent on the 900 ms dice animation)
+- [x] 84. De-flake the "fight attack produces a log line" test (timing-dependent on the 900 ms dice animation)
 - [ ] 83. Combat blessings (Wrath/Defence) buttons appear only on the single-fight widget, not group fights *(split from task 80)*
 - [ ] 82. Test harness: a duplicate top-level `const` in `run()` silently aborts the whole suite (reads as a hang, not a failure)
 - [x] 78. Validate numeric `<section name>` against its filename; fix five mismatched source files
@@ -3091,6 +3091,21 @@ Make it deterministic: either stub/short-circuit `animateDice` in the test envir
 resolved state instead — e.g. after the click settles, check `fight.log.length` /
 `state` directly rather than polling the DOM after a timeout. Confirm the assertion
 passes on repeated headless runs. No engine change; test-only.
+
+**Done (2026-07-11).** Investigating turned up **two** causes, not the one filed. (1)
+`animateDice` is a `setInterval(70ms)×8`, which `--virtual-time-budget` occasionally
+starves so the promise never resolves — fixed by using the existing
+`window.__FL_INSTANT_DICE__` hook (animateDice returns `Promise.resolve()` with no
+timer). (2) The deeper cause: the test reused the shared `gs`, whose Stamina had been
+drained by earlier tests, so an unlucky `fightRound` roll sometimes **killed the player**
+in one round; the handler then `rerender()`s the section and the running `.fight-log`
+is gone (`log=0`). `drawFight` always renders `.fight-log` — including for a *won* fight
+— so only the death path clears it. Fixed by giving the test a **fresh, 99-Stamina
+state** that cannot die in one round (and dropping the 900 ms wall-clock wait for a
+short poll). Verified deterministic: **5/5** clean runs at the default
+`--virtual-time-budget=90000` (previously ~50% failure). Test-only, no stamp;
+`RESULT ALL PASS pass=778 fail=0` each run. The [[flaky-fight-log-test]] "just re-run"
+guidance is now obsolete — a failure here is a real regression.
 
 ---
 
