@@ -51,6 +51,13 @@ Notes:
 - Pure-logic modules (`engine.js`, `combat.js`, `market.js`, `state.js`) can also
   be imported and unit-checked directly in Node for fast feedback.
 - **Never edit `web/data/*.json` to make a test pass — fix the XML or the engine.**
+- Every assertion lives in one big `async function run()` in `web/_test.html`, so a
+  **duplicate top-level `const`/`let`** in a new test block (e.g. reusing `g53`) is a
+  *parse-time* `SyntaxError` that aborts the whole module. A bootstrap error handler now
+  surfaces this as **`RESULT FATAL … Identifier 'x' has already been declared`** (title
+  `TESTS_FAIL`) instead of hanging at `running…` — so a "no RESULT line" result means
+  the server/Chrome never loaded the page, not a duplicate declaration. Fix: rename the
+  clashing identifier or wrap the block in its own `{ … }` scope (many blocks already are).
 
 ## Command execution (Bitdefender on Windows)
 The build and tests **require PowerShell**; running the repo's own vetted scripts

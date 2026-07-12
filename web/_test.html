@@ -1,5 +1,23 @@
 <!doctype html><html><head><meta charset="utf-8"><title>FL tests</title></head>
 <body><pre id="results">running…</pre>
+<script>
+  // Fail loudly on a top-level module error (task 82). A parse-time SyntaxError in the
+  // test module below — most often a duplicate top-level const/let in run() (e.g.
+  // "Identifier 'g53' has already been declared") — aborts the whole module before
+  // run() is ever called, so #results stays "running…" and the title stays "FL tests".
+  // The headless smoke check then reads it as a HANG (no RESULT line), not a failure.
+  // This classic script runs first and registers a window 'error' handler (bubble phase
+  // → catches script/parse errors, not resource 404s) that turns any such abort into a
+  // visible RESULT FATAL line + TESTS_FAIL title, so the smoke check sees a failure it
+  // can diagnose. The guard stops it clobbering a suite that already reported.
+  window.addEventListener('error', function (ev) {
+    if (document.title === 'TESTS_OK' || document.title === 'TESTS_FAIL') return;
+    var where = ev.filename ? ' (' + String(ev.filename).split('/').pop() + ':' + ev.lineno + ')' : '';
+    var el = document.getElementById('results');
+    if (el) el.textContent = 'RESULT FATAL pass=0 fail=1\nFATAL the test module did not load: ' + (ev.message || 'unknown error') + where;
+    document.title = 'TESTS_FAIL';
+  });
+</script>
 <script type="module">
 import * as data from './js/data.js';
 import { GameState, readSlotData, importSave, loadSlotMeta, deleteSlot, makeItem, nextFreeSlot, sanitizeData, currencyAward, splitItemName } from './js/state.js';

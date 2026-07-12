@@ -117,7 +117,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 85. book6/135 source: `tag="keep"` is a stray/misnamed attribute (likely meant `tags=`); harmless but should be cleaned
 - [x] 84. De-flake the "fight attack produces a log line" test (timing-dependent on the 900 ms dice animation)
 - [x] 83. Combat blessings (Wrath/Defence) buttons appear only on the single-fight widget, not group fights *(split from task 80)*
-- [ ] 82. Test harness: a duplicate top-level `const` in `run()` silently aborts the whole suite (reads as a hang, not a failure)
+- [x] 82. Test harness: a duplicate top-level `const` in `run()` silently aborts the whole suite (reads as a hang, not a failure)
 - [x] 78. Validate numeric `<section name>` against its filename; fix five mismatched source files
 - [x] 9. Centralise tag dispatch into a registry
 - [x] 10. Dice RNG quality / reproducibility
@@ -3050,6 +3050,21 @@ No engine/data change. Add a note in `AGENTS.md`'s build+test section about the
 symptom so the next contributor recognises "stuck at running…" as a duplicate
 declaration. Re-run the suite to confirm the guard reports a synthetic collision as a
 visible failure.
+
+**Done (2026-07-12).** Added a small **classic** `<script>` in `web/_test.html`, placed
+*before* the `type="module"` block (so it is registered even when the module fails to
+compile), that listens for the window `error` event (bubble phase → catches script/parse
+errors, not resource 404s). On a top-level abort it writes a visible
+`RESULT FATAL pass=0 fail=1 / FATAL the test module did not load: <message> (file:line)`
+into `#results` and sets the title to `TESTS_FAIL`, with a guard so it never clobbers a
+suite that already reported. Verified by temporarily inserting a duplicate
+`const SYNTHETIC_DUP_82` — the run reported
+`RESULT FATAL … Identifier 'SYNTHETIC_DUP_82' has already been declared (_test.html:36)`
+with title `TESTS_FAIL` (previously a hang at `running…`); reverted, and the healthy run
+is unchanged (`RESULT ALL PASS pass=785 fail=0`, `TESTS_OK`). Also documented the symptom
+in `AGENTS.md`'s build+test notes. Chose the bootstrap over wrapping every block in `{}`
+(the cheapest generic safety net; many blocks are already block-scoped). Test-only, no
+stamp.
 
 ---
 
