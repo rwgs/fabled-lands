@@ -1951,6 +1951,127 @@ async function run() {
       ok('§89 choosing sails exactly that ship and navigates', csB.docked === null && gcs89.data.sailingShipId === csB.id && csA.docked === 'Kunrir' && navCS && String(navCS.sec) === '10');
     }
 
+    // --- task 99: <fightround> bodies run as combat-round rules -------------------------
+    { // block-scoped (task 82)
+      // §5.24 (pre="t"): the Hangman's SANCTITY save runs BEFORE each exchange; the
+      // margin failed by is taken as Stamina damage (var hang → lose stamina="-hang").
+      const s24 = await data.getSection(5, '24');
+      const g24 = GameState.create({ name:'H24', gender:'m', profession:'Warrior', book:5, adv });
+      g24.data.stamina = 30; g24.data.staminaMax = 30; g24.data.abilities.sanctity = 5;
+      const f24 = makeFight(s24.querySelector('fight'), g24);
+      const rn24 = s24.querySelector('fightround');
+      const rnd99 = Math.random;
+      Math.random = () => 0; // every die = 1
+      fightRound(g24, f24, null, rn24);
+      Math.random = rnd99;
+      // pre body: SANCTITY 2+5=7 vs 17 → hang=−10 → −10 Stamina; exchange: player 8 vs
+      // Def 15 misses, Hangman 15 vs Def 8 → −7. 30−10−7 = 13.
+      ok('§5.24 the pre-round save fires before round 1 (choke damage −10 + blow −7)', g24.data.stamina === 13 && f24.stamina === 25, `st=${g24.data.stamina} en=${f24.stamina}`);
+      ok('§5.24 the save wrote its margin var (hang = −10)', g24.getVar('hang') === -10, String(g24.getVar('hang')));
+      ok('§5.24 the round save is logged', f24.log.some((l) => /SANCTITY roll 7 vs 17 — failure/.test(l)), f24.log.join(' | '));
+      // A successful save takes no choke damage (only the Hangman's blow lands).
+      // Abilities cap at 12, so force mid dice: d6=4 → save 8+12=20 vs 17 (margin +3,
+      // no choke); exchange: player 14 vs 15 misses, Hangman 21 vs 8 → −13.
+      const g24b = GameState.create({ name:'H24b', gender:'m', profession:'Warrior', book:5, adv });
+      g24b.data.stamina = 30; g24b.data.staminaMax = 30; g24b.data.abilities.sanctity = 12;
+      const f24b = makeFight(s24.querySelector('fight'), g24b);
+      Math.random = () => 0.5;
+      fightRound(g24b, f24b, null, rn24);
+      Math.random = rnd99;
+      ok('§5.24 a successful save takes no choke damage (30−13=17, hang=+3)', g24b.data.stamina === 17 && g24b.getVar('hang') === 3, `st=${g24b.data.stamina} hang=${g24b.getVar('hang')}`);
+
+      // §5.383 (pre="f"): the MAGIC save runs AFTER each exchange; failing costs 1d.
+      const s383 = await data.getSection(5, '383');
+      const g383 = GameState.create({ name:'SD383', gender:'m', profession:'Warrior', book:5, adv });
+      g383.data.stamina = 30; g383.data.staminaMax = 30; g383.data.abilities.magic = 1;
+      const f383 = makeFight(s383.querySelector('fight'), g383);
+      const rn383 = s383.querySelector('fightround');
+      Math.random = () => 0; // player 8 vs 11 miss; demon 10 vs 8 → −2; MAGIC 3 vs 12 fail → −1
+      fightRound(g383, f383, null, rn383);
+      Math.random = rnd99;
+      ok('§5.383 the post-round save runs after the exchange (30−2−1=27)', g383.data.stamina === 27, `st=${g383.data.stamina}`);
+      ok('§5.383 the failed save is logged', f383.log.some((l) => /MAGIC roll 3 vs 12 — failure/.test(l)), f383.log.join(' | '));
+      // The body does NOT run once the fight is decided (the round that fells the demon).
+      const g383b = GameState.create({ name:'SD383b', gender:'m', profession:'Warrior', book:5, adv });
+      g383b.data.stamina = 30; g383b.data.staminaMax = 30; g383b.data.abilities.magic = 1;
+      const f383b = makeFight(s383.querySelector('fight'), g383b);
+      f383b.stamina = 1; // one blow from death
+      Math.random = () => 0.99; // player 18 vs 11 → −7 ⇒ win before the demon or the save act
+      fightRound(g383b, f383b, null, rn383);
+      Math.random = rnd99;
+      ok('§5.383 no round save after the fight is won (no MAGIC line, no damage)', f383b.outcome === 'win' && g383b.data.stamina === 30 && !f383b.log.some((l) => /MAGIC/.test(l)), `out=${f383b.outcome} st=${g383b.data.stamina}`);
+
+      // §5.689: a failed post-round save records the <goto> (dragged under → §7).
+      const s689 = await data.getSection(5, '689');
+      const g689 = GameState.create({ name:'WD689', gender:'m', profession:'Warrior', book:5, adv });
+      g689.data.stamina = 30; g689.data.staminaMax = 30; g689.data.abilities.scouting = 2;
+      g689.setVar('armpenalty', -1); // the section's <set var="armpenalty" value="-armour"/>
+      const f689 = makeFight(s689.querySelector('fight'), g689);
+      const rn689 = s689.querySelector('fightround');
+      Math.random = () => 0; // player 8 vs 12 miss; drake 11 vs Def 7 (noarmour) → −4; SCOUTING 4−1=3 vs 9 fail → goto 7
+      fightRound(g689, f689, null, rn689);
+      Math.random = rnd99;
+      ok('§5.689 a failed round save records the death redirect (→7)', !!f689.roundGoto && String(f689.roundGoto.section) === '7' && g689.data.stamina === 26, `goto=${JSON.stringify(f689.roundGoto)} st=${g689.data.stamina}`);
+
+      // §5.489: the per-wound SANCTITY save now GATES the Avenger's Bite curse (the
+      // old walker descended into <failure> unconditionally — cursed on every wound).
+      const s489 = await data.getSection(5, '489');
+      const dmg489 = s489.querySelector('fightdamage');
+      const mkSpectre = (g) => makeFight(parse('<fight name="Spectre" combat="20" defence="30" stamina="99"/>'), g);
+      const g489 = GameState.create({ name:'SP489', gender:'m', profession:'Warrior', book:5, adv });
+      g489.data.stamina = 30; g489.data.staminaMax = 30; g489.data.abilities.sanctity = 1;
+      Math.random = () => 0; // wounded (−14); SANCTITY 3 vs 11 fail → cursed
+      fightRound(g489, mkSpectre(g489), dmg489);
+      Math.random = rnd99;
+      ok("§5.489 failing the wound save inflicts the Avenger's Bite curse", g489.hasCurse("Avenger's Bite"));
+      const g489b = GameState.create({ name:'SP489b', gender:'m', profession:'Warrior', book:5, adv });
+      g489b.data.stamina = 30; g489b.data.staminaMax = 30; g489b.data.abilities.sanctity = 12;
+      Math.random = () => 0.99; // wounded (−24); SANCTITY 24 vs 11 success → NO curse
+      fightRound(g489b, mkSpectre(g489b), dmg489);
+      Math.random = rnd99;
+      ok("§5.489 passing the wound save leaves you uncursed (was: cursed regardless)", !g489b.hasCurse("Avenger's Bite") && g489b.data.stamina === 6, `st=${g489b.data.stamina}`);
+
+      // §4.238: "If you get wounded, →184" — the <fightdamage> goto records a redirect.
+      const s238 = await data.getSection(4, '238');
+      const g238 = GameState.create({ name:'CT238', gender:'m', profession:'Warrior', book:4, adv });
+      g238.data.stamina = 20; g238.data.staminaMax = 20;
+      const f238 = makeFight(s238.querySelector('fight'), g238);
+      Math.random = () => 0; // player 8 vs 7 → −1; cutthroats 10 vs 8 → wound → goto 184
+      fightRound(g238, f238, s238.querySelector('fightdamage'));
+      Math.random = rnd99;
+      ok('§4.238 a wound records the fight redirect (→184)', !!f238.roundGoto && String(f238.roundGoto.section) === '184', JSON.stringify(f238.roundGoto || null));
+
+      // DOM §5.24: the fightround renders as inert prose — no detached manual roll.
+      const gd24 = GameState.create({ name:'D24', gender:'m', profession:'Warrior', book:5, adv });
+      gd24.data.stamina = 30; gd24.data.staminaMax = 30; gd24.data.abilities.sanctity = 5;
+      const cd24 = document.createElement('div');
+      new Story(cd24, gd24, { navigate(){}, onDeath(){}, notify(){} }).begin(s24, 5, '24');
+      const fr24 = cd24.querySelector('.fx.fightround');
+      ok('§5.24 the fightround renders inert (its roll is not a live widget)', !!fr24 && Array.from(fr24.querySelectorAll('button')).every((b) => b.disabled));
+      ok('§5.24 no enabled roll button outside the fight widget', Array.from(cd24.querySelectorAll('.btn-roll')).filter((b) => !b.disabled && !b.closest('.fight')).length === 0);
+      // Attacking runs the round rule end-to-end through the widget: choke −10 + blow −7.
+      Math.random = () => 0;
+      Array.from(cd24.querySelectorAll('.fight .btn-roll')).find((b) => b.textContent === 'Attack').click();
+      await settle42();
+      Math.random = rnd99;
+      ok('§5.24 Attack applies the round rule through the widget (30→13)', gd24.data.stamina === 13, `st=${gd24.data.stamina}`);
+      ok('§5.24 the fight log shows the round save', /SANCTITY roll 7 vs 17/.test(cd24.querySelector('.fight-log')?.textContent || ''), (cd24.querySelector('.fight-log')?.textContent || '').slice(0, 160));
+
+      // DOM §5.689: a failed round save navigates to §7 through the widget.
+      const gd689 = GameState.create({ name:'D689', gender:'m', profession:'Warrior', book:5, adv });
+      gd689.data.stamina = 20; gd689.data.staminaMax = 20; gd689.data.abilities.scouting = 2;
+      let nav689 = null;
+      const cd689 = document.createElement('div');
+      new Story(cd689, gd689, { navigate(bk, sec){ nav689 = { bk, sec }; }, onDeath(){}, notify(){} }).begin(s689, 5, '689');
+      const fr689 = cd689.querySelector('.fx.fightround');
+      ok('§5.689 the fightround renders inert', !!fr689 && Array.from(fr689.querySelectorAll('button')).every((b) => b.disabled));
+      Math.random = () => 0; // fail the round save → dragged under
+      Array.from(cd689.querySelectorAll('.fight .btn-roll')).find((b) => b.textContent === 'Attack').click();
+      await settle42();
+      Math.random = rnd99;
+      ok('§5.689 a failed round save drags you under (navigates to §7)', nav689 && String(nav689.sec) === '7', JSON.stringify(nav689));
+    }
+
     // --- task 80: combat blessings (Divine Wrath / Defence through Faith) --------------
     // Headless: Divine Wrath deals 1d to the enemy, once, and is consumed.
     const gw80 = GameState.create({ name:'W80', gender:'m', profession:'Warrior', book:6, adv });

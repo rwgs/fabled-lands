@@ -410,14 +410,27 @@ export function applyEffect(el, state, opts = {}) {
 const PASSIVE_BODY_TAGS = new Set(['lose', 'tick', 'gain', 'set', 'curse', 'disease', 'poison', 'adjustmoney', 'transfer']);
 const ROLL_BODY_TAGS = new Set(['random', 'rankcheck', 'difficulty']);
 
-/** Apply an effect *body* headlessly: a <fightdamage>/<flee> subtree (or any
- *  wrapper). Walks children in order — rolling any <random>/<rankcheck>/
- *  <difficulty> (storing its var=), honouring <if>/<elseif>/<else> chains, and
- *  applying each passive effect. Used at wound-time (fightdamage) and when the
- *  player flees, where the effect must fire on the event, never on render. */
-export function applyEffectBody(parent, state) {
+/** Apply an effect *body* headlessly: a <fightdamage>/<flee>/<fightround> subtree
+ *  (or any wrapper). Walks children in order — rolling any <random>/<rankcheck>/
+ *  <difficulty> (storing its var=), honouring <if>/<elseif>/<else> chains AND
+ *  <success>/<failure> branches (matched by their var=, else against the walk's
+ *  last roll — so §5.489's per-wound SANCTITY save gates its curse instead of the
+ *  branch body firing unconditionally), and applying each passive effect. A <goto>
+ *  ends the walk and is returned ({goto: {book, section}}) for the CALLER to
+ *  navigate — a fight-round failure can drag the player to a death section
+ *  (§5.689), a wound can redirect the fight (§4.238). `log`, when given, collects
+ *  human-readable lines (the fight log). Used at wound-time (fightdamage), on
+ *  fleeing, and between combat rounds (<fightround> — task 99); never on render. */
+export function applyEffectBody(parent, state, log = null) {
+  const ctx = { log, goto: null, lastRoll: null };
+  walkEffectBody(parent, state, ctx);
+  return { goto: ctx.goto };
+}
+
+function walkEffectBody(parent, state, ctx) {
   let inChain = false, chainMatched = false;
   for (const node of Array.from(parent.children)) {
+    if (ctx.goto) return; // a <goto> ended the walk
     const tag = node.tagName.toLowerCase();
     if (tag === 'if' || tag === 'elseif' || tag === 'else') {
       let active;
@@ -426,30 +439,56 @@ export function applyEffectBody(parent, state) {
       else if (chainMatched) active = false;
       else if (tag === 'else') { active = true; chainMatched = true; }
       else { active = evaluateCondition(node, state); chainMatched = active; }
-      if (active) applyEffectBody(node, state);
+      if (active) walkEffectBody(node, state, ctx);
       continue;
     }
     inChain = false; chainMatched = false;
+    // <success>/<failure>: the branch fires when it matches — by its var= (>0 =
+    // success, the margin an earlier roll stored — §5.24 hang), else by the last
+    // roll of this walk (§5.383/489). No roll and no var ⇒ it stays silent.
+    if (tag === 'success' || tag === 'failure') {
+      const want = tag === 'success';
+      const v = node.getAttribute('var');
+      let match = false;
+      if (v != null) match = state.hasVar(v) && (state.getVar(v) > 0) === want; // an unwritten var fires nothing (task 50's rule)
+      else if (ctx.lastRoll && ctx.lastRoll.success != null) match = ctx.lastRoll.success === want;
+      if (match) walkEffectBody(node, state, ctx);
+      continue;
+    }
+    // <goto>: record it and end the walk. Headless code never navigates itself.
+    if (tag === 'goto') {
+      if (node.getAttribute('section') != null) {
+        ctx.goto = { book: node.getAttribute('book') != null ? Number(node.getAttribute('book')) : null, section: node.getAttribute('section') };
+      }
+      continue;
+    }
     if (ROLL_BODY_TAGS.has(tag)) {
       const varName = node.getAttribute('var');
       if (tag === 'random') {
         const dice = node.hasAttribute('dice') ? parseInt(node.getAttribute('dice'), 10) : 2;
         const r = rollDice(dice);
-        if (varName) state.setVar(varName, r.total + childAdjustment(node, state));
+        const total = r.total + childAdjustment(node, state);
+        if (varName) state.setVar(varName, total);
+        ctx.lastRoll = { success: null, total };
+        if (ctx.log) ctx.log.push(`Rolled ${total}`);
       } else if (tag === 'rankcheck') {
         const res = rollRankCheck(state, parseInt(node.getAttribute('dice') || '1', 10), parseInt(node.getAttribute('add') || '0', 10), childAdjustment(node, state));
         if (varName) state.setVar(varName, res.margin);
+        ctx.lastRoll = res;
+        if (ctx.log) ctx.log.push(`Rank check ${res.total} vs ${state.rankValue()} — ${res.success ? 'success' : 'failure'}`);
       } else {
         const res = rollDifficulty(state, node.getAttribute('ability'), resolveValue(state, node.getAttribute('level')), childAdjustment(node, state));
         if (varName) state.setVar(varName, res.margin);
+        ctx.lastRoll = res;
+        if (ctx.log) ctx.log.push(`${(res.ability || '').toUpperCase()} roll ${res.total} vs ${res.level} — ${res.success ? 'success' : 'failure'}`);
       }
       continue;
     }
-    if (PASSIVE_BODY_TAGS.has(tag)) { applyEffect(node, state); continue; }
+    if (PASSIVE_BODY_TAGS.has(tag)) { const note = applyEffect(node, state); if (note && ctx.log) ctx.log.push(note); continue; }
     // A <rest> inside an effect body (potion of restoration heals all Stamina —
     // task 41): a bare/blank stamina= restores to full (task 31), else that amount.
     if (tag === 'rest') { applyRest(state, node.getAttribute('stamina'), node.getAttribute('shards') != null ? resolveValue(state, node.getAttribute('shards')) : 0); continue; }
-    applyEffectBody(node, state); // wrapper (e.g. <p>/<text>): descend
+    walkEffectBody(node, state, ctx); // wrapper (e.g. <p>/<text>): descend
   }
 }
 

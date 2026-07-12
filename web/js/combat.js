@@ -135,22 +135,46 @@ function enemyStrike(state, fight, dmgNode) {
   const replace = dmg > 0 && dmgNode && (dmgNode.getAttribute('type') || '').toLowerCase() === 'replace';
   if (dmg > 0 && !replace) applyEnemyDamage(state, fight, dmg);
   fight.log.push(`${fight.name} rolls ${r.total}+${fight.combat}=${total} vs your Def ${def} → ${dmg ? (replace ? 'a telling blow' : '−' + dmg + ' your Stamina') : 'miss'}`);
-  // Apply the whole <fightdamage> body (all children, rolls + if-chains) when the
-  // blow lands — never on render.
-  if (dmg > 0 && dmgNode) applyEffectBody(dmgNode, state);
+  // Apply the whole <fightdamage> body (all children, rolls + branches) when the
+  // blow lands — never on render. A <goto> inside redirects the fight ("If you
+  // get wounded, →184" — §4.238): record it for the view to navigate. (task 99)
+  if (dmg > 0 && dmgNode) {
+    const res = applyEffectBody(dmgNode, state, fight.log);
+    if (res.goto) fight.roundGoto = res.goto;
+  }
+}
+
+/** Execute a <fightround> body (task 99): its rolls/branches/effects run in this
+ *  round's context, once, with any outcome lines joining the fight log. A <goto>
+ *  (§5.689 "dragged you under") is recorded on the fight for the view to follow. */
+function runRoundNode(state, fight, roundNode) {
+  const res = applyEffectBody(roundNode, state, fight.log);
+  if (res.goto) fight.roundGoto = res.goto;
 }
 
 /**
  * Resolve one attack exchange against a single enemy, respecting initiative.
  * Mutates `fight` (stamina, outcome, log) and `state` (player stamina + any
  * <fightdamage> effect). The enemy strikes `attacks` times per round (Tripling).
+ * A section's <fightround> body (task 99, JaFL RoundNode) executes exactly once
+ * per round: pre="t" before the exchange (§5.24 "Before each combat round…"),
+ * else after it, and only while the fight is still undecided. Its body may kill
+ * the player (Stamina damage) or record a fight.roundGoto redirect (§5.689).
  */
-export function fightRound(state, fight, dmgNode) {
+export function fightRound(state, fight, dmgNode, roundNode = null) {
+  const pre = roundNode != null && boolAttr(roundNode.getAttribute('pre'));
+  if (roundNode && pre) {
+    runRoundNode(state, fight, roundNode);
+    if (fight.outcome || fight.roundGoto || state.isDead()) return; // choked out before the exchange
+  }
   const order = fight.playerFirst ? ['player', 'enemy'] : ['enemy', 'player'];
   for (const who of order) {
-    if (fight.outcome || state.isDead()) break;
+    if (fight.outcome || fight.roundGoto || state.isDead()) break;
     if (who === 'player') playerStrike(state, fight);
-    else { const n = fight.attacks || 1; for (let k = 0; k < n && !state.isDead() && !fight.outcome; k++) enemyStrike(state, fight, dmgNode); }
+    else { const n = fight.attacks || 1; for (let k = 0; k < n && !state.isDead() && !fight.outcome && !fight.roundGoto; k++) enemyStrike(state, fight, dmgNode); }
+  }
+  if (roundNode && !pre && !fight.outcome && !fight.roundGoto && !state.isDead()) {
+    runRoundNode(state, fight, roundNode);
   }
 }
 

@@ -6,7 +6,7 @@ stable IDs pointing at the detail sections below (sections are in the order
 the tasks were filed, not work order).
 
 **HIGH**
-- [ ] 99. `<fightround>` effects are detached manual widgets instead of combat-round rules
+- [x] 99. `<fightround>` effects are detached manual widgets instead of combat-round rules
 - [x] 89. Ship actions still use remote vessels, and `<choice sail>` does not sail one
 - [x] 77. Selector-aware `<set item|cache …>` expressions read the sheet instead of the selected item/cache (21 nodes)
 - [x] 76. Blessings are stored as inert labels — ability/Luck/travel benefits cannot be used *(core rerolls done; combat Defence/Wrath split → task 80)*
@@ -3429,6 +3429,34 @@ combat model and execute their body at the specified phase of every completed
 round, exactly once per round, with variables/branches resolved in that round's
 context. Add deterministic headless tests for all three sections plus a render
 test proving there is no detached manual roll. Stamp and run all sections.
+
+**Done (2026-07-12).** `applyEffectBody` (engine.js) grew into a full round-body
+executor: it now honours `<success>/<failure>` branches — matched by their `var=`
+(the margin an earlier roll stored; an unwritten var fires nothing, task 50's
+rule) or by the walk's last roll — and a `<goto>` ends the walk and is *returned*
+(`{goto}`) for the caller to navigate; rolls and effect notes stream into a
+supplied log. `combat.fightRound(state, fight, dmgNode, roundNode)` executes the
+section's `<fightround>` exactly once per round — `pre="t"` before the exchange
+(§5.24's choking, which can kill before a blow lands), else after it, and only
+while the fight is undecided — recording any `fight.roundGoto`. The view
+(render.js) finds the node like `<fightdamage>`, renders it **inert** (prose, no
+live widgets — `renderInert` replaces `renderChildrenOnly`), threads it through
+`drawFight`/redraws, and follows `roundGoto` (single and group fights).
+
+Two adjacent live bugs fixed by the same walker upgrade: **§5.489/565/631's
+per-wound SANCTITY save** — the old walker descended into `<failure>`
+unconditionally, so the Avenger's Bite curse landed on *every* wound regardless
+of the roll (now gated); and **§4.238's "if you get wounded, →184"** — the
+`<fightdamage>` goto was inert (now redirects the fight).
+
+Tests: +17 (block-scoped) — §5.24 pre-round choke (margin damage, `hang` var,
+log line, successful-save no-damage), §5.383 post-round save (after the
+exchange; skipped once the demon falls), §5.689 failed save records →7 with the
+armour penalty applied, §5.489 curse gated both ways, §4.238 wound redirect, and
+DOM: both §5.24/§5.689 fightrounds render inert (no detached/enabled roll), the
+§5.24 Attack applies the round rule through the widget with the save in the
+fight log, §5.689's Attack navigates to §7. Web-only — stamped
+`26.07.12.a2cabcb`. Suite green: `RESULT ALL PASS pass=829 fail=0`.
 
 ---
 

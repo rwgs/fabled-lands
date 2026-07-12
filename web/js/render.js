@@ -77,13 +77,16 @@ const TAG_RENDERERS = {
   table:           'renderTable',
   'choices-table': 'renderTable',
   // task 32: previously unhandled tags. <field>/<extrachoice> are implemented;
-  // <while>/<fightround>/<sectionview> render their inner prose (as the default
-  // recursion already did — no behaviour change) with the automated mechanic
-  // deferred. Explicit entries let the default case become strict later.
+  // <while>/<sectionview> render their inner prose (as the default recursion
+  // already did — no behaviour change) with the automated mechanic deferred.
+  // Explicit entries let the default case become strict later.
   field:           'renderField',
   extrachoice:     'renderExtraChoice',
   while:           'renderChildrenOnly',
-  fightround:      'renderChildrenOnly',
+  // <fightround> is a combat-round RULE (task 99): its body executes headlessly
+  // between rounds (combat.fightRound), so it renders as inert prose — visible
+  // words, no live roll widgets the player could work out of sequence.
+  fightround:      'renderInert',
   sectionview:     'renderChildrenOnly',
 };
 
@@ -2324,16 +2327,17 @@ export class Story {
       };
     }
 
-    // Find the section's <fightdamage>/<flee> ANYWHERE (they may sit inside a <p>,
-    // or even before the <fight> — book2/152/207/297/313 etc.), not just as a
-    // forward same-level sibling.
+    // Find the section's <fightdamage>/<flee>/<fightround> ANYWHERE (they may sit
+    // inside a <p>, or even before the <fight> — book2/152/207/297/313 etc.), not
+    // just as a forward same-level sibling.
     const dmgNode = this.findInSection('fightdamage');
     const fleeNode = this.findInSection('flee');
+    const roundNode = this.findInSection('fightround'); // between-round rules (task 99)
 
     const box = document.createElement('div');
     box.className = 'fight';
     container.appendChild(box);
-    this.drawFight(box, fight, node, dmgNode, fleeNode, key, locked);
+    this.drawFight(box, fight, node, dmgNode, fleeNode, key, locked, roundNode);
     return box;
   }
 
@@ -2426,6 +2430,14 @@ export class Story {
         controls.querySelectorAll('button').forEach((b) => (b.disabled = true));
         await animateDice(box, true);
         groupFightRound(this.state, fights, dmgNode, target);
+        // A <fightdamage> body's <goto> (a wound redirect) ends the combat by
+        // navigation, exactly as in a single fight. (task 99)
+        const redirected = fights.find((f) => f.roundGoto);
+        if (redirected && !this.state.isDead()) {
+          const g = redirected.roundGoto; fights.forEach((f) => { f.roundGoto = null; });
+          this.navigate(g.book != null ? g.book : this.book, g.section);
+          return;
+        }
         // On any resolution (all foes down) or death, rerender so the gate (and the
         // death/lose guard, via the sectionFight proxy above) re-evaluates.
         if (fights.every((f) => isDefeated(f)) || this.state.isDead()) { this.rerender(); return; }
@@ -2496,7 +2508,7 @@ export class Story {
     return this.sectionEl ? this.sectionEl.querySelector(tag) : null;
   }
 
-  drawFight(box, fight, node, dmgNode, fleeNode, key, locked = false) {
+  drawFight(box, fight, node, dmgNode, fleeNode, key, locked = false, roundNode = null) {
     box.innerHTML = '';
     const title = document.createElement('div');
     title.className = 'fight-title';
@@ -2552,14 +2564,21 @@ export class Story {
     attack.addEventListener('click', async () => {
       controls.querySelectorAll('button').forEach((b) => (b.disabled = true));
       await animateDice(box, true);
-      fightRound(this.state, fight, dmgNode);
+      fightRound(this.state, fight, dmgNode, roundNode);
+      // A <fightround>/<fightdamage> body can end the fight by navigation — §5.689
+      // "dragged you under" (→7), §4.238 "if you get wounded" (→184). (task 99)
+      if (fight.roundGoto && !this.state.isDead()) {
+        const g = fight.roundGoto; fight.roundGoto = null;
+        this.navigate(g.book != null ? g.book : this.book, g.section);
+        return;
+      }
       // Reduced to 0 Stamina: if the section has an "if you lose…" branch, that's
       // a (non-death) loss — route to it; otherwise it's death.
       if (this.state.isDead() && this.fightGate && this.fightGate.hasLosePath) fight.outcome = 'lose';
       // On any resolution (win/lose/fled) or death, re-render the whole section so
       // the fight gate re-evaluates which onward links are enabled.
       if (fight.outcome || this.state.isDead()) { this.rerender(); return; }
-      this.drawFight(box, fight, node, dmgNode, fleeNode, key, false); // fight continues (never locked mid-fight)
+      this.drawFight(box, fight, node, dmgNode, fleeNode, key, false, roundNode); // fight continues (never locked mid-fight)
     });
     controls.appendChild(attack);
 
@@ -2599,7 +2618,7 @@ export class Story {
         const dmg = useWrathBlessing(this.state, fight);
         this.notify(`Divine Wrath strikes the ${fight.name} for ${dmg}!`);
         if (fight.outcome || this.state.isDead()) { this.rerender(); return; }
-        this.drawFight(box, fight, node, dmgNode, fleeNode, key, false);
+        this.drawFight(box, fight, node, dmgNode, fleeNode, key, false, roundNode);
       });
       controls.appendChild(w);
     }
@@ -2609,7 +2628,7 @@ export class Story {
       d.textContent = 'Use Defence through Faith (+3 Defence)';
       d.addEventListener('click', () => {
         useDefenceBlessing(this.state, fight);
-        this.drawFight(box, fight, node, dmgNode, fleeNode, key, false);
+        this.drawFight(box, fight, node, dmgNode, fleeNode, key, false, roundNode);
       });
       controls.appendChild(d);
     }
