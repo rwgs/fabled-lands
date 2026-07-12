@@ -5,62 +5,6 @@ priority — work the first open (`- [ ]`) item top-down. Task numbers are
 stable IDs pointing at the detail sections below (sections are in the order
 the tasks were filed, not work order).
 
-Reviewed 2026-07-06: every previously open item (3–13) was re-verified against
-the current code and is still accurate; items 15–36 were added from a full
-review of the rules engine (`engine.js`/`combat.js`/`market.js`/`state.js`) and
-the view/app/infra layer, with every finding verified against both the code and
-the book XML corpus.
-
-Reviewed 2026-07-07: the suite is green at HEAD (`RESULT ALL PASS pass=381
-fail=0`) and every closed MEDIUM task's claims (24–31, 40, 41) were audited
-against the shipped code — no discrepancies. A fresh review of the newest
-subsystems (fight attributes, roll gates, currencies, item effects) plus the
-cross-module seams filed tasks **45–62** (each verified against both the code
-path and the triggering book XML); task **43** moved from LOW to MEDIUM to match
-its own severity rating, and a `useCache` Defence divergence was appended to the
-task-36 grab-bag. Checked clean in the same pass: `sanitizeData` round-trips all
-newer fields (currencies, item effects, abilityFlags, cache locks, afflictions);
-currency wallet routing; ship canonicalisation; tick caps; the roll-payment
-arm/consume/re-arm cycle.
-
-Reviewed 2026-07-09: the external review in `REVIEW.md` was verified against the
-code — its two new findings were already filed as tasks **64**/**65** (both
-premises re-confirmed: the stamp hashes js/css/json/html/manifest but not
-`web/assets/`; `renderStatic`'s `<th>` branch at `app.js:781` is shadowed by the
-identical heading test at `:775`), and its confirmed-backlog items all map to
-the open tasks 33/34/35/38/39. Its two unrecorded recommendations are now filed
-as tasks **66** (CI smoke-suite workflow — no `.github/` exists) and **67**
-(README says section illustrations are absent, but the build ships the three
-bespoke ones). The suite is green at HEAD: `RESULT ALL PASS pass=597 fail=0`
-(the reviewer's environment couldn't launch Chrome, so no result was claimed
-there).
-
-Reviewed 2026-07-10: a fresh corpus-to-engine audit found seven gaps that the
-render-every-section smoke scan cannot detect because every affected section
-still builds valid DOM. Filed tasks **73–79**: ship-location metadata is not
-maintained; standalone `force="f"` effects auto-apply; several live `<tick>`
-forms are inert; blessings cannot be spent on their rule-defined rerolls/combat
-benefits; selector-aware `<set>` expressions ignore their item/cache selectors;
-five numeric source files have mismatched `<section name>` metadata; and the
-preview/import persistence paths report success after a failed write. Each
-finding was checked against the source XML and `JaFL-XML-Tags.html`. Baseline
-suite at HEAD is green: `RESULT ALL PASS pass=649 fail=0`.
-
-Worked 2026-07-08: all eight HIGH items (45–52) implemented, each with focused
-headless tests and the full render-every-section scan green after every step
-(suite grew 381 → 440 assertions, `RESULT ALL PASS fail=0`). Notable shared
-plumbing added this pass: an aggregate multi-fight proxy + sequential locking
-(45); an ability/stamina resolution mode threaded through `evalExpression` (46,
-reused by the coming task 53); a shared `matchItemQuery`/`hasItemMatch` item
-matcher (47); a settable group-fight proxy + per-foe targeting (48); a transient
-per-fight attack/Defence bonus store (49); `ctx.wroteVars` roll/`<set>` write
-tracking that gates var-keyed branches (50, also needed by tasks 61/43); a shared
-`rollGateState` pay-to-roll gate on `<difficulty>`/`<rankcheck>` + resolved-roll
-branch binding (51); and `removeCodeword` clearing the counter value (52, feeds
-task 43). Left for their own tasks: `<fightround>` per-round rolls (32), the
-hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
-"choose one" cycle (43).
-
 **HIGH**
 - [x] 77. Selector-aware `<set item|cache …>` expressions read the sheet instead of the selected item/cache (21 nodes)
 - [x] 76. Blessings are stored as inert labels — ability/Luck/travel benefits cannot be used *(core rerolls done; combat Defence/Wrath split → task 80)*
@@ -3490,3 +3434,67 @@ project's supported payment/flag nodes (prefer an XML correction over a one-off
 view rule if `<price>` is invalid legacy markup). Add an end-to-end test for
 insufficient funds, one successful 25-Shard payment and poison removal exactly
 once. Rebuild, stamp, and run all sections.
+
+---
+
+## Review log
+
+*Running audit log of the backlog — each pass re-verifies the open items against
+the current code and records what was filed, split, or re-confirmed. Task
+numbers refer to the contents checklist at the top of the file.*
+
+Reviewed 2026-07-06: every previously open item (3–13) was re-verified against
+the current code and is still accurate; items 15–36 were added from a full
+review of the rules engine (`engine.js`/`combat.js`/`market.js`/`state.js`) and
+the view/app/infra layer, with every finding verified against both the code and
+the book XML corpus.
+
+Reviewed 2026-07-07: the suite is green at HEAD (`RESULT ALL PASS pass=381
+fail=0`) and every closed MEDIUM task's claims (24–31, 40, 41) were audited
+against the shipped code — no discrepancies. A fresh review of the newest
+subsystems (fight attributes, roll gates, currencies, item effects) plus the
+cross-module seams filed tasks **45–62** (each verified against both the code
+path and the triggering book XML); task **43** moved from LOW to MEDIUM to match
+its own severity rating, and a `useCache` Defence divergence was appended to the
+task-36 grab-bag. Checked clean in the same pass: `sanitizeData` round-trips all
+newer fields (currencies, item effects, abilityFlags, cache locks, afflictions);
+currency wallet routing; ship canonicalisation; tick caps; the roll-payment
+arm/consume/re-arm cycle.
+
+Reviewed 2026-07-09: the external review in `REVIEW.md` was verified against the
+code — its two new findings were already filed as tasks **64**/**65** (both
+premises re-confirmed: the stamp hashes js/css/json/html/manifest but not
+`web/assets/`; `renderStatic`'s `<th>` branch at `app.js:781` is shadowed by the
+identical heading test at `:775`), and its confirmed-backlog items all map to
+the open tasks 33/34/35/38/39. Its two unrecorded recommendations are now filed
+as tasks **66** (CI smoke-suite workflow — no `.github/` exists) and **67**
+(README says section illustrations are absent, but the build ships the three
+bespoke ones). The suite is green at HEAD: `RESULT ALL PASS pass=597 fail=0`
+(the reviewer's environment couldn't launch Chrome, so no result was claimed
+there).
+
+Reviewed 2026-07-10: a fresh corpus-to-engine audit found seven gaps that the
+render-every-section smoke scan cannot detect because every affected section
+still builds valid DOM. Filed tasks **73–79**: ship-location metadata is not
+maintained; standalone `force="f"` effects auto-apply; several live `<tick>`
+forms are inert; blessings cannot be spent on their rule-defined rerolls/combat
+benefits; selector-aware `<set>` expressions ignore their item/cache selectors;
+five numeric source files have mismatched `<section name>` metadata; and the
+preview/import persistence paths report success after a failed write. Each
+finding was checked against the source XML and `JaFL-XML-Tags.html`. Baseline
+suite at HEAD is green: `RESULT ALL PASS pass=649 fail=0`.
+
+Worked 2026-07-08: all eight HIGH items (45–52) implemented, each with focused
+headless tests and the full render-every-section scan green after every step
+(suite grew 381 → 440 assertions, `RESULT ALL PASS fail=0`). Notable shared
+plumbing added this pass: an aggregate multi-fight proxy + sequential locking
+(45); an ability/stamina resolution mode threaded through `evalExpression` (46,
+reused by the coming task 53); a shared `matchItemQuery`/`hasItemMatch` item
+matcher (47); a settable group-fight proxy + per-foe targeting (48); a transient
+per-fight attack/Defence bonus store (49); `ctx.wroteVars` roll/`<set>` write
+tracking that gates var-keyed branches (50, also needed by tasks 61/43); a shared
+`rollGateState` pay-to-roll gate on `<difficulty>`/`<rankcheck>` + resolved-roll
+branch binding (51); and `removeCodeword` clearing the counter value (52, feeds
+task 43). Left for their own tasks: `<fightround>` per-round rolls (32), the
+hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
+"choose one" cycle (43).
