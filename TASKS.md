@@ -111,7 +111,7 @@ hidden-price silent-arm phantom Pay button (56), and the repeatable price/flag
 - [x] 70. Visit box renders unticked on the visit it ticks; bare `<tick/>` prints "If not, , and read on" (§496 + widespread)
 
 **LOW**
-- [ ] 87. Fight widget "Your Combat" omits the per-fight attack bonus (`special="attack"`), unlike the Defence line
+- [x] 87. Fight widget "Your Combat" omits the per-fight attack bonus (`special="attack"`), unlike the Defence line
 - [ ] 86. Add a full-section render integration test for book5/386 (currently covered only by synthetic ticks)
 - [ ] 85. book6/135 source: `tag="keep"` is a stray/misnamed attribute (likely meant `tags=`); harmless but should be cleaned
 - [ ] 84. De-flake the "fight attack produces a log line" test (timing-dependent on the 900 ms dice animation)
@@ -3121,3 +3121,12 @@ actually use. Cosmetic — the resolution already uses the bonus (`playerCombat`
 `combat.js`). For parity, show `Your Combat ${state.ability('combat') + state.fightAttackBonus()}`
 in both `drawFight` and `drawGroupFight`. Add/extend a DOM assertion that the displayed
 Combat reflects a `special="attack"` bonus. Web-only; stamp and re-run all sections.
+
+**Done (2026-07-11).** Both `drawFight` and `drawGroupFight` (`render.js`) now show
+`Your Combat ${state.ability('combat') + state.fightAttackBonus()}` (single-fight
+via a `shownCombat` local mirroring the existing `shownDef`), so the displayed
+Combat matches `playerCombat` in `combat.js`. Added 3 headless assertions
+(`_test.html`): a `<tick special="attack" bonus="3">` before a single `<fight>`
+sets the bonus on entry and the widget's `.you` line shows base + 3; the group-fight
+widget likewise shows base + 2. Web-only — stamped `26.07.11.4781047`. Suite green:
+`RESULT ALL PASS pass=773 fail=0`.

@@ -2380,7 +2380,10 @@ export class Story {
 
     const you = document.createElement('div');
     you.className = 'fight-stats you';
-    you.innerHTML = `<span>Your Combat ${this.state.ability('combat')}</span><span>Your Defence ${this.state.defence()}</span><span>Your Stamina ${this.state.data.stamina}/${this.state.effectiveStaminaMax()}</span>`;
+    // Show the per-fight attack bonus (special="attack") so the displayed Combat
+    // matches what resolution uses (playerCombat). (tasks 49, 87)
+    const shownCombat = this.state.ability('combat') + this.state.fightAttackBonus();
+    you.innerHTML = `<span>Your Combat ${shownCombat}</span><span>Your Defence ${this.state.defence()}</span><span>Your Stamina ${this.state.data.stamina}/${this.state.effectiveStaminaMax()}</span>`;
     box.appendChild(you);
 
     const logEl = document.createElement('div');
@@ -2463,10 +2466,12 @@ export class Story {
 
     const you = document.createElement('div');
     you.className = 'fight-stats you';
-    // Include any per-fight Defence bonus (Defence through Faith / special="defence") so
-    // the displayed value matches what combat resolution uses. (tasks 49, 80)
+    // Include any per-fight attack/Defence bonus (special="attack"/"defence",
+    // Defence through Faith) so the displayed values match what combat resolution
+    // uses (playerCombat / defence). (tasks 49, 80, 87)
+    const shownCombat = this.state.ability('combat') + this.state.fightAttackBonus();
     const shownDef = this.state.defence() + this.state.fightDefenceBonus();
-    you.innerHTML = `<span>Your Combat ${this.state.ability('combat')}</span><span>Your Defence ${shownDef}</span><span>Your Stamina ${this.state.data.stamina}/${this.state.effectiveStaminaMax()}</span>`;
+    you.innerHTML = `<span>Your Combat ${shownCombat}</span><span>Your Defence ${shownDef}</span><span>Your Stamina ${this.state.data.stamina}/${this.state.effectiveStaminaMax()}</span>`;
     box.appendChild(you);
 
     const logEl = document.createElement('div');

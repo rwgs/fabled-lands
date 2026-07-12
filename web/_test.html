@@ -1857,6 +1857,28 @@ async function run() {
     new Story(cno80, gno80, { navigate(){}, onDeath(){}, notify(){} }).begin(parse(secF80), 6, 'TF80');
     ok('§80 no blessing → the fight widget shows no combat-blessing buttons', !Array.from(cno80.querySelectorAll('button')).some((b) => /Divine Wrath|Defence through Faith/.test(b.textContent)));
 
+    // --- task 87: the fight widget's "Your Combat" includes the per-fight attack bonus ---
+    // A <tick special="attack"> before the <fight> sets the transient bonus on entry
+    // (task 49); the displayed Combat must match what resolution uses (base + bonus).
+    const secA87 = '<section name="TA87"><p><tick special="attack" bonus="3"/><fight name="Ogre" combat="6" defence="10" stamina="12"/></p></section>';
+    const ga87 = GameState.create({ name:'A87', gender:'m', profession:'Warrior', book:6, adv });
+    ga87.data.stamina = 20; ga87.data.staminaMax = 20;
+    const ca87 = document.createElement('div');
+    new Story(ca87, ga87, { navigate(){}, onDeath(){}, notify(){} }).begin(parse(secA87), 6, 'TA87');
+    ok('§87 the attack bonus is set on entry', ga87.fightAttackBonus() === 3, `atk=${ga87.fightAttackBonus()}`);
+    ok('§87 the single-fight widget shows Combat including the +3 attack bonus',
+      new RegExp('Your Combat ' + (ga87.ability('combat') + 3) + '(?!\\d)').test(ca87.querySelector('.you').textContent),
+      ca87.querySelector('.you').textContent);
+    // Same parity for the group-fight widget (drawGroupFight).
+    const secG87 = '<section name="TG87"><p><tick special="attack" bonus="2"/><fight group="g" name="A" combat="5" defence="8" stamina="6"/><fight group="g" name="B" combat="5" defence="8" stamina="6"/></p></section>';
+    const gg87 = GameState.create({ name:'G87', gender:'m', profession:'Warrior', book:6, adv });
+    gg87.data.stamina = 20; gg87.data.staminaMax = 20;
+    const cg87 = document.createElement('div');
+    new Story(cg87, gg87, { navigate(){}, onDeath(){}, notify(){} }).begin(parse(secG87), 6, 'TG87');
+    ok('§87 the group-fight widget shows Combat including the +2 attack bonus',
+      new RegExp('Your Combat ' + (gg87.ability('combat') + 2) + '(?!\\d)').test(cg87.querySelector('.you').textContent),
+      cg87.querySelector('.you').textContent);
+
     // --- task 75: live <tick> forms (equipment / profession / patterned titles) --------
     // Patterned title: first grant sets titleValue; later grants advance by titleAdjust;
     // the pattern renders "Circle N Master of bokh".
