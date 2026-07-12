@@ -529,12 +529,20 @@ function applyLose(el, state, opts) {
     const b = get('blessing');
     if (b === '*') { if (state.removeAllBlessings()) notes.push('lost all blessings'); }
     else if (b === '?') {
+      // Punitive robbery ("lose one of your blessings" — book2/157/394): truly
+      // removes the pick, permanent or not, like the punitive "*".
       if (state.data.blessings.length) {
         const pick = opts.chooser ? opts.chooser(state.data.blessings.slice(), 1, 'blessing') : null;
         const chosen = (pick && pick.length) ? pick[0] : state.data.blessings[0];
         if (state.removeBlessing(chosen)) notes.push('lost blessing');
       }
-    } else if (state.removeBlessing(b)) notes.push('lost blessing');
+    } else if (state.useBlessing(b)) {
+      // Every NAMED <lose blessing="…"> in the corpus (storm/disease/poison, 70
+      // nodes) is the blessing being SPENT for its protection — a use, so §6.159's
+      // permanent Safety from Storms survives ("never used up") while an ordinary
+      // blessing is crossed off. (task 90)
+      notes.push(state.isBlessingPermanent(b) ? 'blessing invoked (permanent)' : 'lost blessing');
+    }
   }
   if (get('curse') != null) { if (state.removeCurse(get('curse'))) notes.push('curse lifted'); }
   if (get('disease') != null) { if (state.removeDisease(get('disease'))) notes.push('cured disease'); }

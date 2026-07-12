@@ -25,8 +25,8 @@ the tasks were filed, not work order).
 - [x] 71. `<lose staminato="N">` never applies — the handler is gated on a `stamina=` attr it lacks (16 sections)
 
 **MEDIUM**
-- [ ] 90. Permanent Safety from Storms is deleted by storm-avoidance `<lose blessing>` nodes
 - [ ] 91. COMBAT blessing cannot reroll an attack, and Defence blessing leaks between fights
+- [x] 90. Permanent Safety from Storms is deleted by storm-avoidance `<lose blessing>` nodes
 - [ ] 92. Eight live `<adjust>` variants are ignored or applied unconditionally
 - [ ] 93. Item group provenance and rolled `itemAt=` losses are not represented
 - [ ] 94. `quantity=` is ignored on rewards, cargo ticks and market stock
@@ -3278,6 +3278,18 @@ blessing spent for its benefit as a use (permanent survives), while the explicit
 punitive `<lose blessing="*">` must still clear everything. Add a direct state
 test plus an end-to-end permanent-storm path; retain coverage that an ordinary
 Storms blessing is consumed. Web-only; stamp and run all sections.
+
+**Done (2026-07-12).** `applyLose` (engine.js) now routes a NAMED
+`<lose blessing="…">` through `state.useBlessing()` — a corpus audit confirmed
+all 70 named nodes (storm/storms/disease/poison) are the blessing being spent
+for its protection, so a permanent one survives ("never used up") and an
+ordinary one is crossed off as before. The punitive forms are unchanged: `"*"`
+(`removeAllBlessings`) and the `"?"` robbery pick still remove even a permanent
+blessing. Tests: +7 — direct state (permanent survives the named spend incl.
+the "storms" alias; `"*"` clears it; ordinary consumed) and end-to-end §1.586
+(a permanent blessing protects through two consecutive storms with the →85
+branch live; an ordinary one is used up by the first). Web-only — stamped
+`26.07.12.f3b1db2`. Suite green: `RESULT ALL PASS pass=836 fail=0`.
 
 ---
 

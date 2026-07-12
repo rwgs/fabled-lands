@@ -2072,6 +2072,37 @@ async function run() {
       ok('§5.689 a failed round save drags you under (navigates to §7)', nav689 && String(nav689.sec) === '7', JSON.stringify(nav689));
     }
 
+    // --- task 90: permanent Safety from Storms survives its storm-avoidance spend ------
+    { // block-scoped (task 82)
+      const g90 = GameState.create({ name:'B90', gender:'m', profession:'Warrior', book:6, adv });
+      g90.addBlessing('storm', true); // §6.159's permanent grant
+      eng.applyEffect(parse('<lose blessing="storm"/>'), g90, {});
+      ok('§90 a named spend leaves the permanent blessing in place', g90.hasBlessing('storm') && g90.isBlessingPermanent('storm'));
+      eng.applyEffect(parse('<lose blessing="storms"/>'), g90, {}); // the alias spelling
+      ok('§90 the alias spelling ("storms") also survives', g90.hasBlessing('storm'));
+      eng.applyEffect(parse('<lose blessing="*"/>'), g90, {});
+      ok('§90 the punitive "*" still clears even a permanent blessing', !g90.hasBlessing('storm') && !g90.isBlessingPermanent('storm'));
+      const g90b = GameState.create({ name:'B90b', gender:'m', profession:'Warrior', book:6, adv });
+      g90b.addBlessing('storm'); // ordinary
+      eng.applyEffect(parse('<lose blessing="storm"/>'), g90b, {});
+      ok('§90 an ordinary Storms blessing is still consumed by its use', !g90b.hasBlessing('storm'));
+
+      // End-to-end: §1.586's storm-avoidance branch spends the blessing on entry — a
+      // permanent one protects through every storm, an ordinary one only the first.
+      const s90 = await data.getSection(1, '586');
+      const g90p = GameState.create({ name:'P90', gender:'m', profession:'Warrior', book:1, adv });
+      g90p.addBlessing('storm', true);
+      new Story(document.createElement('div'), g90p, { navigate(){}, onDeath(){}, notify(){} }).begin(s90, 1, '586');
+      ok('§1.586 first storm: the permanent blessing protects and survives', g90p.hasBlessing('storm') && g90p.isBlessingPermanent('storm'));
+      const c90p2 = document.createElement('div');
+      new Story(c90p2, g90p, { navigate(){}, onDeath(){}, notify(){} }).begin(s90, 1, '586');
+      ok('§1.586 second storm: still protected (branch active, →85 live)', g90p.hasBlessing('storm') && activeGoto(c90p2, 85));
+      const g90o = GameState.create({ name:'O90', gender:'m', profession:'Warrior', book:1, adv });
+      g90o.addBlessing('storm');
+      new Story(document.createElement('div'), g90o, { navigate(){}, onDeath(){}, notify(){} }).begin(s90, 1, '586');
+      ok('§1.586 an ordinary blessing is used up by the first storm', !g90o.hasBlessing('storm'));
+    }
+
     // --- task 80: combat blessings (Divine Wrath / Defence through Faith) --------------
     // Headless: Divine Wrath deals 1d to the enemy, once, and is consumed.
     const gw80 = GameState.create({ name:'W80', gender:'m', profession:'Warrior', book:6, adv });
