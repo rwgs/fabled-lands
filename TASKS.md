@@ -25,7 +25,7 @@ the tasks were filed, not work order).
 - [x] 71. `<lose staminato="N">` never applies — the handler is gated on a `stamina=` attr it lacks (16 sections)
 
 **MEDIUM**
-- [ ] 93. Item group provenance and rolled `itemAt=` losses are not represented
+- [x] 93. Item group provenance and rolled `itemAt=` losses are not represented
 - [ ] 94. `quantity=` is ignored on rewards, cargo ticks and market stock
 - [ ] 95. Item `replace=` rewards add a duplicate instead of transforming the possession
 - [ ] 96. Hidden item rewards inside `<group>` choices are never granted
@@ -3401,6 +3401,32 @@ entry, and normalize §5.14 to the supported singular attribute. Add tests for
 same-named items from different groups, group-restricted `?` choice/removal,
 rolled indices including out-of-range values, and §5.14. Rebuild, stamp, and run
 all sections.
+
+**Done (2026-07-13).** Awarded possessions now carry their XML `group=`:
+`makeItem()` gained a `group` field (state.js), threaded from both award sites in
+`render.js` (`renderItemAward`, `grantChoosableReward`) and preserved by
+`sanitizeItem()` across save/load. `matchItemQuery(items, pattern, tags, group)`
+applies a final group filter to *both* the `?`/blank and concrete-name branches;
+`applyLose` group-filters its item candidates the same way, and `evaluateCondition`'s
+item path passes `group=` through. So §5.118's `<if item="?" group="5.238"
+greaterthan="1">` counts only the §5.238 tomb haul, §3.132's `<lose>` crosses off
+just the §3.94 map (not a same-named map from elsewhere), and §5.578's donation is
+drawn from that mission's three rewards. Rolled `<lose itemAt="x">` (§6.63/168) is
+a new `applyLose` branch that removes the 1-based sheet entry at the rolled index
+(out-of-range → no-op, per §6.168 "the compass without losing anything"); `itemAt`
+was added to `pendingRollVar`'s QTY list so the loss defers until the `<random
+var="x">` rolls instead of memoizing a no-op with x=0. §5.14's lone source typo
+`<lose items="*" shards="*">` was normalized to the supported singular `item="*"`.
+
+Tests: +19 (block-scoped) — group round-trips through `makeItem`/`sanitizeData`;
+the §5.118 count is group-scoped (1 vs 2 group items, 2 unrelated ignored);
+same-named §3.94 vs other-island maps don't collide on `<if>` or `<lose>`; §5.578
+donation removes one of three group items (chooser offered only those three, and
+the no-chooser default) while the unrelated heirloom survives; `itemAt` removes the
+x-th entry and no-ops out of range; §6.63 renders inert until the die rolls then
+forfeits exactly one possession; §5.14 source uses singular `item="*"` and the
+botched teleport empties both possessions and cash. Rebuilt (book5.json +1 line),
+stamped `26.07.13.08a83f4`. Suite green: `RESULT ALL PASS pass=886 fail=0`.
 
 ---
 

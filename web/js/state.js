@@ -404,7 +404,7 @@ export class GameState {
   /** True if a possession satisfies an item= requirement, honouring "?" + tags=
    *  (a light-source gate, etc.) — the same matcher the <if item="?" tags=…> path
    *  uses, so a <choice item="?" tags="light"> is no longer permanently locked. (task 47) */
-  hasItemMatch(pattern, tags) { return matchItemQuery(this.data.items, pattern, tags).length > 0; }
+  hasItemMatch(pattern, tags, group) { return matchItemQuery(this.data.items, pattern, tags, group).length > 0; }
 
   // ---- caches: named stashes / banks (money + items, lockable) --------
   // A cache is a stash the books address by name: an investment box, a bank
@@ -903,6 +903,7 @@ function sanitizeItem(it) {
     ability: typeof it.ability === 'string' ? it.ability : null,
     tags: asArr(it.tags).filter((t) => typeof t === 'string'),
     effects: asArr(it.effects).map(sanitizeEffect).filter(Boolean),
+    group: typeof it.group === 'string' && it.group ? it.group : null,
     wielded: asBool(it.wielded),
     worn: asBool(it.worn),
   };
@@ -1070,11 +1071,14 @@ function describeSaveError(e) {
   return 'Your browser is blocking storage, so your progress can’t be saved (this often happens in private-browsing mode). Export this adventure to a file to keep it safe.';
 }
 
-export function makeItem(kind, name, bonus = 0, ability = null, tags = [], effects = []) {
+export function makeItem(kind, name, bonus = 0, ability = null, tags = [], effects = [], group = null) {
   // effects: [{type:'use'|'aura'|'wielded', ability, bonus, uses, verb, text, body}]
   // aura/wielded fold into ability()/defence() while carried/wielded; use = a
   // Drink/Consult/Use action fired from the Adventure Sheet (task 41).
-  return { id: nid(), kind: kind || 'item', name, bonus: bonus || 0, ability: ability || null, tags: tags || [], effects: effects || [], wielded: false, worn: false };
+  // group = the award's XML `group=` provenance key (§5.238 tomb haul, §3.94 map,
+  // §5.578 mission loot), so later `<if|lose item="?" group=…>` can count/select
+  // only the items from that award, not unrelated possessions (task 93).
+  return { id: nid(), kind: kind || 'item', name, bonus: bonus || 0, ability: ability || null, tags: tags || [], effects: effects || [], group: group || null, wielded: false, worn: false };
 }
 
 /** Parse a comma/pipe-separated tags attribute into a clean string array. */
@@ -1126,16 +1130,22 @@ export function matchItems(items, pattern) {
  *  listed tag when tags= is given (e.g. item="?" tags="light" — any light source).
  *  A concrete name/glob pattern defers to matchItems. Shared by the `<if>` item
  *  path and the `<choice>` item gate so both matchers agree. (tasks 18, 47) */
-export function matchItemQuery(items, pattern, tags) {
+export function matchItemQuery(items, pattern, tags, group) {
+  let matches;
   if (pattern === '?' || pattern == null || pattern === '') {
-    let matches = (items || []).slice();
+    matches = (items || []).slice();
     if (tags) {
       const want = tags.split(/[,|]/).map((t) => normalize(t)).filter(Boolean);
       matches = matches.filter((it) => want.every((t) => (it.tags || []).map(normalize).includes(t)));
     }
-    return matches;
+  } else {
+    matches = matchItems(items, pattern);
   }
-  return matchItems(items, pattern);
+  // group= restricts to the items awarded under that XML provenance key (task 93):
+  // §5.118 counts only the §5.238 tomb haul, §3.132 crosses off the §3.94 map, and
+  // §5.578's donation is drawn from that mission's three rewards, not the whole pack.
+  if (group != null && group !== '') matches = matches.filter((it) => it.group === group);
+  return matches;
 }
 
 /** True if an affliction list holds `name`; '*'/'?'/'' mean "any affliction". */

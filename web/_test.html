@@ -3643,6 +3643,101 @@ async function run() {
       ok('task65: a heading outside a table stays an <hN>', !!doc65b.querySelector('h4') && !doc65b.querySelector('table th'));
     }
 
+    // --- task 93: item group provenance + rolled itemAt losses -----------------
+    { // block-scoped
+      // makeItem carries the award's XML group; sanitizeData round-trips it.
+      const it93 = makeItem('item', 'silver flute', 0, null, [], [], '5.238');
+      ok('task93: makeItem records group provenance', it93.group === '5.238', String(it93.group));
+      const g93sv = GameState.create({ name:'P93', gender:'m', profession:'Warrior', book:5, adv });
+      g93sv.data.items = [makeItem('item', 'silver flute', 0, null, [], [], '5.238')];
+      const g93rt = new GameState(sanitizeData(JSON.parse(JSON.stringify(g93sv.data))));
+      ok('task93: group survives a save round-trip', g93rt.data.items[0].group === '5.238', String(g93rt.data.items[0].group));
+
+      // §5.238/§5.118: <if item="?" group="5.238" greaterthan="1"> counts only the
+      // tomb-haul items, not unrelated possessions.
+      const g118 = GameState.create({ name:'T118', gender:'m', profession:'Warrior', book:5, adv });
+      g118.data.items = [];
+      g118.addItem(makeItem('item', 'rope'));      // unrelated
+      g118.addItem(makeItem('item', 'lantern'));   // unrelated
+      g118.addItem(makeItem('item', 'silver flute', 0, null, [], [], '5.238'));
+      const ifGroup93 = parse('<if item="?" group="5.238" greaterthan="1"/>');
+      ok('task93: one group item ⇒ "took more than one" is false', eng.evaluateCondition(ifGroup93, g118) === false);
+      g118.addItem(makeItem('item', 'black axe', 0, null, [], [], '5.238'));
+      ok('task93: two group items ⇒ "took more than one" is true (2 unrelated ignored)', eng.evaluateCondition(ifGroup93, g118) === true);
+
+      // §3.94/§132/§413: same-named items from different groups do not collide.
+      const g132 = GameState.create({ name:'T132', gender:'m', profession:'Warrior', book:3, adv });
+      g132.data.items = [];
+      const otherMap93 = g132.addItem(makeItem('item', 'treasure map', 0, null, [], [], '3.500')); // another island's map
+      g132.addItem(makeItem('item', 'treasure map', 0, null, [], [], '3.94'));
+      ok('task93: §413 sees the 3.94 map', eng.evaluateCondition(parse('<if item="treasure map" group="3.94"/>'), g132) === true);
+      ok('task93: §413 does not see a wrong-group map', eng.evaluateCondition(parse('<if item="treasure map" group="9.99"/>'), g132) === false);
+      eng.applyEffect(parse('<lose item="treasure map" group="3.94"/>'), g132, {});
+      ok('task93: §132 crosses off only the 3.94 map', g132.data.items.length === 1 && g132.data.items[0].id === otherMap93.id, g132.data.items.map((i)=>i.group).join(','));
+
+      // §5.578: "donate one of the items you found" removes ONE of the mission's three
+      // rewards (group 5.578), never an unrelated possession — chooser & no-chooser.
+      const mk578 = () => {
+        const g = GameState.create({ name:'T578', gender:'m', profession:'Warrior', book:5, adv });
+        g.data.items = [];
+        g.addItem(makeItem('item', 'family heirloom'));                     // unrelated, must survive
+        g.addItem(makeItem('tool', 'silver holy symbol', 2, 'sanctity', [], [], '5.578'));
+        g.addItem(makeItem('weapon', 'fine sabre', 2, null, [], [], '5.578'));
+        g.addItem(makeItem('item', 'Uttakin telescope', 0, null, [], [], '5.578'));
+        return g;
+      };
+      const g578a = mk578();
+      eng.applyEffect(parse('<lose item="?" group="5.578"/>'), g578a, {}); // no chooser → first group item
+      ok('task93: §5.578 donation removes one mission item', g578a.data.items.length === 3);
+      ok('task93: §5.578 keeps the unrelated heirloom', g578a.hasItem('family heirloom'));
+      ok('task93: §5.578 removes a group-5.578 item', g578a.data.items.filter((i)=>i.group==='5.578').length === 2);
+      const g578b = mk578();
+      let offered578 = null;
+      eng.applyEffect(parse('<lose item="?" group="5.578"/>'), g578b, { chooser: (m) => { offered578 = m; return [m.find((i)=>i.name==='fine sabre')]; } });
+      ok('task93: §5.578 chooser is offered only the 3 group items', !!offered578 && offered578.length === 3 && offered578.every((i)=>i.group==='5.578'));
+      ok('task93: §5.578 removes exactly the chosen group item', !g578b.data.items.some((i)=>i.name==='fine sabre') && g578b.data.items.length === 3);
+
+      // <lose itemAt="x">: a rolled 1-based sheet index; out-of-range takes nothing.
+      const gAt93 = GameState.create({ name:'TAt', gender:'m', profession:'Warrior', book:6, adv });
+      gAt93.data.items = [];
+      ['first','second','third'].forEach((nm) => gAt93.addItem(makeItem('item', nm)));
+      gAt93.setVar('x', 2);
+      eng.applyEffect(parse('<lose itemAt="x">the item</lose>'), gAt93, {});
+      ok('task93: itemAt removes the x-th (1-based) sheet entry', gAt93.data.items.map((i)=>i.name).join(',') === 'first,third', gAt93.data.items.map((i)=>i.name).join(','));
+      gAt93.setVar('x', 9);
+      const atCount93 = gAt93.itemCount();
+      eng.applyEffect(parse('<lose itemAt="x">the item</lose>'), gAt93, {});
+      ok('task93: an out-of-range itemAt roll takes nothing', gAt93.itemCount() === atCount93);
+
+      // §6.63 end-to-end: a penniless loser forfeits one possession chosen by a die
+      // that must roll first — the loss is deferred until x is set (like §521).
+      const g63 = GameState.create({ name:'T63', gender:'m', profession:'Warrior', book:6, adv });
+      g63.data.shards = 0; g63.data.items = [];
+      for (const nm of ['a63','b63','c63','d63','e63','f63']) g63.addItem(makeItem('item', nm)); // 6 items ⇒ any 1-6 roll is in range
+      const start63 = g63.itemCount();
+      const c63 = document.createElement('div');
+      const st63 = new Story(c63, g63, { navigate(){}, onDeath(){}, notify(){} });
+      st63.begin(await data.getSection(6, '63'), 6, '63');
+      ok('task93: §63 takes nothing before the die is rolled', g63.itemCount() === start63, `count=${g63.itemCount()}`);
+      ok('task93: §63 shows a roll button', !!c63.querySelector('.btn-roll'));
+      c63.querySelector('.btn-roll').click();
+      await new Promise((r) => setTimeout(r, 1000));
+      const x63 = g63.getVar('x');
+      ok('task93: §63 rolls 1-6 for the forfeit', x63 >= 1 && x63 <= 6, 'x='+x63);
+      ok('task93: §63 forfeits exactly one possession after the roll', g63.itemCount() === start63 - 1, `count=${g63.itemCount()} x=${x63}`);
+
+      // §5.14 typo fix: the botched-teleport <lose item="*" shards="*"> empties both,
+      // and the source no longer carries the unsupported plural items="*".
+      const s14 = await data.getSection(5, '14');
+      const lose14 = s14.querySelector('lose[item], lose[items]');
+      ok('task93: §5.14 uses singular item="*" (not items="*")', !!lose14 && lose14.getAttribute('item') === '*' && lose14.getAttribute('items') == null, lose14 && lose14.outerHTML);
+      const g14 = GameState.create({ name:'T14', gender:'m', profession:'Warrior', book:5, adv });
+      g14.data.shards = 500; g14.data.items = [];
+      ['x14','y14'].forEach((nm) => g14.addItem(makeItem('item', nm)));
+      eng.applyEffect(lose14, g14, {});
+      ok('task93: §5.14 botched teleport empties possessions and cash', g14.itemCount() === 0 && g14.data.shards === 0, `items=${g14.itemCount()} shards=${g14.data.shards}`);
+    }
+
   } catch (e) {
     out.push('FATAL ' + (e.stack || e.message));
     fail++;

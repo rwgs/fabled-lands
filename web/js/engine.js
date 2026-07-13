@@ -213,7 +213,10 @@ export function evaluateCondition(el, state) {
   add(get('item'), () => {
     // "?" = any possession, optionally tag-filtered (e.g. <if item="?" tags="light">
     // — do you have a light source?); a concrete name/glob defers to matchItems.
-    const matches = matchItemQuery(itemPool, get('item'), get('tags'));
+    // group= counts only the items awarded under that provenance key — §5.118's
+    // "if you took more than one item" means more than one of the §5.238 haul,
+    // not of the whole pack (task 93).
+    const matches = matchItemQuery(itemPool, get('item'), get('tags'), get('group'));
     const cmp = compare(matches.length);
     return cmp == null ? matches.length > 0 : cmp;
   });
@@ -583,6 +586,11 @@ function applyLose(el, state, opts) {
         const want = tags.split(/[,|]/).map((t) => normalize(t));
         matches = matches.filter((it) => want.every((t) => (it.tags || []).map(normalize).includes(t)));
       }
+      // group= scopes the loss to that award's items: §3.132 crosses off the §3.94
+      // treasure map (not a same-named map from elsewhere), and §5.578's "donate one
+      // of the items you found" is drawn from that mission's three rewards. (task 93)
+      const group = get('group');
+      if (group != null && group !== '') matches = matches.filter((it) => it.group === group);
       const count = get('multiple') ? resolveValue(state, get('multiple')) : 1;
       let toLose = matches;
       if (matches.length > count) {
@@ -591,6 +599,15 @@ function applyLose(el, state, opts) {
       toLose.slice(0, count).forEach((it) => removeById(it.id));
       if (toLose.length) notes.push('lost item');
     }
+  }
+  // <lose itemAt="x"> takes the item at a rolled 1-based Adventure Sheet position
+  // (§6.63 the loser's forfeit, §6.168 the dream-compass swap). A roll that points
+  // past the end of the list takes nothing ("you get the compass without losing
+  // anything"); the render layer defers this until x is rolled (task 93).
+  if (get('itemAt') != null) {
+    const idx = resolveValue(state, get('itemAt'));
+    const it = Number.isFinite(idx) && idx >= 1 ? state.data.items[idx - 1] : null;
+    if (it) { state.removeItemById(it.id); notes.push('lost item'); }
   }
   // Confiscation of equipment: <lose weapon|armour|tool="?"/"*"> — optionally
   // using="t" ("the one you're wielding/wearing").

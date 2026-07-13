@@ -5,7 +5,7 @@
 	</p>
 	<p><random/> to see how well the teleport worked.</p>
 	<outcomes>
-		<outcome range="2"><lose items="*" shards="*">Lose all possessions and cash</lose> in transit</outcome>
+		<outcome range="2"><lose item="*" shards="*">Lose all possessions and cash</lose> in transit</outcome>
 		<outcome range="3-4">Reappear with your face twisted, permanently <lose ability="charisma" amount="2">reduce CHARISMA by 2</lose></outcome>
 		<outcome range="5-6">Reappear inside-out; <lose stamina="10"/></outcome>
 		<outcome range="7+">Bliss! The spell works perfectly</outcome>

@@ -1061,7 +1061,7 @@ export class Story {
   // renderPassive): a literal, a dice expression, or an already-set var applies now,
   // and a var no roll here fills is left to apply (harmlessly as 0) rather than hang.
   pendingRollVar(node) {
-    const QTY = ['multiple', 'shards', 'stamina', 'staminato', 'amount', 'count'];
+    const QTY = ['multiple', 'shards', 'stamina', 'staminato', 'amount', 'count', 'itemAt'];
     for (const a of QTY) {
       const v = node.getAttribute(a);
       if (v == null) continue;
@@ -1332,7 +1332,7 @@ export class Story {
         const bonus = node.getAttribute('bonus') ? parseInt(node.getAttribute('bonus'), 10) : 0;
         const ability = node.getAttribute('ability') || null;
         const tags = [...parseTags(node.getAttribute('tags')), ...alts];
-        this.state.addItem(makeItem(tag, name, bonus, ability, tags, readItemEffects(node)));
+        this.state.addItem(makeItem(tag, name, bonus, ability, tags, readItemEffects(node), node.getAttribute('group')));
       }
       this.state.setFlag(key, false);
       return '';
@@ -1653,7 +1653,7 @@ export class Story {
       btn.addEventListener('click', () => {
         if (currency != null) this.state.adjustMoney(currency); // stackable "N Shards" treasure
         else {
-          this.state.addItem(makeItem(kind, name, bonus, ability, tags, effects));
+          this.state.addItem(makeItem(kind, name, bonus, ability, tags, effects, group));
           afflictions.forEach((aff) => applyEffect(aff, this.state));
         }
         this.ctx.applied.add(key);
