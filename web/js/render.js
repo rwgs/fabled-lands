@@ -9,7 +9,7 @@
 import {
   evaluateCondition, applyEffect, applyEffectBody, boolAttr, resolveValue, isDiceExpr,
   rollDifficulty, rollRankCheck, rollTraining, rollDice, matchRange, childAdjustment,
-  applyRest, buyResurrectionDeal, abilityChoiceOptions, readItemEffects,
+  applyRest, buyResurrectionDeal, reviveWithResurrection, abilityChoiceOptions, readItemEffects,
 } from './engine.js';
 import { makeFight, fightRound, groupFightRound, isDefeated, useWrathBlessing, useDefenceBlessing, rerollAttack } from './combat.js';
 import { shopKind, goodsFrom, ownsGoods, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo, canUpgradeCrew, payChoiceCost } from './market.js';
@@ -633,7 +633,15 @@ export class Story {
     // in that book"): apply the effects and then follow the goto/return on click.
     const gotoNode = node.querySelector('goto');
     const returnNode = node.querySelector('return');
-    if (!label || (!effects.length && !itemNodes.length && !restNodes.length && !gotoNode && !returnNode)) {
+    // A death-revival group bundles the "use your deal" trigger (a no-section
+    // <resurrection/>) with the price of coming back — erase possessions/money/ship
+    // (§3.123/560/6.140/1.680) or just the ship (§1.616). On the group action, apply
+    // those losses, consume the earliest deal (revive at half Stamina) and turn to
+    // the deal's own section — instead of ignoring the resurrection child and leaving
+    // the player erased but stranded. (task 98)
+    const resNode = node.querySelector('resurrection');
+    const isRevival = !!resNode && !resNode.getAttribute('section');
+    if (!label || (!effects.length && !itemNodes.length && !restNodes.length && !gotoNode && !returnNode && !isRevival)) {
       // no visible action (or nothing to apply) — plain inline wrapper
       const span = document.createElement('span');
       this.appendChildren(span, node, path);
@@ -656,7 +664,13 @@ export class Story {
           applyRest(this.state, perUse, cost);
         });
         this.ctx.applied.add(key);
-        if (gotoNode) {
+        if (isRevival) {
+          // Consume the deal and turn to its section (the revive rule — half max
+          // Stamina — lives in engine.js). Guard against a missing deal.
+          const target = reviveWithResurrection(this.state);
+          if (target) { this.navigate(target.book, target.section); return; }
+          this.rerender();
+        } else if (gotoNode) {
           const b = gotoNode.getAttribute('book') ? Number(gotoNode.getAttribute('book')) : this.book;
           this.navigate(b, gotoNode.getAttribute('section'));
         } else if (returnNode) {
@@ -1373,7 +1387,7 @@ export class Story {
       buyResurrectionDeal(this.state, {
         book: node.getAttribute('book') ? Number(node.getAttribute('book')) : this.book,
         section: node.getAttribute('section'), text: node.getAttribute('text') || (node.textContent || '').trim(),
-        god: node.getAttribute('god'), cost: 0,
+        god: node.getAttribute('god'), cost: 0, supplemental: boolAttr(node.getAttribute('supplemental')),
       });
       this.state.setFlag(key, false);
       return 'Resurrection deal arranged.';
@@ -3281,22 +3295,40 @@ export class Story {
     // pick (book1/597: taking it consumes the single choice). (task 63)
     const resFlag = node.getAttribute('flag');
     if (resFlag != null && this.isChooseOne(resFlag)) return this.renderChoosableReward(container, node, path, resFlag);
-    const span = document.createElement('span');
-    this.appendChildren(span, node, path);
     const section = node.getAttribute('section');
     const shards = node.getAttribute('shards');
-    if (section) {
-      // an offer to buy a resurrection deal
+    const supplemental = boolAttr(node.getAttribute('supplemental'));
+    const hidden = boolAttr(node.getAttribute('hidden'));
+    const arrange = () => buyResurrectionDeal(this.state, {
+      book: node.getAttribute('book') ? Number(node.getAttribute('book')) : this.book,
+      section, text: node.getAttribute('text') || (node.textContent || '').trim(), god: node.getAttribute('god'),
+      cost: shards ? resolveValue(this.state, shards) : 0, supplemental,
+    });
+    const memo = 'res@' + path;
+    // A resurrection with book+section ARRANGES/registers a deal; one with no section
+    // is a "use your deal" trigger that lives inside a death-revival <group>
+    // (renderGroup) — here it is just narrative prose. (task 98)
+    if (section && hidden) {
+      // hidden="t" registers the deal automatically on entry, exactly once (§3.351's
+      // Island of Rebirth re-arms the deal each visit while its boxes remain) — no
+      // manual button, no repeated registration.
+      if (!this.inactive && !this.ctx.applied.has(memo)) { this.ctx.applied.add(memo); arrange(); }
+      return null;
+    }
+    const span = document.createElement('span');
+    this.appendChildren(span, node, path);
+    if (section && !this.inactive) {
+      // A visible offer to buy/arrange a deal — armed once per visit so it cannot be
+      // clicked repeatedly to stockpile duplicate lives (task 98).
       const cost = shards ? resolveValue(this.state, shards) : 0;
+      const done = this.ctx.applied.has(memo);
       const btn = document.createElement('button');
-      btn.className = 'btn-secondary';
-      btn.textContent = cost ? `Buy resurrection deal (${cost} Shards)` : 'Arrange resurrection';
-      btn.disabled = cost > 0 && this.state.data.shards < cost;
-      btn.addEventListener('click', () => {
-        buyResurrectionDeal(this.state, {
-          book: node.getAttribute('book') ? Number(node.getAttribute('book')) : this.book,
-          section, text: node.getAttribute('text') || span.textContent.trim(), god: node.getAttribute('god'), cost,
-        });
+      btn.className = 'btn-secondary' + (done ? ' done' : '');
+      btn.textContent = done ? '☑ Resurrection arranged' : (cost ? `Buy resurrection deal (${cost} Shards)` : 'Arrange resurrection');
+      btn.disabled = done || (cost > 0 && this.state.data.shards < cost);
+      if (!done) btn.addEventListener('click', () => {
+        arrange();
+        this.ctx.applied.add(memo);
         this.notify('Resurrection deal arranged.');
         this.rerender();
       });

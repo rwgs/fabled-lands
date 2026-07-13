@@ -3935,6 +3935,68 @@ async function run() {
       ok('task96: a full pack respects the 12-item cap (no 13th item) yet records the codeword', gf96.itemCount() === 12 && !gf96.hasItem('mirror of the Sun Goddess') && gf96.hasCodeword('GoddessMirror'), `items=${gf96.itemCount()}`);
     }
 
+    // --- task 98: resurrection replacement / supplemental / hidden / revival ---
+    { // block-scoped
+      // Standard replacement + supplemental append (engine-level).
+      const gres = GameState.create({ name:'Tres', gender:'m', profession:'Warrior', book:2, adv });
+      gres.data.resurrections = [];
+      eng.buyResurrectionDeal(gres, { book:2, section:'227', text:'Tyrnai', god:'Tyrnai' });
+      ok('task98: a standard deal registers one arrangement', gres.data.resurrections.length === 1);
+      eng.buyResurrectionDeal(gres, { book:2, section:'339', text:'Nagil', god:'Nagil' });
+      ok('task98: a new standard deal replaces the old (only one at a time)', gres.data.resurrections.length === 1 && gres.data.resurrections[0].section === '339');
+      eng.buyResurrectionDeal(gres, { book:6, section:'710', text:'boon', supplemental:true });
+      ok('task98: a supplemental boon is added on top', gres.data.resurrections.length === 2 && gres.data.resurrections.some((r)=>r.supplemental));
+      eng.buyResurrectionDeal(gres, { book:1, section:'350', text:'Nagil2' });
+      const stds98 = gres.data.resurrections.filter((r)=>!r.supplemental);
+      ok('task98: a further standard deal replaces only the standard, keeping the supplemental', gres.data.resurrections.length === 2 && stds98.length === 1 && stds98[0].section === '350' && gres.data.resurrections.some((r)=>r.supplemental));
+      const before98 = gres.data.resurrections.slice();
+      const tgt98 = eng.reviveWithResurrection(gres);
+      ok('task98: revival consumes the earliest deal and leaves the rest in order', !!tgt98 && gres.data.resurrections.length === 1 && gres.data.resurrections[0].section === before98[1].section, `tgt=${JSON.stringify(tgt98)} rest=${JSON.stringify(gres.data.resurrections)}`);
+      eng.buyResurrectionDeal(gres, { book:6, section:'710', text:'boon2', supplemental:true });
+      const gresRT = new GameState(sanitizeData(JSON.parse(JSON.stringify(gres.data))));
+      ok('task98: the supplemental flag survives a save round-trip', gresRT.data.resurrections.some((r)=>r.supplemental === true));
+
+      // §4.428: a visible arrange offer registers once and cannot be re-clicked to stockpile.
+      const g428 = GameState.create({ name:'T428', gender:'m', profession:'Warrior', book:4, adv });
+      g428.data.resurrections = [];
+      const c428 = document.createElement('div');
+      const st428 = new Story(c428, g428, { navigate(){}, onDeath(){}, notify(){} });
+      st428.begin(await data.getSection(4, '428'), 4, '428');
+      const arrangeBtn = () => Array.from(c428.querySelectorAll('.btn-secondary')).find((x)=>/resurrection|arrange/i.test(x.textContent));
+      ok('task98: §428 shows an arrange offer, no deal yet', !!arrangeBtn() && !g428.hasResurrection());
+      arrangeBtn().click();
+      ok('task98: arranging registers exactly one deal and spends the offer', g428.data.resurrections.length === 1 && arrangeBtn().disabled && /arranged/i.test(arrangeBtn().textContent), `res=${g428.data.resurrections.length} txt=${arrangeBtn() && arrangeBtn().textContent}`);
+
+      // §3.351: a hidden deal auto-registers on entry (no button); re-entry keeps one.
+      const g351 = GameState.create({ name:'T351', gender:'m', profession:'Warrior', book:3, adv });
+      g351.data.resurrections = [];
+      const c351 = document.createElement('div');
+      const st351 = new Story(c351, g351, { navigate(){}, onDeath(){}, notify(){} });
+      st351.begin(await data.getSection(3, '351'), 3, '351');
+      ok('task98: §351 auto-registers the Island of Rebirth deal on entry (hidden)', g351.hasResurrection() && g351.data.resurrections[0].section === '351', JSON.stringify(g351.data.resurrections));
+      ok('task98: §351 shows no manual arrange button for the hidden deal', !Array.from(c351.querySelectorAll('.btn-secondary')).some((x)=>/resurrection|arrange/i.test(x.textContent)));
+      st351.begin(await data.getSection(3, '351'), 3, '351');
+      ok('task98: re-entering §351 keeps exactly one deal (standard replacement)', g351.data.resurrections.length === 1, `res=${g351.data.resurrections.length}`);
+
+      // §3.123 death-revival group: erase possessions/money/ship, consume the deal,
+      // revive at half max Stamina and turn to the deal's own section.
+      const g123 = GameState.create({ name:'T123', gender:'m', profession:'Warrior', book:3, adv });
+      g123.data.items = []; g123.addItem(makeItem('item','loot1')); g123.addItem(makeItem('item','loot2'));
+      g123.data.shards = 500; g123.data.staminaMax = 20; g123.data.stamina = 1;
+      g123.data.ships = []; g123.addShip({ type:'barque', name:'Boat', crew:'poor', cargo:[], docked:null });
+      eng.buyResurrectionDeal(g123, { book:3, section:'351', text:'Island of Rebirth' });
+      let nav123 = null;
+      const c123 = document.createElement('div');
+      const st123 = new Story(c123, g123, { navigate(b,s){ nav123 = { b, s }; }, onDeath(){}, notify(){} });
+      st123.begin(await data.getSection(3, '123'), 3, '123');
+      const grp123 = Array.from(c123.querySelectorAll('.group-action')).find((x)=>/turn to/i.test(x.textContent));
+      ok('task98: §123 revival group renders when a deal exists', !!grp123, `groups=${c123.querySelectorAll('.group-action').length}`);
+      grp123.click();
+      ok('task98: §123 revival erases possessions, money and ship', g123.itemCount() === 0 && g123.data.shards === 0 && g123.data.ships.length === 0, `items=${g123.itemCount()} sh=${g123.data.shards} ships=${g123.data.ships.length}`);
+      ok('task98: §123 revival consumes the deal and revives at half max Stamina', g123.data.resurrections.length === 0 && g123.data.stamina === 10, `res=${g123.data.resurrections.length} stam=${g123.data.stamina}`);
+      ok('task98: §123 revival turns to the deal section (3/351)', nav123 && nav123.b === 3 && String(nav123.s) === '351', JSON.stringify(nav123));
+    }
+
   } catch (e) {
     out.push('FATAL ' + (e.stack || e.message));
     fail++;

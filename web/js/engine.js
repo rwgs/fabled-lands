@@ -1167,9 +1167,9 @@ export function applyRest(state, perUse, cost) {
 
 // ---- resurrection ----------------------------------------------------------
 /** Purchase a resurrection deal: pay the (optional) cost and record the deal. */
-export function buyResurrectionDeal(state, { book, section, text, god, cost = 0 }) {
+export function buyResurrectionDeal(state, { book, section, text, god, cost = 0, supplemental = false }) {
   if (cost) state.adjustMoney(-cost);
-  state.addResurrection({ book, section, text, god: god || null });
+  state.addResurrection({ book, section, text, god: god || null, supplemental: !!supplemental });
 }
 
 /** Cash in the earliest resurrection deal on death: consume it and revive at half

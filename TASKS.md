@@ -29,7 +29,7 @@ the tasks were filed, not work order).
 - [x] 94. `quantity=` is ignored on rewards, cargo ticks and market stock
 - [x] 95. Item `replace=` rewards add a duplicate instead of transforming the possession
 - [x] 96. Hidden item rewards inside `<group>` choices are never granted
-- [ ] 98. Resurrection arrangements ignore replacement, supplemental and hidden semantics
+- [x] 98. Resurrection arrangements ignore replacement, supplemental and hidden semantics
 - [ ] 100. The two live `<while>` loops execute only one rendered pass
 - [x] 92. Eight live `<adjust>` variants are ignored or applied unconditionally
 - [x] 91. COMBAT blessing cannot reroll an attack, and Defence blessing leaks between fights
@@ -3566,6 +3566,35 @@ supplemental replacement, once-per-visit purchase/registration and hidden auto-
 registration, with costs/effects applied exactly once. Verify revival consumes
 the intended arrangement and leaves valid supplemental deals in order. Stamp and
 run all sections.
+
+**Done (2026-07-13).** Semantics taken from the original engine
+(`java-engine/flands/ResurrectionNode.java` + `Adventurer.addResurrection`, reference
+only): a resurrection with `book`+`section` ARRANGES a deal; one with no section is a
+"use your deal" trigger. `GameState.addResurrection` (state.js) now replaces any
+existing *standard* deal when a new standard one is arranged, while a
+`supplemental="t"` boon (§6.355) is appended and never displaces the standard — so at
+most one standard deal coexists with any number of supplementals. The `supplemental`
+flag is threaded through `buyResurrectionDeal` (engine.js) and persisted by
+`sanitizeData`. `renderResurrection` (render.js): a visible arrange offer is armed
+once per visit (memoised `res@path`, button becomes "☑ Resurrection arranged") so it
+can't be re-clicked to stockpile duplicate lives; a `hidden="t"` offer with a section
+(§3.351 Island of Rebirth) auto-registers on entry exactly once with no button; a
+no-section resurrection is left as narrative prose. The five death-revival groups
+(§3.123/560/6.140/1.680 erase-all, §1.616 lose-ship) — a `<group>` bundling a
+no-section `<resurrection/>` with the price of return — now, on the group action,
+apply the losses, consume the earliest deal (`reviveWithResurrection` → half max
+Stamina) and turn to that deal's own section, instead of ignoring the resurrection
+child and stranding the erased player. The choose-one grant path also passes
+`supplemental`.
+
+Tests: +15 (block-scoped) — standard-replaces-standard, supplemental-appends, a
+further standard replacing only the standard while keeping the supplemental, revival
+consuming the earliest and leaving the rest ordered, and a save round-trip of the
+supplemental flag; §4.428 arrange armed once (spent button, no duplicate lives);
+§3.351 hidden auto-registration on entry with no button and re-entry keeping exactly
+one; and the §3.123 revival group erasing possessions/money/ship, consuming the deal,
+reviving at half Stamina and navigating to the deal's section. Web-only; stamped
+`26.07.13.6da614c`. Suite green: `RESULT ALL PASS pass=942 fail=0`.
 
 ---
 

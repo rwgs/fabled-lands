@@ -61,7 +61,7 @@ function freshData() {
     ships: [],            // {id, type, name, crew, cargo:[], docked}
     location: null,       // the current dock (section dock=); null = inland / at sea (task 73)
     sailingShipId: null,  // the ship the player is currently sailing (at large); null = none (task 81)
-    resurrections: [],    // {book, section, text, god}
+    resurrections: [],    // {book, section, text, god, supplemental}
     effects: [],          // {ability, bonus, type, uses, text}
     abilityFlags: {},     // ability -> {fixed?:true, cursed?:true} (effect="+fixed|+cursed")
     diseases: [],         // {name, type:'disease', effects:[]}  (task 19 populates)
@@ -743,7 +743,15 @@ export class GameState {
 
   // ---- resurrections ---------------------------------------------------
   hasResurrection() { return this.data.resurrections.length > 0; }
-  addResurrection(r) { this.data.resurrections.push(r); this.changed(); }
+  // A standard arrangement replaces any existing standard one (JaFL Adventurer
+  // .addResurrection: "you can only have one resurrection arranged at a time; a new
+  // deal cancels the old"); a supplemental boon (§6.355) is added on top and never
+  // displaces a standard deal, so both coexist. (task 98)
+  addResurrection(r) {
+    if (!r.supplemental) this.data.resurrections = this.data.resurrections.filter((x) => x.supplemental);
+    this.data.resurrections.push(r);
+    this.changed();
+  }
 
   // ---- ships -----------------------------------------------------------
   addShip(ship) { if (!ship.id) ship.id = nid(); if (ship.docked === undefined) ship.docked = this.data.location ?? null; this.data.ships.push(ship); this.changed(); return ship; }
@@ -1012,7 +1020,7 @@ export function sanitizeData(raw) {
   out.sailingShipId = (d.sailingShipId != null && out.ships.some((s) => s.id === asStr(d.sailingShipId) && s.docked == null)) ? asStr(d.sailingShipId) : null;
   out.resurrections = asArr(d.resurrections).map((r) => {
     const o = asObj(r);
-    return { book: asNum(o.book, out.book, { min: 1, int: true }), section: o.section == null ? null : asStr(o.section), text: asStr(o.text), god: o.god == null ? null : asStr(o.god) };
+    return { book: asNum(o.book, out.book, { min: 1, int: true }), section: o.section == null ? null : asStr(o.section), text: asStr(o.text), god: o.god == null ? null : asStr(o.god), supplemental: asBool(o.supplemental) };
   });
   out.effects = asArr(d.effects).map((e) => {
     const o = asObj(e);
