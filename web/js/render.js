@@ -620,6 +620,11 @@ export class Story {
     // <adjust> is excluded: inside a group it is a modifier for a nested roll
     // (e.g. "Difficulty 15 if you have climbing gear"), not a group effect.
     const effects = Array.from(node.querySelectorAll('lose, tick, gain, set, curse'));
+    // A bundled item/weapon/armour/tool reward (the hidden quest prize in §1.228/509
+    // gold chain mail, §4.189 Sun Goddess mirror): the group collapses to one button,
+    // so the award can't render its own Take button — grant it headlessly on the
+    // click via the normal award transaction (capacity-checked). (task 96)
+    const itemNodes = Array.from(node.querySelectorAll('item, weapon, armour, tool'));
     // A <rest> child heals on the group click (book6/628 "regain 1 Stamina point"):
     // applyRest headlessly, since the group renders as one button, not a rest widget.
     // Without this the daily inn group cleared its flag but never healed. (task 61)
@@ -628,7 +633,7 @@ export class Story {
     // in that book"): apply the effects and then follow the goto/return on click.
     const gotoNode = node.querySelector('goto');
     const returnNode = node.querySelector('return');
-    if (!label || (!effects.length && !restNodes.length && !gotoNode && !returnNode)) {
+    if (!label || (!effects.length && !itemNodes.length && !restNodes.length && !gotoNode && !returnNode)) {
       // no visible action (or nothing to apply) — plain inline wrapper
       const span = document.createElement('span');
       this.appendChildren(span, node, path);
@@ -644,6 +649,7 @@ export class Story {
     if (!done) {
       btn.addEventListener('click', () => {
         effects.forEach((fx) => applyEffect(fx, this.state, {}));
+        itemNodes.forEach((n) => this.grantItemNode(n));
         restNodes.forEach((r) => {
           const perUse = r.hasAttribute('stamina') ? r.getAttribute('stamina') : null;
           const cost = r.getAttribute('shards') ? resolveValue(this.state, r.getAttribute('shards')) : 0;
@@ -728,6 +734,26 @@ export class Story {
     }
     container.appendChild(span);
     return span;
+  }
+
+  // Grant an <item>/<weapon>/<armour>/<tool> reward headlessly — no button — for a
+  // reward bundled inside a <group> action, which collapses to a single button and so
+  // can't show the award its own Take button (§1.228/509 gold chain mail, §4.189 Sun
+  // Goddess mirror). A "N Shards" reward banks its value; a possession is added when a
+  // slot is free (the 12-item carry cap), and any <curse>/<disease>/<poison> child
+  // bites on pickup. Mirrors renderItemAward's grant, minus the widget. (task 96)
+  grantItemNode(node) {
+    const kind = node.tagName.toLowerCase();
+    const rawName = node.getAttribute('name') || (kind === 'weapon' ? 'weapon' : kind);
+    const currency = kind === 'item' ? currencyAward(rawName) : null;
+    if (currency != null) { this.state.adjustMoney(currency); return; }
+    if (this.state.freeSlots() <= 0) return; // capacity handling: no room, no grant
+    const { name, alts } = splitItemName(rawName);
+    const bonus = node.getAttribute('bonus') ? parseInt(node.getAttribute('bonus'), 10) : 0;
+    const ability = node.getAttribute('ability') || null;
+    const tags = [...parseTags(node.getAttribute('tags')), ...alts];
+    this.state.addItem(makeItem(kind, name, bonus, ability, tags, readItemEffects(node), node.getAttribute('group')));
+    Array.from(node.querySelectorAll(':scope > curse, :scope > disease, :scope > poison')).forEach((aff) => applyEffect(aff, this.state));
   }
 
   // ---- passive effects -----------------------------------------------------

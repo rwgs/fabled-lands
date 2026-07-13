@@ -3903,6 +3903,38 @@ async function run() {
       ok('task95: a replace with no source item is disabled', !!absBtn95 && absBtn95.disabled, absBtn95 && absBtn95.textContent);
     }
 
+    // --- task 96: hidden item rewards bundled inside a <group> action ----------
+    { // block-scoped
+      const check96 = async (b, sec, itemName, codeword) => {
+        const first = itemName.split(' ')[0];
+        const re = new RegExp(first, 'i');
+        const g = GameState.create({ name:'T96', gender:'m', profession:'Warrior', book:b, adv });
+        g.data.items = []; g.data.stamina = 40; g.data.staminaMax = 40; // survive §228's spear
+        const c = document.createElement('div');
+        const st = new Story(c, g, { navigate(){}, onDeath(){}, notify(){} });
+        st.begin(await data.getSection(b, sec), b, sec);
+        const grpBtn = Array.from(c.querySelectorAll('.group-action')).find((x) => re.test(x.textContent));
+        ok(`task96: §${b}.${sec} shows the group action, reward not yet granted`, !!grpBtn && !g.hasItem(itemName) && !g.hasCodeword(codeword), `btn=${!!grpBtn} has=${g.hasItem(itemName)} cw=${g.hasCodeword(codeword)}`);
+        ok(`task96: §${b}.${sec} has no separate Take button for the hidden item`, !Array.from(c.querySelectorAll('.take-item')).some((x) => re.test(x.textContent)));
+        grpBtn.click();
+        ok(`task96: §${b}.${sec} group click grants the hidden item once and sets the codeword`, g.findItems(itemName).length === 1 && g.hasCodeword(codeword), `count=${g.findItems(itemName).length} cw=${g.hasCodeword(codeword)}`);
+      };
+      await check96(1, '228', 'gold chain mail of Tyrnai', 'StolenTyrnaiMail');
+      await check96(1, '509', 'gold chain mail of Tyrnai', 'StolenTyrnaiMail');
+      await check96(4, '189', 'mirror of the Sun Goddess', 'GoddessMirror');
+
+      // Capacity handling: a full pack can't hold the mirror, so the grant is skipped
+      // (no 13th item) while the quest codeword still records — the group is atomic.
+      const gf96 = GameState.create({ name:'Tf96', gender:'m', profession:'Warrior', book:4, adv });
+      gf96.data.items = [];
+      for (let k = 0; k < 12; k++) gf96.addItem(makeItem('item', 'junk'+k)); // full
+      const cf96 = document.createElement('div');
+      const stf96 = new Story(cf96, gf96, { navigate(){}, onDeath(){}, notify(){} });
+      stf96.begin(await data.getSection(4, '189'), 4, '189');
+      Array.from(cf96.querySelectorAll('.group-action')).find((x) => /mirror/i.test(x.textContent)).click();
+      ok('task96: a full pack respects the 12-item cap (no 13th item) yet records the codeword', gf96.itemCount() === 12 && !gf96.hasItem('mirror of the Sun Goddess') && gf96.hasCodeword('GoddessMirror'), `items=${gf96.itemCount()}`);
+    }
+
   } catch (e) {
     out.push('FATAL ' + (e.stack || e.message));
     fail++;

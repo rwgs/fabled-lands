@@ -28,7 +28,7 @@ the tasks were filed, not work order).
 - [x] 93. Item group provenance and rolled `itemAt=` losses are not represented
 - [x] 94. `quantity=` is ignored on rewards, cargo ticks and market stock
 - [x] 95. Item `replace=` rewards add a duplicate instead of transforming the possession
-- [ ] 96. Hidden item rewards inside `<group>` choices are never granted
+- [x] 96. Hidden item rewards inside `<group>` choices are never granted
 - [ ] 98. Resurrection arrangements ignore replacement, supplemental and hidden semantics
 - [ ] 100. The two live `<while>` loops execute only one rendered pass
 - [x] 92. Eight live `<adjust>` variants are ignored or applied unconditionally
@@ -3518,6 +3518,26 @@ group choice/codeword but never enter inventory. Extend group resolution so hidd
 `item`/`weapon`/`armour`/`tool` rewards use the normal award transaction exactly
 once, including capacity handling, without showing a second independent Take
 button. Add end-to-end tests for these three choices. Stamp and run all sections.
+
+**Done (2026-07-13).** `renderGroup` (render.js) now collects the group's
+`item/weapon/armour/tool` children alongside its `lose/tick/gain/set/curse/rest`
+effects, and grants them on the group-action click through a new headless
+`grantItemNode` helper (mirrors `renderItemAward`'s grant minus the widget): a "N
+Shards" reward banks its value, a possession is added when a slot is free (12-item
+cap), and any `<curse>/<disease>/<poison>` child bites on pickup. Because the group
+collapses to a single button, the hidden reward never renders its own Take button,
+so there is no double-grant. A corpus check confirmed the only item-family-in-group
+cases are exactly the three hidden quest prizes (§1.228/509 gold chain mail of
+Tyrnai, §4.189 mirror of the Sun Goddess), so the change is surgical. The
+roll-bundled group variant (`renderGroupWithRoll`) needs no change — none of these
+sit inside a rolled group.
+
+Tests: +10 (block-scoped) — for each of §1.228/509/189: the group action renders,
+the reward is ungranted until clicked, there is no separate Take button, and the
+click grants the item exactly once and sets the quest codeword; plus a full-pack
+case proving the 12-item cap is respected (no 13th item) while the codeword still
+records. Web-only; stamped `26.07.13.f82fedd`. Suite green: `RESULT ALL PASS
+pass=927 fail=0`.
 
 ---
 
