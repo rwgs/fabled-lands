@@ -26,7 +26,7 @@ the tasks were filed, not work order).
 
 **MEDIUM**
 - [x] 93. Item group provenance and rolled `itemAt=` losses are not represented
-- [ ] 94. `quantity=` is ignored on rewards, cargo ticks and market stock
+- [x] 94. `quantity=` is ignored on rewards, cargo ticks and market stock
 - [ ] 95. Item `replace=` rewards add a duplicate instead of transforming the possession
 - [ ] 96. Hidden item rewards inside `<group>` choices are never granted
 - [ ] 98. Resurrection arrangements ignore replacement, supplemental and hidden semantics
@@ -3445,6 +3445,30 @@ number subject to carry/cargo capacity, keep uncollected units available where
 the player must choose capacity, and enforce trade stock per visit. Test fixed
 and rolled item quantities, quantity currency items, partial capacity, two cargo
 units, and a one-ship market row. Stamp and run all sections.
+
+**Done (2026-07-13).** `renderItemAward` (render.js) now honours `quantity=` as a
+per-visit countdown: each click takes ONE unit (tallied in a new `ctx.awardCounts`
+keyed by path) up to the resolved quantity, so a possession award can be picked up
+partially when the 12-item cap bites and the rest stay available (§6.257 twelve
+nuggets, §3.16/339 three swords, §6.375 two axes). A rolled quantity (§1.561 x
+fish, §4.425 x·1000 Shards) waits for its `<random var>` — `quantity` was added to
+`pendingRollVar`'s QTY list, and the award renders a disabled "Roll first" button
+until the die resolves, rather than granting x=0 and memoising it. Currency awards
+(§4.425) bank their value per click with no slot cost; the choose-one grant path
+(`grantChoosableReward`) honours quantity too (§4.634's two-ink-sac barter option).
+`<tick cargo>` (engine.js) loads `quantity=` units onto the current vessel, capped
+by hold capacity — §3.569 loads 2 textiles, and a full hold refuses the overflow
+(imported `SHIP_TYPES` for the capacity). `renderShopRow` (render.js) enforces a
+per-visit stock cap via a new `ctx.stock` tally: §6.655's lone salvaged barque
+sells once then shows "Sold out" instead of being re-buyable. (Inline `<buy
+quantity=>` caps were already handled by task 23's `ctx.buys`.)
+
+Tests: +19 (block-scoped) — §6.375 two-axe countdown (one/two taken, then closed);
+partial capacity (1 free slot takes 1 axe, holds the 2nd, re-arms when a slot frees);
+§1.561 fish award disabled pre-roll then live for exactly x units; §4.425 gold lots
+bank x·1000 Shards using no slots; `<tick cargo quantity=2>` loads 2 on a brigantine
+and 1 on a barque (cap); §6.655 barque bought once then sold out. Web-only; stamped
+`26.07.13.c6bb64c`. Suite green: `RESULT ALL PASS pass=905 fail=0`.
 
 ---
 

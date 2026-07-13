@@ -133,7 +133,7 @@ export class Story {
     this.state.arriveAtDock(sectionEl.getAttribute('dock'));
     // Remember this section's todock= so the wrapped navigate applies it on leaving. (task 81)
     this.sectionTodock = sectionEl.getAttribute('todock') || null;
-    this.ctx = { applied: new Set(), rolls: new Map(), fights: new Map(), buys: new Map(), groupLimits: new Map(), groupPicks: new Map(), wroteVars: new Set(), rolledVars: new Set(), pathNodes: new Map(), rollLockCaches: new Set(), forcedChosen: new Map() };
+    this.ctx = { applied: new Set(), rolls: new Map(), fights: new Map(), buys: new Map(), groupLimits: new Map(), groupPicks: new Map(), wroteVars: new Set(), rolledVars: new Set(), pathNodes: new Map(), rollLockCaches: new Set(), forcedChosen: new Map(), awardCounts: new Map(), stock: new Map() };
     // Gambling-bet lock (task 38): a <tick special="lock" cache="X"> bundled inside
     // a roll <group> means "freeze the bet once you roll" (book1/91, book2/134) — as
     // opposed to a top-level lock, which is stash bookkeeping and must NOT disable
@@ -1061,7 +1061,7 @@ export class Story {
   // renderPassive): a literal, a dice expression, or an already-set var applies now,
   // and a var no roll here fills is left to apply (harmlessly as 0) rather than hang.
   pendingRollVar(node) {
-    const QTY = ['multiple', 'shards', 'stamina', 'staminato', 'amount', 'count', 'itemAt'];
+    const QTY = ['multiple', 'shards', 'stamina', 'staminato', 'amount', 'count', 'itemAt', 'quantity'];
     for (const a of QTY) {
       const v = node.getAttribute(a);
       if (v == null) continue;
@@ -1325,14 +1325,20 @@ export class Story {
     if (ITEM_FAMILY_TAGS.has(tag)) {
       const rawName = node.getAttribute('name') || tag;
       const currency = tag === 'item' ? currencyAward(rawName) : null;
+      // A quantity= choose-one option grants that many of the reward (§4.634's ink-sac
+      // barter option is two sacs), currency stacking freely and possessions limited by
+      // the 12-item carry cap. (task 94)
+      const quantity = node.getAttribute('quantity') != null ? Math.max(1, resolveValue(this.state, node.getAttribute('quantity'))) : 1;
       if (currency != null) {
-        this.state.adjustMoney(currency);
+        for (let k = 0; k < quantity; k++) this.state.adjustMoney(currency);
       } else {
         const { name, alts } = splitItemName(rawName);
         const bonus = node.getAttribute('bonus') ? parseInt(node.getAttribute('bonus'), 10) : 0;
         const ability = node.getAttribute('ability') || null;
         const tags = [...parseTags(node.getAttribute('tags')), ...alts];
-        this.state.addItem(makeItem(tag, name, bonus, ability, tags, readItemEffects(node), node.getAttribute('group')));
+        const group = node.getAttribute('group');
+        const effects = readItemEffects(node);
+        for (let k = 0; k < quantity && this.state.freeSlots() > 0; k++) this.state.addItem(makeItem(tag, name, bonus, ability, tags, effects, group));
       }
       this.state.setFlag(key, false);
       return '';
@@ -1623,28 +1629,49 @@ export class Story {
     else if (bonus) tag = ` (+${bonus})`;
     const display = currency != null ? `${currency} Shards` : titleCase(name) + tag;
     const key = 'take@' + path;
-    const taken = this.ctx.applied.has(key);
     // Grouped "choose up to N" award: consult the shared group tally so the extra
     // rows lock once the player has taken their allotment (book1/16, book4/218…).
     const group = node.getAttribute('group');
     const limit = group ? this.ctx.groupLimits.get(group) : null;
     const groupCount = group ? (this.ctx.groupPicks.get(group) || 0) : 0;
+
+    // quantity= awards more than one of the same reward — a fixed count (§6.257
+    // twelve silver nuggets, §3.16 three swords) or a rolled one (§1.561 x fish,
+    // §4.425 x lots of 1000 Shards). Each click takes ONE unit, so a possession
+    // award can be picked up partially when the 12-item cap bites and the rest stay
+    // available; a rolled quantity waits for its <random var> before it is live
+    // (else x=0 would grant nothing and memoise it). (task 94)
+    const qtyAttr = node.getAttribute('quantity');
+    if (qtyAttr != null && this.pendingRollVar(node)) {
+      const wait = document.createElement('button');
+      wait.className = 'btn-mini take-item';
+      wait.disabled = true;
+      wait.textContent = 'Take ' + display;
+      wait.title = 'Roll first';
+      container.appendChild(wait);
+      return wait;
+    }
+    const quantity = qtyAttr != null ? Math.max(0, resolveValue(this.state, qtyAttr)) : 1;
+    const takenCount = this.ctx.awardCounts.get(key) || 0;
+    const remaining = Math.max(0, quantity - takenCount);
+    const taken = remaining <= 0;
+    const countSuffix = quantity > 1 ? ` (${remaining} of ${quantity} left)` : '';
     const groupFull = limit != null && !taken && groupCount >= limit;
     const btn = document.createElement('button');
     btn.className = 'btn-mini take-item' + (taken ? ' done' : '');
     if (taken) {
       btn.disabled = true;
-      btn.textContent = '☑ ' + display;
+      btn.textContent = '☑ ' + display + (quantity > 1 ? ` (×${quantity})` : '');
     } else if (groupFull) {
       btn.disabled = true;
-      btn.textContent = display;
+      btn.textContent = display + countSuffix;
       btn.title = `You may choose only ${limit}`;
     } else if (currency == null && this.state.freeSlots() <= 0) {
       btn.disabled = true;
-      btn.textContent = display;
+      btn.textContent = display + countSuffix;
       btn.title = 'No room (12-item carry limit)';
     } else {
-      btn.textContent = 'Take ' + display;
+      btn.textContent = 'Take ' + display + countSuffix;
       const tags = [...parseTags(node.getAttribute('tags')), ...alts];
       const effects = readItemEffects(node); // <effect> use/aura/wielded children (task 41)
       // A trapped treasure carries a <curse>/<disease>/<poison> child that only
@@ -1656,7 +1683,7 @@ export class Story {
           this.state.addItem(makeItem(kind, name, bonus, ability, tags, effects, group));
           afflictions.forEach((aff) => applyEffect(aff, this.state));
         }
-        this.ctx.applied.add(key);
+        this.ctx.awardCounts.set(key, takenCount + 1);
         if (limit != null) this.ctx.groupPicks.set(group, groupCount + 1);
         this.rerender();
       });
@@ -2734,19 +2761,30 @@ export class Story {
     label.textContent = titleCase(splitItemName(name).name) + tag; // show the first of a "a|b" label
     row.appendChild(label);
 
+    // quantity= caps how many of this row are in stock this visit — §6.655's lone
+    // salvaged barque is a one-off sale, not an unlimited shipyard, so it can be
+    // bought only once per visit rather than repeatedly. (task 94) The per-visit
+    // tally lives on ctx; a direct renderMarket() with no visit context (some tests)
+    // simply has no cap.
+    const stockAttr = node.getAttribute('quantity');
+    const stockLimit = stockAttr != null ? resolveValue(this.state, stockAttr) : null;
+    const bought = (this.ctx && this.ctx.stock.get(path)) || 0;
+    const soldOut = stockLimit != null && bought >= stockLimit;
+
     const actions = document.createElement('span');
     actions.className = 'trade-actions';
     if (buy != null) {
       const price = resolveValue(this.state, buy);
       const b = document.createElement('button');
       b.className = 'btn-mini';
-      b.textContent = `Buy ${price}${coin}`;
+      b.textContent = soldOut ? 'Sold out' : `Buy ${price}${coin}`;
       const noSlot = carryable && this.state.freeSlots() <= 0;
-      b.disabled = balance < price || noSlot;
-      b.title = balance < price ? `Not enough ${foreign ? currency : 'Shards'}` : (noSlot ? 'No room (12-item limit)' : '');
+      b.disabled = soldOut || balance < price || noSlot;
+      b.title = soldOut ? 'None left' : (balance < price ? `Not enough ${foreign ? currency : 'Shards'}` : (noSlot ? 'No room (12-item limit)' : ''));
       b.addEventListener('click', () => {
         const res = buyTrade(this.state, goods, price, currency);
         if (!res.ok) { if (res.note) this.notify(res.note, 'warn'); return; }
+        if (stockLimit != null && this.ctx) this.ctx.stock.set(path, bought + 1);
         this.rerender();
       });
       actions.appendChild(b);

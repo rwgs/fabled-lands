@@ -1,7 +1,7 @@
 // engine.js — the rules engine: dice, condition evaluation, and passive effects.
 // Reads attributes off the parsed XML elements and applies them to a GameState.
 
-import { ABILITIES, canonShipType, CREW_LEVELS } from './rules.js';
+import { ABILITIES, canonShipType, CREW_LEVELS, SHIP_TYPES } from './rules.js';
 import { makeItem, normalize, matchItems, matchItemQuery, isShardsCurrency } from './state.js';
 import { availableBooks } from './data.js';
 
@@ -719,7 +719,21 @@ function applyTick(el, state, opts) {
   // crew=/cargo= act on the current vessel; a recognized attribute with no vessel
   // present is inert but still sets `did` (no bare-tick box fallthrough). (task 89)
   if (get('crew') != null) { const s = state.currentShip(); if (s) { s.crew = get('crew'); state.changed(); } did = true; }
-  if (get('cargo') != null) { const s = state.currentShip(); if (s) { (s.cargo ||= []).push(get('cargo')); state.changed(); } did = true; }
+  if (get('cargo') != null) {
+    // Load quantity= units of cargo onto the current vessel, up to its hold capacity
+    // (§3.569 loads 2 Cargo Units of textiles, not 1); default 1 (§3.583). A full
+    // hold refuses the overflow rather than exceeding capacity. (task 94)
+    const s = state.currentShip();
+    if (s) {
+      const qty = get('quantity') != null ? resolveValue(state, get('quantity')) : 1;
+      const cap = SHIP_TYPES[canonShipType(s.type)]?.capacity || 1;
+      s.cargo ||= [];
+      let loaded = 0;
+      for (let k = 0; k < qty && s.cargo.length < cap; k++) { s.cargo.push(get('cargo')); loaded++; }
+      if (loaded) state.changed();
+    }
+    did = true;
+  }
   // Enchant one or more possessions in place: addbonus= raises the bonus, addtag=
   // stamps a tag, removetag= strips one. The target is selected by item=/weapon=/
   // armour=/tool= (kind-filtered), narrowed by tags= / using= (the wielded weapon or
