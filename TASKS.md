@@ -27,7 +27,7 @@ the tasks were filed, not work order).
 **MEDIUM**
 - [x] 93. Item group provenance and rolled `itemAt=` losses are not represented
 - [x] 94. `quantity=` is ignored on rewards, cargo ticks and market stock
-- [ ] 95. Item `replace=` rewards add a duplicate instead of transforming the possession
+- [x] 95. Item `replace=` rewards add a duplicate instead of transforming the possession
 - [ ] 96. Hidden item rewards inside `<group>` choices are never granted
 - [ ] 98. Resurrection arrangements ignore replacement, supplemental and hidden semantics
 - [ ] 100. The two live `<while>` loops execute only one rendered pass
@@ -3485,6 +3485,26 @@ preserving the new node's kind/bonus/ability/tags and not changing slot count.
 Disable/refuse only when the required source item is absent, and make the action
 visit-safe. Add coverage for all three shapes above and a full-inventory case.
 Stamp and run all sections.
+
+**Done (2026-07-13).** `renderItemAward` (render.js) now detects `replace=` and hands
+off to a new `renderReplaceAward`, which transforms the matching possession in place
+rather than adding a duplicate. The target is the named `replace="X"` or, for empty
+`replace=""`, the reward's own name (the same-named item is upgraded). On click the
+old possession is removed and the new one added — or, for a "N Shards" reward
+(§5.118 bag of gold → 2000 Shards), its value banked — so the slot count never rises
+and the 12-item carry cap can't refuse the conversion. The row is disabled while the
+source item is absent (you cannot transform what you do not hold), and is memoised
+(`ctx.applied`) so a re-render never re-transforms. The transformed item keeps its
+provenance group (the reward's own, else the source's) so §5.118's group-scoped
+count stays stable across the swap. Covers §5.118 (flute/axe `replace=""`, bag of
+gold → currency), §6.207 (sceptre → +5 tool), §6.448a (cursed −2 sword → clean +2 —
+removing the −2 blade is itself the curse lift, per §6.677's forced weapon).
+
+Tests: +12 (block-scoped) — §5.118 all three transforms (in-place, no duplicate,
+slot count steady, currency banked and a slot freed, rows checked-off after);
+§6.207 same-name sceptre upgrade; §6.448a cursed→clean sword; a full (12-item)
+inventory still allowing the net-zero replace; and a source-absent row disabled.
+Web-only; stamped `26.07.13.1f6b585`. Suite green: `RESULT ALL PASS pass=917 fail=0`.
 
 ---
 

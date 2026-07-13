@@ -1629,6 +1629,13 @@ export class Story {
     else if (bonus) tag = ` (+${bonus})`;
     const display = currency != null ? `${currency} Shards` : titleCase(name) + tag;
     const key = 'take@' + path;
+    // replace= TRANSFORMS an existing possession into this reward instead of adding a
+    // duplicate: a named replace="X" converts the item named X, an empty replace=""
+    // converts the same-named item (§5.118 plain flute/axe → enchanted, bag of gold →
+    // 2000 Shards; §6.207 old sceptre → +5; §6.448a cursed sword → clean +2). It is
+    // net-zero on slots so the 12-item cap never blocks it, and it is disabled while
+    // the source item is absent. Visit-safe (memoised once done). (task 95)
+    if (node.getAttribute('replace') != null) return this.renderReplaceAward(container, node, path, { kind, name, alts, bonus, ability, currency, display, key });
     // Grouped "choose up to N" award: consult the shared group tally so the extra
     // rows lock once the player has taken their allotment (book1/16, book4/218…).
     const group = node.getAttribute('group');
@@ -1685,6 +1692,48 @@ export class Story {
         }
         this.ctx.awardCounts.set(key, takenCount + 1);
         if (limit != null) this.ctx.groupPicks.set(group, groupCount + 1);
+        this.rerender();
+      });
+    }
+    container.appendChild(btn);
+    return btn;
+  }
+
+  // A replace= award (see renderItemAward): transform the matching possession into
+  // this reward in place. targetName is the named replace="X", or — for empty
+  // replace="" — the reward's own name (the same-named item is upgraded). The old
+  // possession is removed and the new one added (or, for a "N Shards" reward, its
+  // value banked), so the slot count does not rise and the carry cap never refuses
+  // the conversion. Disabled while the source is absent. (task 95)
+  renderReplaceAward(container, node, path, { kind, name, alts, bonus, ability, currency, display, key }) {
+    const targetName = node.getAttribute('replace') || name;
+    const source = this.state.findItems(targetName)[0] || null;
+    const done = this.ctx.applied.has(key);
+    const btn = document.createElement('button');
+    btn.className = 'btn-mini take-item' + (done ? ' done' : '');
+    if (done) {
+      btn.disabled = true;
+      btn.textContent = '☑ ' + display;
+    } else if (!source) {
+      btn.disabled = true;
+      btn.textContent = display;
+      btn.title = `You have no ${titleCase(targetName)} to transform`;
+    } else {
+      btn.textContent = 'Take ' + display;
+      const tags = [...parseTags(node.getAttribute('tags')), ...alts];
+      const effects = readItemEffects(node);
+      const afflictions = Array.from(node.querySelectorAll(':scope > curse, :scope > disease, :scope > poison'));
+      // Keep the transformed item's provenance: the reward's own group=, else the
+      // source item's, so a group-scoped count (§5.118) stays stable across the swap.
+      const grp = node.getAttribute('group') || source.group || null;
+      btn.addEventListener('click', () => {
+        this.state.removeItemById(source.id); // net-zero: drop the old, add/bank the new
+        if (currency != null) this.state.adjustMoney(currency);
+        else {
+          this.state.addItem(makeItem(kind, name, bonus, ability, tags, effects, grp));
+          afflictions.forEach((aff) => applyEffect(aff, this.state));
+        }
+        this.ctx.applied.add(key);
         this.rerender();
       });
     }

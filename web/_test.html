@@ -3827,6 +3827,82 @@ async function run() {
       ok('task94: the one-off ship row is then sold out (no repeat purchase)', buy655().disabled && /sold out/i.test(buy655().textContent), buy655() && buy655().textContent);
     }
 
+    // --- task 95: replace= transforms a possession in place (no duplicate) ------
+    { // block-scoped
+      // §5.118: three replaces on the §5.238 tomb haul — empty replace="" upgrades the
+      // same-named item, and a named replace to a "N Shards" reward banks the cash.
+      const g118r = GameState.create({ name:'T118r', gender:'m', profession:'Warrior', book:5, adv });
+      g118r.data.items = []; g118r.data.shards = 0;
+      g118r.addItem(makeItem('item', 'silver flute', 0, null, [], [], '5.238'));
+      g118r.addItem(makeItem('item', 'black axe', 0, null, [], [], '5.238'));
+      g118r.addItem(makeItem('item', 'bag of gold', 0, null, [], [], '5.238'));
+      const startCount95 = g118r.itemCount();
+      const c118r = document.createElement('div');
+      const st118r = new Story(c118r, g118r, { navigate(){}, onDeath(){}, notify(){} });
+      st118r.begin(await data.getSection(5, '118'), 5, '118');
+      const findBtn95 = (re) => Array.from(c118r.querySelectorAll('.take-item')).find((b) => re.test(b.textContent));
+      findBtn95(/silver flute/i).click();
+      const flute95 = g118r.findItems('silver flute');
+      ok('task95: replace="" transforms the same-named item in place (no duplicate)', flute95.length === 1 && flute95[0].kind === 'tool' && flute95[0].ability === 'charisma' && flute95[0].bonus === 2 && g118r.itemCount() === startCount95, JSON.stringify(flute95));
+      findBtn95(/2000 shards/i).click();
+      ok('task95: a named replace to a currency reward banks Shards and frees the slot', !g118r.hasItem('bag of gold') && g118r.data.shards === 2000 && g118r.itemCount() === startCount95 - 1, `shards=${g118r.data.shards} items=${g118r.itemCount()}`);
+      findBtn95(/black axe/i).click();
+      const axe95 = g118r.findItems('black axe');
+      ok('task95: replace="" upgrades the black axe to a +1 weapon', axe95.length === 1 && axe95[0].kind === 'weapon' && axe95[0].bonus === 1, JSON.stringify(axe95));
+      ok('task95: completed replace rows are checked-off (visit-safe, no re-transform)', Array.from(c118r.querySelectorAll('.take-item')).filter((b) => b.disabled && /☑/.test(b.textContent)).length >= 3);
+
+      // §6.207: a named replace="royal sceptre" upgrades the plain sceptre to the +5 tool.
+      const g207 = GameState.create({ name:'T207', gender:'m', profession:'Warrior', book:6, adv });
+      g207.data.items = [];
+      g207.addItem(makeItem('item', 'royal sceptre')); // the plain sceptre from §6.166
+      const c207 = document.createElement('div');
+      const st207 = new Story(c207, g207, { navigate(){}, onDeath(){}, notify(){} });
+      st207.begin(await data.getSection(6, '207'), 6, '207');
+      const sceptreBtn = () => Array.from(c207.querySelectorAll('.take-item')).find((b) => /sceptre/i.test(b.textContent));
+      ok('task95: §207 sceptre transform is offered when the source is present', !!sceptreBtn() && !sceptreBtn().disabled);
+      const cnt207 = g207.itemCount();
+      sceptreBtn().click();
+      const scep = g207.findItems('royal sceptre');
+      ok('task95: §207 upgrades the sceptre in place to the +5 tool, no duplicate', scep.length === 1 && scep[0].kind === 'tool' && scep[0].bonus === 5 && scep[0].ability === '*' && g207.itemCount() === cnt207, JSON.stringify(scep));
+
+      // §6.448a: the cursed sword (a forced −2 weapon) turns into a clean +2 sword.
+      const g448 = GameState.create({ name:'T448', gender:'m', profession:'Warrior', book:6, adv });
+      g448.data.items = [];
+      g448.addItem(makeItem('weapon', 'cursed sword', -2)); // §6.677's forced −2 blade
+      const c448 = document.createElement('div');
+      const st448 = new Story(c448, g448, { navigate(){}, onDeath(){}, notify(){} });
+      st448.begin(await data.getSection(6, '448a'), 6, '448a');
+      const swordBtn = () => Array.from(c448.querySelectorAll('.take-item')).find((b) => /sword/i.test(b.textContent));
+      ok('task95: §448a offers the cursed-sword transform', !!swordBtn() && !swordBtn().disabled);
+      const cnt448 = g448.itemCount();
+      swordBtn().click();
+      ok('task95: §448a turns the cursed sword into a clean +2 sword', !g448.hasItem('cursed sword') && g448.findItems('sword').some((w)=>w.kind==='weapon' && w.bonus===2) && g448.itemCount() === cnt448, JSON.stringify(g448.data.items));
+
+      // Full inventory: a net-zero replace is NOT refused by the 12-item carry cap.
+      const gfull95 = GameState.create({ name:'Tfull', gender:'m', profession:'Warrior', book:6, adv });
+      gfull95.data.items = [];
+      gfull95.addItem(makeItem('item', 'royal sceptre'));
+      for (let k = 0; k < 11; k++) gfull95.addItem(makeItem('item', 'junk'+k)); // 12 items → full
+      ok('task95: the test inventory is full', gfull95.freeSlots() === 0);
+      const cfull95 = document.createElement('div');
+      const stfull95 = new Story(cfull95, gfull95, { navigate(){}, onDeath(){}, notify(){} });
+      stfull95.begin(await data.getSection(6, '207'), 6, '207');
+      const fullBtn95 = () => Array.from(cfull95.querySelectorAll('.take-item')).find((b) => /sceptre/i.test(b.textContent));
+      ok('task95: a full inventory does not block a net-zero replace', !!fullBtn95() && !fullBtn95().disabled);
+      fullBtn95().click();
+      const scepF = gfull95.findItems('royal sceptre');
+      ok('task95: replace at full inventory transforms in place (still 12 items)', scepF.length === 1 && scepF[0].kind === 'tool' && gfull95.itemCount() === 12, `items=${gfull95.itemCount()}`);
+
+      // Source absent: the replace row is disabled (nothing to transform).
+      const gabs95 = GameState.create({ name:'Tabs', gender:'m', profession:'Warrior', book:6, adv });
+      gabs95.data.items = []; // no cursed sword
+      const cabs95 = document.createElement('div');
+      const stabs95 = new Story(cabs95, gabs95, { navigate(){}, onDeath(){}, notify(){} });
+      stabs95.begin(await data.getSection(6, '448a'), 6, '448a');
+      const absBtn95 = Array.from(cabs95.querySelectorAll('.take-item')).find((b) => /sword/i.test(b.textContent));
+      ok('task95: a replace with no source item is disabled', !!absBtn95 && absBtn95.disabled, absBtn95 && absBtn95.textContent);
+    }
+
   } catch (e) {
     out.push('FATAL ' + (e.stack || e.message));
     fail++;
