@@ -2193,6 +2193,70 @@ async function run() {
       ok('§91 the group retry strikes only the missed foe (Orc 12→9, Goblin 10/10)', /Stamina 9\/12/.test(orc91.textContent) && /Stamina 10\/10/.test(gob91.textContent) && gdg91.data.stamina === 40, `${orc91.textContent} | ${gob91.textContent}`);
     }
 
+    // --- task 92: the eight live <adjust> variants --------------------------------------
+    { // block-scoped (task 82)
+      const adj92 = (xml, g) => eng.childAdjustment(parse(xml), g);
+      const g92 = GameState.create({ name:'AJ92', gender:'m', profession:'Warrior', book:5, adv });
+      ok('§92 titleVal uses default= without the title (−1)', adj92('<random><adjust titleVal="bokh" default="-1"/></random>', g92) === -1);
+      g92.addTitle('bokh', 2);
+      ok('§92 titleVal adds the held title value (+2)', adj92('<random><adjust titleVal="bokh" default="-1"/></random>', g92) === 2);
+      g92.data.rank = 5;
+      ok('§92 ability="rank" greaterthan=3 applies at Rank 5', adj92('<random><adjust ability="rank" greaterthan="3" value="1"/></random>', g92) === 1);
+      ok('§92 greaterthan=5 does not apply at Rank 5', adj92('<random><adjust ability="rank" greaterthan="5" value="1"/></random>', g92) === 0);
+      ok('§92 lessthan=4 does not apply at Rank 5', adj92('<random><adjust ability="rank" lessthan="4" value="1"/></random>', g92) === 0);
+      ok('§92 title= gates on holding the title', adj92('<random><adjust title="Nightstalker" value="1"/></random>', g92) === 0);
+      g92.addTitle('Nightstalker');
+      ok('§92 title= applies once held (§4.63)', adj92('<random><adjust title="Nightstalker" value="1"/></random>', g92) === 1);
+
+      // §5.79: <adjust ability="combat" modifier="noweapon"/> adds the unarmed score.
+      const g92w = GameState.create({ name:'AJ92w', gender:'m', profession:'Warrior', book:5, adv });
+      g92w.data.items = g92w.data.items.filter((i) => i.kind !== 'weapon');
+      g92w.reconcileEquipment();
+      g92w.addItem(makeItem('weapon', 'glaive', 2));
+      const n79 = (await data.getSection(5, '79')).querySelector('random');
+      ok('§5.79 modifier="noweapon" excludes the +2 weapon bonus', g92w.ability('combat') === g92w.abilityNatural('combat') + 2 && eng.childAdjustment(n79, g92w) === g92w.abilityNatural('combat'), `full=${g92w.ability('combat')} nw=${eng.childAdjustment(n79, g92w)}`);
+
+      // §2.579: stamina modifier natural (written score) / current, vs the effective max.
+      const g92s = GameState.create({ name:'AJ92s', gender:'m', profession:'Warrior', book:2, adv });
+      g92s.data.staminaMax = 20; g92s.data.stamina = 5;
+      g92s.addItem(makeItem('item', 'vitality charm', 0, null, [], eng.readItemEffects(parse('<item name="vitality charm"><effect type="aura" ability="stamina" bonus="2"/></item>'))));
+      ok('§2.579 modifier="natural" reads the written unwounded score (20, not 22)', adj92('<lose><adjust ability="stamina" modifier="natural"/></lose>', g92s) === 20 && g92s.effectiveStaminaMax() === 22);
+      ok('§92 modifier="current" reads the wounded value (5)', adj92('<lose><adjust ability="stamina" modifier="current"/></lose>', g92s) === 5);
+      ok('§92 a bare stamina adjust still reads the effective max (22)', adj92('<lose><adjust ability="stamina"/></lose>', g92s) === 22);
+
+      // §6.736: item="?" tags="light" — any light source adds the +2.
+      const g92l = GameState.create({ name:'AJ92l', gender:'m', profession:'Warrior', book:6, adv });
+      const n736 = (await data.getSection(6, '736')).querySelector('difficulty');
+      ok('§6.736 no light source ⇒ no +2', eng.childAdjustment(n736, g92l) === 0);
+      g92l.addItem(makeItem('item', 'lantern', 0, null, ['light']));
+      ok('§6.736 a light-tagged item adds the +2', eng.childAdjustment(n736, g92l) === 2);
+
+      // §4.411 (source normalized to profession="Warrior"): Warrior + Rank 5 + good crew.
+      const n411 = (await data.getSection(4, '411')).querySelector('difficulty');
+      const g92a = GameState.create({ name:'AJ92a', gender:'m', profession:'Warrior', book:4, adv });
+      g92a.data.rank = 5;
+      g92a.addShip({ type:'barque', crew:'good', cargo:[], docked:null });
+      ok('§4.411 Warrior/Rank 5/good crew ⇒ +3', eng.childAdjustment(n411, g92a) === 3, String(eng.childAdjustment(n411, g92a)));
+      const g92b = GameState.create({ name:'AJ92b', gender:'m', profession:'Rogue', book:4, adv });
+      g92b.data.rank = 1;
+      g92b.addShip({ type:'barque', crew:'poor', cargo:[], docked:null });
+      ok('§4.411 Rogue/Rank 1/poor crew ⇒ −1 (nothing applies unconditionally)', eng.childAdjustment(n411, g92b) === -1, String(eng.childAdjustment(n411, g92b)));
+
+      // §5.343: the bokh game adds your circles of mastery, else −1.
+      const n343 = (await data.getSection(5, '343')).querySelector('random');
+      const g92c = GameState.create({ name:'AJ92c', gender:'m', profession:'Warrior', book:5, adv });
+      ok('§5.343 no bokh mastery ⇒ −1', eng.childAdjustment(n343, g92c) === -1);
+      g92c.addTitle('bokh', 3);
+      ok('§5.343 a 3rd-Circle Master adds +3', eng.childAdjustment(n343, g92c) === 3);
+
+      // §5.527: galleon +1, excellent crew +1, Rank > 5 +1.
+      const n527 = (await data.getSection(5, '527')).querySelector('random');
+      const g92d = GameState.create({ name:'AJ92d', gender:'m', profession:'Warrior', book:5, adv });
+      g92d.data.rank = 6;
+      g92d.addShip({ type:'galleon', crew:'excellent', cargo:[], docked:null });
+      ok('§5.527 galleon/excellent crew/Rank 6 ⇒ +3', eng.childAdjustment(n527, g92d) === 3, String(eng.childAdjustment(n527, g92d)));
+    }
+
     // --- task 80: combat blessings (Divine Wrath / Defence through Faith) --------------
     // Headless: Divine Wrath deals 1d to the enemy, once, and is consumed.
     const gw80 = GameState.create({ name:'W80', gender:'m', profession:'Warrior', book:6, adv });

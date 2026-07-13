@@ -8,7 +8,7 @@
 	</p>
 	<p>
 		<difficulty ability="charisma" level="11">
-			<adjust profession="1" value="1"/>
+			<adjust profession="Warrior" value="1"/>
 			<adjust ability="rank" greaterthan="3" value="1"/>
 			<adjust crew="poor" value="-1"/>
 			<adjust crew="good" value="1"/>

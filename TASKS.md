@@ -25,15 +25,15 @@ the tasks were filed, not work order).
 - [x] 71. `<lose staminato="N">` never applies — the handler is gated on a `stamina=` attr it lacks (16 sections)
 
 **MEDIUM**
-- [ ] 92. Eight live `<adjust>` variants are ignored or applied unconditionally
-- [x] 91. COMBAT blessing cannot reroll an attack, and Defence blessing leaks between fights
-- [x] 90. Permanent Safety from Storms is deleted by storm-avoidance `<lose blessing>` nodes
 - [ ] 93. Item group provenance and rolled `itemAt=` losses are not represented
 - [ ] 94. `quantity=` is ignored on rewards, cargo ticks and market stock
 - [ ] 95. Item `replace=` rewards add a duplicate instead of transforming the possession
 - [ ] 96. Hidden item rewards inside `<group>` choices are never granted
 - [ ] 98. Resurrection arrangements ignore replacement, supplemental and hidden semantics
 - [ ] 100. The two live `<while>` loops execute only one rendered pass
+- [x] 92. Eight live `<adjust>` variants are ignored or applied unconditionally
+- [x] 91. COMBAT blessing cannot reroll an attack, and Defence blessing leaks between fights
+- [x] 90. Permanent Safety from Storms is deleted by storm-avoidance `<lose blessing>` nodes
 - [x] 81. Ships: honour `todock=` and track which at-large ship is being sailed *(split from task 73)*
 - [x] 80. Combat blessings: expose Defence through Faith (+3, one fight) and Divine Wrath (1d pre-damage) as fight-widget buttons *(split from task 76)*
 - [x] 75. Live `<tick>` forms for equipment, profession changes and patterned titles are incomplete/inert
@@ -3356,6 +3356,30 @@ remaining live forms therefore produce wrong difficulties:
 Implement the attributes according to `JaFL-XML-Tags.html`, normalize the §4.411
 source typo, and add focused calculation tests plus integration renders for these
 eight nodes. Rebuild generated data, stamp, and run all sections.
+
+**Done (2026-07-12).** Both halves implemented per the spec (engine.js):
+- **`adjustAmount`** — `titleVal="T" [default="N"]` adds the title's stored value
+  (bokh circles of mastery) or the default when unheld; `ability=` now honours
+  `modifier=`: the six abilities resolve through `abilityForMode` (noweapon/
+  notool/natural — §5.79's unarmed COMBAT), and `stamina` distinguishes
+  `natural` (the written unwounded score — §2.579's reset) and `current` (the
+  wounded value) from the default effective max.
+- **`adjustApplies`** — `greaterthan=`/`lessthan=` turn the `ability=`/`name=`
+  VALUE into the condition, with the contribution coming from `value=` (§4.411
+  Rank > 3, §5.527 Rank > 5 — previously unconditional); `title=` is a has-title
+  gate (§4.63 Nightstalker — previously everyone); `item="?" [tags=…]` routes
+  through `hasItemMatch` (§6.736's any-light-source +2 — previously a literal
+  item named "?"), name lists keep the exact match.
+- **§4.411 source** — `profession="1"` normalized to `profession="Warrior"`
+  (matching its prose); data rebuilt under pwsh 7 (book4.json + meta only).
+
+Tests: +18 — unit (titleVal held/default, rank greaterthan/lessthan both ways,
+title gate, noweapon vs full score with a +2 weapon, stamina natural=20 vs
+current=5 vs effective=22 under a +2 aura) and integration on the shipped nodes
+(§6.736 with/without a light source, §4.411 Warrior/Rank 5/good crew = +3 vs
+Rogue/Rank 1/poor crew = −1, §5.343 bokh −1/+3, §5.527 galleon/excellent/Rank 6
+= +3). Stamped `26.07.12.6aa9e84`. Suite green: `RESULT ALL PASS pass=866
+fail=0`.
 
 ---
 

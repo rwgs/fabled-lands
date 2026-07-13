@@ -1166,17 +1166,28 @@ export function childAdjustment(el, state) {
 }
 
 /** The signed amount a roll-modifier <adjust> contributes. An explicit
- *  value=/amount= wins; otherwise <adjust ability="X"/> adds X's current value
- *  (e.g. "Add your Rank to the roll"), and <adjust name="V"/> adds a stored var. */
+ *  value=/amount= wins; otherwise <adjust titleVal="T" [default="N"]/> adds the
+ *  title's value or the default when it isn't held (§5.343/432 bokh circles),
+ *  <adjust ability="X" [modifier=…]/> adds X's value under the resolution keyword
+ *  (noweapon/notool/natural — §5.79 unarmed COMBAT; for stamina: natural = the
+ *  written unwounded score (§2.579), current = the wounded value), and
+ *  <adjust name="V"/> adds a stored counter. (tasks 25, 44, 92) */
 function adjustAmount(el, state) {
   const v = el.getAttribute('value') ?? el.getAttribute('amount');
   if (v != null) return resolveValue(state, v);
+  const tv = el.getAttribute('titleVal');
+  if (tv != null) return state.hasTitle(tv) ? state.titleValue(tv) : resolveValue(state, el.getAttribute('default') ?? '0');
   const ab = el.getAttribute('ability');
   if (ab != null) {
     const key = ab.split('|')[0].trim().toLowerCase();
+    const mode = String(el.getAttribute('modifier') || '').trim().toLowerCase() || null;
     if (key === 'rank') return state.rankValue(); // ring of ultimate power +2 (task 44)
-    if (key === 'stamina') return state.effectiveStaminaMax(); // unwounded score, incl. aura/affliction
-    if (ABILITIES.includes(key)) return state.ability(key);
+    if (key === 'stamina') {
+      if (mode === 'natural') return state.data.staminaMax; // the written score, no aura/affliction
+      if (mode === 'current') return state.data.stamina;
+      return state.effectiveStaminaMax(); // unwounded score, incl. aura/affliction
+    }
+    if (ABILITIES.includes(key)) return state.abilityForMode(key, mode); // mode null ⇒ the full score
   }
   const nm = el.getAttribute('name');
   if (nm != null) return state.codewordValue(nm);
@@ -1184,16 +1195,36 @@ function adjustAmount(el, state) {
 }
 
 /** Does a roll-modifier <adjust> apply in the current state? Modifiers gated on
- *  crew grade / ship type / god / profession / item / codeword count only when
- *  the player meets that condition; an unconditional modifier always counts.
- *  Crew/ship match is exact (a "good crew" bonus does not fire for excellent) and
- *  reads the CURRENT vessel — §1.586's storm bonus follows the crew sailing with
- *  you, not one berthed at another port (task 89). */
+ *  crew grade / ship type / god / profession / title / item / codeword count only
+ *  when the player meets that condition; an unconditional modifier always counts.
+ *  greaterthan=/lessthan= turn the ability=/name= VALUE into the condition (the
+ *  contribution then comes from value=/amount= — §4.411 "if you are 4th Rank or
+ *  higher", §5.527 rank > 5). Crew/ship match is exact (a "good crew" bonus does
+ *  not fire for excellent) and reads the CURRENT vessel (task 89). (task 92) */
 function adjustApplies(el, state) {
   const get = (a) => el.getAttribute(a);
+  const gt = get('greaterthan'), lt = get('lessthan');
+  if (gt != null || lt != null) {
+    let v = 0;
+    const ab = get('ability');
+    if (ab != null) {
+      const key = ab.split('|')[0].trim().toLowerCase();
+      v = key === 'rank' ? state.rankValue()
+        : key === 'stamina' ? state.data.stamina
+        : state.abilityForCheck(key, normalize(get('modifier') || '') === 'natural');
+    } else if (get('name') != null) v = state.codewordValue(get('name'));
+    return (gt == null || v > resolveValue(state, gt)) && (lt == null || v < resolveValue(state, lt));
+  }
   if (get('god') != null) return state.hasGod(get('god'));
   if (get('profession') != null) return normalize(state.data.profession) === normalize(get('profession'));
-  if (get('item') != null) return get('item').split(/[|,]/).some((n) => state.hasItem(n.trim()));
+  if (get('title') != null) return state.hasTitle(get('title')); // §4.63 Nightstalker
+  if (get('item') != null) {
+    const it = get('item');
+    // item="?" [tags=…] = any possession carrying the tags (§6.736 a light source);
+    // a name list keeps the exact-name match.
+    if (it === '?' || it === '') return state.hasItemMatch(it, get('tags'));
+    return it.split(/[|,]/).some((n) => state.hasItem(n.trim()));
+  }
   if (get('codeword') != null) return get('codeword').split(/[|,]/).some((c) => state.hasCodeword(c.trim()));
   if (get('crew') != null) { const s = state.currentShip(); return !!s && s.crew === get('crew'); }
   if (get('ship') != null) return matchShipType(state, get('ship'));
