@@ -237,11 +237,16 @@ img { max-width: 100%; }
 .illus figcaption { margin-top: 0.4rem; font-size: 0.85em; font-style: italic; opacity: 0.75; }
 
 /* inline <image>text</image> — a link that opens the illustration in a modal */
-.image-link {
+.image-link, .sectionview-link {
   display: inline; border: none; background: none; color: var(--crimson-bright); font: inherit;
   font-weight: 600; text-decoration: underline dotted; text-decoration-color: rgba(154,59,42,0.5);
   text-underline-offset: 2px; padding: 0; cursor: pointer;
 }
+
+/* <sectionview> trance oracle popup (§5.114): read-only random-section prose */
+.sectionview-cap { font-size: 0.85em; font-weight: 700; opacity: 0.7; margin-bottom: 0.4em; }
+.sectionview-prose { max-height: 45vh; overflow-y: auto; }
+.sectionview-prose p { margin: 0 0 0.7em; }
 
 /* goto links */
 .goto {

@@ -68,7 +68,7 @@ the tasks were filed, not work order).
 **LOW**
 - [x] 88. book5/386: the hidden `removetag="Tz"` cleanup fires on entry, so Targdaz's weapon-enchant roll/outcomes never land (weapon never changes)
 - [x] 97. Molhern's `itemcache` ignores its `<include>` / `<exclude>` filters
-- [ ] 101. §5.114's `<sectionview>` oracle cannot display its referenced section
+- [x] 101. §5.114's `<sectionview>` oracle cannot display its referenced section
 - [ ] 102. §1.338's standalone `<price>` does not charge for or complete the poison cure
 - [ ] 103. §4.658: `initialCrew="oldcrew"` ignores the `oldcrew` variable — the salvaged barque's crew resets to average
 - [x] 87. Fight widget "Your Combat" omits the per-fight attack bonus (`special="attack"`), unlike the Defence line
@@ -3715,6 +3715,23 @@ the requested book/section, renders its prose in an isolated view, and cannot
 apply effects, mutate navigation/history, expose interactive controls or change
 the current visit. Add a DOM test confirming both preview content and zero state
 mutation. Stamp and run all sections.
+
+**Done 2026-07-14.** `renderSectionview` (render.js) renders the tag's inner words
+as a `.sectionview-link` (text taken via `textContent`, never `appendChildren`, so
+its own body applies nothing) that opens `openSectionView` — an isolated popup
+(built directly, not via `modal()`, which closes on any button) revealing one random
+section's prose at a time, up to the `random=` count, then a Close. Section prose is
+rendered by a new exported `previewProse(el)` that walks the parsed element keeping
+only paragraphs and inline emphasis (`<b>/<i>/<u>`) and recurses every other tag for
+its words alone — mirroring `app.renderStatic` but kept in the view layer (no
+app-shell import cycle) and operating on the shared cached parse without mutating it.
+The oracle touches no game state: it reads no `state`, calls `getSection`/`loadBook`
+(data layer) and `bookTitle` only, arms no controls, and never navigates or changes
+the current visit. DOM test on §5.114: the link renders; `previewProse` shows the
+section prose ("priestess") with `<p>`s and zero controls; opening the oracle yields
+an isolated popup (caption + prose, no controls) while the player's section,
+navigation and full state JSON are unchanged. Suite green: `RESULT ALL PASS pass=979
+fail=0`.
 
 ---
 

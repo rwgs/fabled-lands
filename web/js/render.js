@@ -16,7 +16,7 @@ import { makeFight, fightRound, groupFightRound, isDefeated, useWrathBlessing, u
 import { shopKind, goodsFrom, ownsGoods, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo, canUpgradeCrew, payChoiceCost } from './market.js';
 import { normalize, makeItem, parseTags, currencyAward, splitItemName, isShardsCurrency } from './state.js';
 import { ABILITY_LABEL } from './rules.js';
-import { bookTitle, availableBooks } from './data.js';
+import { bookTitle, availableBooks, loadBook, getSection } from './data.js';
 import { animateDice, modal } from './ui.js';
 
 const INLINE_STYLE = { b: 'strong', i: 'em', u: 'u', caps: 'span' };
@@ -91,8 +91,34 @@ const TAG_RENDERERS = {
   // between rounds (combat.fightRound), so it renders as inert prose — visible
   // words, no live roll widgets the player could work out of sequence.
   fightround:      'renderInert',
-  sectionview:     'renderChildrenOnly',
+  // <sectionview> (§5.114's trance oracle) opens a read-only popup showing random
+  // sections' prose — no effects, no controls, no visit change (task 101).
+  sectionview:     'renderSectionview',
 };
+
+// Render a section's prose READ-ONLY for the <sectionview> oracle (§5.114): walk the
+// parsed element keeping paragraphs and inline emphasis, and for every game tag just
+// recurse into its words — so no effect is applied, no control is armed and the player's
+// state/visit is untouched. (A deliberate sibling of app.renderStatic, kept here so the
+// view layer needn't import the app shell.) (task 101)
+export function previewProse(sectionEl) {
+  const wrap = document.createElement('div');
+  wrap.className = 'sectionview-prose';
+  const walk = (node, parent) => {
+    Array.from(node.childNodes).forEach((n) => {
+      if (n.nodeType === Node.TEXT_NODE) { const t = n.nodeValue.replace(/\s+/g, ' '); if (t.trim()) parent.appendChild(document.createTextNode(t)); return; }
+      if (n.nodeType !== Node.ELEMENT_NODE) return;
+      const tag = n.tagName.toLowerCase();
+      if (tag === 'p') { const p = document.createElement('p'); walk(n, p); parent.appendChild(p); }
+      else if (tag === 'b') { const b = document.createElement('strong'); walk(n, b); parent.appendChild(b); }
+      else if (tag === 'i') { const i = document.createElement('em'); walk(n, i); parent.appendChild(i); }
+      else if (tag === 'u') { const u = document.createElement('u'); walk(n, u); parent.appendChild(u); }
+      else walk(n, parent); // any other tag: keep its words, drop its behaviour
+    });
+  };
+  walk(sectionEl, wrap);
+  return wrap;
+}
 
 export class Story {
   constructor(rootEl, state, opts) {
@@ -637,6 +663,87 @@ export class Story {
     // A live loop that has not yet terminated holds back the rest of the section.
     if (!terminated) this.blocked = true;
     return wrap;
+  }
+
+  // <sectionview random="N" title="T"> — §5.114's trance oracle. Renders its inner
+  // words as a link that opens a read-only popup showing up to N random sections'
+  // prose ("read any sequence of up to six paragraphs"). The preview applies no
+  // effects, arms no controls and never touches the player's section/history/state —
+  // it is pure divination flavour. (task 101)
+  renderSectionview(container, node, path) {
+    const link = document.createElement('button');
+    link.className = 'sectionview-link';
+    // Take the words directly (textContent), never appendChildren — the oracle link
+    // must not render or apply anything from its own body.
+    link.textContent = (node.textContent || '').replace(/\s+/g, ' ').trim() || 'Consult the oracle';
+    link.title = 'A read-only vision — it does not affect your adventure';
+    const count = parseInt(node.getAttribute('random') || '1', 10);
+    const title = node.getAttribute('title') || 'Vision';
+    link.addEventListener('click', () => this.openSectionView(title, count > 0 ? count : 1));
+    container.appendChild(link);
+    return link;
+  }
+
+  // A random section (book + parsed element) drawn from the available books, for the
+  // oracle. Read-only: getSection returns the shared cached parse, which previewProse
+  // never mutates. Retries a few times in case a random key misses.
+  async randomSectionEl() {
+    const books = availableBooks();
+    if (!books.length) return null;
+    for (let tries = 0; tries < 8; tries++) {
+      const b = books[Math.floor(Math.random() * books.length)];
+      let raw;
+      try { raw = await loadBook(b); } catch { continue; }
+      const keys = Object.keys(raw || {});
+      if (!keys.length) continue;
+      const key = keys[Math.floor(Math.random() * keys.length)];
+      const el = await getSection(b, key);
+      if (el) return { book: b, section: key, el };
+    }
+    return null;
+  }
+
+  // The oracle popup: an isolated modal (built directly rather than via modal(), which
+  // closes on any button) that reveals one random section's prose at a time, up to
+  // `count` reveals, then a Close. Nothing here reads or writes game state. (task 101)
+  async openSectionView(title, count) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    const box = document.createElement('div');
+    box.className = 'modal sectionview-modal';
+    const h = document.createElement('h2'); h.textContent = title; box.appendChild(h);
+    const body = document.createElement('div'); body.className = 'modal-body'; box.appendChild(body);
+    const bar = document.createElement('div'); bar.className = 'modal-buttons';
+    const another = document.createElement('button'); another.className = 'btn btn-primary';
+    const close = document.createElement('button'); close.className = 'btn'; close.textContent = 'Close';
+    bar.appendChild(another); bar.appendChild(close); box.appendChild(bar);
+    overlay.appendChild(box);
+    const teardown = () => { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); };
+    close.addEventListener('click', teardown);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) teardown(); });
+
+    let remaining = count;
+    const reveal = async () => {
+      another.disabled = true;
+      const found = await this.randomSectionEl();
+      body.innerHTML = '';
+      if (found) {
+        const cap = document.createElement('div');
+        cap.className = 'sectionview-cap';
+        cap.textContent = `${bookTitle(found.book)} · ${found.section}`;
+        body.appendChild(cap);
+        body.appendChild(previewProse(found.el));
+      } else {
+        body.textContent = 'The vision is clouded…';
+      }
+      remaining--;
+      if (remaining > 0) { another.disabled = false; another.textContent = `Reveal another (${remaining} left)`; }
+      else { another.disabled = true; another.textContent = 'The vision fades'; }
+    };
+    another.addEventListener('click', reveal);
+    document.body.appendChild(overlay);
+    await reveal(); // show the first vision
+    return overlay;
   }
 
   // Surface the player's active extra choices (<extrachoice>) at this section: a

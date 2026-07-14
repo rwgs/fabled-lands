@@ -24,7 +24,7 @@ import { GameState, readSlotData, importSave, loadSlotMeta, deleteSlot, makeItem
 import * as eng from './js/engine.js';
 import { fightRound, makeFight, groupFightRound, isDefeated, useWrathBlessing, useDefenceBlessing, rerollAttack } from './js/combat.js';
 import { goodsFrom, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo, canUpgradeCrew, payChoiceCost } from './js/market.js';
-import { Story } from './js/render.js';
+import { Story, previewProse } from './js/render.js';
 import { Narrator } from './js/tts.js';
 import { renderSheet } from './js/ui.js';
 import { renderStatic } from './js/app.js';
@@ -412,6 +412,33 @@ async function run() {
       depBtn('iron sword').click();
       ok('§2.617 storing a weapon caches it and enforces itemlimit=1', g617.cacheItems('2.617').length === 1 && !g617.hasItem('iron sword') && !c617.querySelector('.cache-deposit'),
         `cache=${g617.cacheItems('2.617').length} deposit=${!!c617.querySelector('.cache-deposit')}`);
+    }
+
+    // task 101: §5.114's <sectionview> trance oracle — a read-only preview of random
+    // sections that applies no effects and never changes the player's visit or state.
+    {
+      const gSV = GameState.create({ name:'SV', gender:'m', profession:'Warrior', book:5, adv });
+      let svNav = null;
+      const cSV = document.createElement('div');
+      const storySV = new Story(cSV, gSV, { navigate:(b,s)=>{svNav={b,s};}, onDeath(){}, notify(){} });
+      storySV.begin(await data.getSection(5,'114'), 5, '114');
+      const svLink = cSV.querySelector('.sectionview-link');
+      ok('§5.114 renders the <sectionview> oracle as a read-only link', !!svLink && /up to six paragraphs/i.test(svLink.textContent));
+
+      // previewProse renders a known section's prose read-only: content present, no controls.
+      const prose = previewProse(await data.getSection(5,'114'));
+      ok('previewProse renders the section prose (content present)', /priestess/i.test(prose.textContent) && prose.querySelectorAll('p').length >= 1);
+      ok('previewProse arms no interactive controls', prose.querySelectorAll('button, .goto, .choice, .btn-roll').length === 0);
+
+      // Opening the oracle shows an isolated popup, mutates NO state and does NOT navigate.
+      const before = JSON.stringify(gSV.data);
+      const beforeSection = gSV.data.section;
+      const overlay = await storySV.openSectionView('Trance', 6);
+      ok('§5.114 opening the oracle shows an isolated read-only popup', document.body.contains(overlay) && !!overlay.querySelector('.sectionview-modal') && !!overlay.querySelector('.sectionview-cap') && !!overlay.querySelector('.sectionview-prose'));
+      ok('§5.114 the oracle popup exposes no game controls', overlay.querySelectorAll('.sectionview-prose button, .sectionview-prose .goto, .sectionview-prose .choice, .sectionview-prose .btn-roll').length === 0);
+      ok('§5.114 the oracle changes neither the current section nor navigation', gSV.data.section === beforeSection && svNav === null);
+      ok('§5.114 the oracle mutates no player state', JSON.stringify(gSV.data) === before, 'state changed by oracle');
+      overlay.remove();
     }
 
     // ranges
