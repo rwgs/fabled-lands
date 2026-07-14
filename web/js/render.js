@@ -22,6 +22,11 @@ import { animateDice, modal } from './ui.js';
 const INLINE_STYLE = { b: 'strong', i: 'em', u: 'u', caps: 'span' };
 const BRANCH_TAGS = new Set(['success', 'failure', 'outcomes']);
 const ROLL_TAGS = new Set(['difficulty', 'random', 'rankcheck', 'training']);
+// Roll-gate scoping (task 104): a roll inside one of these wrappers is conditionally
+// present (optional), so its onward choices are not gated; and a nav node inside one
+// of these is a roll resolution, not onward navigation, so it is never gated.
+const ROLLGATE_OPTIONAL_WRAP = new Set(['if', 'elseif', 'else', 'success', 'failure', 'outcome', 'group']);
+const ROLLGATE_OUTCOME_WRAP = new Set(['outcomes', 'outcome']);
 // Note: <adjust> is deliberately NOT here. In this corpus it is always a die-roll
 // MODIFIER (a child of <difficulty>/<random>/<rankcheck>, consumed by
 // childAdjustment) — never a passive effect. Auto-applying it on view would
@@ -264,11 +269,17 @@ export class Story {
     // follows it must not be clickable (else the player skips the fight). See
     // computeFightGate / applyFightGate.
     this.fightGate = this.computeFightGate(el);
+    // Travel/encounter roll gating: a mandatory <random> feeding an <outcomes> table
+    // must be rolled before the section's onward <choices> unlock, and a "get lost"
+    // outcome that carries its own <goto> suppresses those choices (task 104). See
+    // computeRollGate / applyRollGate.
+    this.rollGate = this.computeRollGate(el);
     this.sectionFight = null; // aggregate proxy for the section's fight(s) (set in renderFight)
     this.sectionFights = []; // every sequential (non-group) fight drawn this pass, in order (task 45)
     this.renderedGroups = new Set(); // group= ids already drawn this pass (task 26)
     this.appendChildren(flow, el, 'r');
     this.applyFightGate(flow);
+    this.applyRollGate(flow); // gate onward nav on the mandatory travel/encounter roll (task 104)
     this.surfaceExtraChoices(flow); // persistent <extrachoice> options active here (task 32)
     // Draw the box row now (after the walk) so a <tick/> applied this visit reads
     // as ☑ immediately; it sits above the prose, beside the section number (task 70).
@@ -1778,6 +1789,7 @@ export class Story {
       this.navigate(targetBook, section);
     });
     this.tagFightNav(node, link);
+    this.tagRollNav(node, link);
     container.appendChild(link);
     return link;
   }
@@ -1823,6 +1835,7 @@ export class Story {
     if (hist.length) link.addEventListener('click', () => this.goBack());
     else { link.disabled = true; link.title = 'Nowhere to return to'; }
     this.tagFightNav(node, link);
+    this.tagRollNav(node, link);
     container.appendChild(link);
     return link;
   }
@@ -2099,6 +2112,7 @@ export class Story {
       });
     }
     this.tagFightNav(node, btn);
+    this.tagRollNav(node, btn);
     return btn;
   }
 
@@ -2209,6 +2223,9 @@ export class Story {
 
   // ---- rolls: random -------------------------------------------------------
   renderRandom(container, node, path) {
+    // Remember where the travel/encounter gate's roll lives, so applyRollGate can read
+    // its result (whether the leg has been rolled yet) after the walk. (task 104)
+    if (this.rollGate && node === this.rollGate.rollNode) this.rollGate.rollPath = path;
     const dice = node.hasAttribute('dice') ? parseInt(node.getAttribute('dice'), 10) : this.inferDice(node, 2);
     const varName = node.getAttribute('var');
     const desc = document.createElement('span');
@@ -2443,7 +2460,14 @@ export class Story {
           else if (cw) match = cw.split(/[|,]/).some((w) => this.state.hasCodeword(w.trim()));
           else match = true; // default
         }
-        if (match) { this.revealBranch(container, c, path + '.o' + i); break; }
+        if (match) {
+          // Record the matched outcome for the roll gate: if it carries its own
+          // redirect (a "get lost" <goto>), applyRollGate keeps the onward choices
+          // suppressed so only that redirect is offered (§1.278 → 82). (task 104)
+          if (this.rollGate && node === this.rollGate.outcomesNode) this.rollGate.matchedOutcome = c;
+          this.revealBranch(container, c, path + '.o' + i);
+          break;
+        }
       }
       // Always-available alternatives inside the table (e.g. "or don't try").
       if (choiceKids.length) this.renderChoices(container, node, path, null, choiceKids);
@@ -2611,6 +2635,90 @@ export class Story {
         btn.classList.add('gated');
         if (!fight.outcome) btn.title = `Defeat the ${fight.name} first.`;
       }
+    });
+  }
+
+  // ---- travel / encounter roll gating (task 104) ---------------------------
+  // The overland/river/sea idiom is a MANDATORY <random> whose <outcomes> resolve
+  // the leg, followed by a <choices> block of onward destinations. The port draws
+  // those choices independently of the roll, so (1) they are live before the
+  // encounter is rolled — you can leave without rolling — and (2) a "get lost"
+  // outcome that carries its own <goto> (§1.278 → 82, §1.548 → 474) doesn't stop the
+  // player ignoring it and picking a destination anyway. This gate holds the onward
+  // navigation until the roll resolves; once resolved, if the matched outcome
+  // redirects, the onward choices stay suppressed (only that redirect is offered),
+  // otherwise they unlock. Scoped to a mandatory roll: a pay-gated ("pay to spin")
+  // or conditionally-present roll is OPTIONAL — the choices beside it stay live
+  // (§5.674's physician cure, where declining and leaving must remain possible).
+  // Returns { rollNode, outcomesNode, navNodes:Set, rollPath, matchedOutcome } or null.
+  computeRollGate(sectionEl) {
+    if (!sectionEl) return null;
+    const outcomesNode = sectionEl.querySelector('outcomes');
+    if (!outcomesNode) return null;
+    // The mandatory roll feeding those outcomes: a <random> before the table that is
+    // neither pay-gated (flag=/price= → the "pay to spin" cost, book5/674) nor inside
+    // a conditional/branch wrapper (<if>/<success>/… → only sometimes present).
+    const rollNode = Array.from(sectionEl.querySelectorAll('random')).find((r) => {
+      if (!(r.compareDocumentPosition(outcomesNode) & Node.DOCUMENT_POSITION_FOLLOWING)) return false;
+      if (r.getAttribute('price') != null) return false;
+      const fl = r.getAttribute('flag');
+      if (fl != null && this.isRollGate(fl)) return false;
+      return !this.hasAncestorTag(r, ROLLGATE_OPTIONAL_WRAP);
+    });
+    if (!rollNode) return null;
+    // Onward navigation to gate: choice/goto/return that follows the roll and sits
+    // OUTSIDE the outcomes table (the table's own gotos are the roll's resolutions,
+    // revealed by renderBranch, and must stay live). A flee="t" choice is never gated.
+    const navNodes = new Set();
+    sectionEl.querySelectorAll('choice, goto, return').forEach((n) => {
+      if (!(rollNode.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING)) return;
+      if (this.hasAncestorTag(n, ROLLGATE_OUTCOME_WRAP)) return;
+      if (boolAttr(n.getAttribute('flee'))) return;
+      navNodes.add(n);
+    });
+    if (!navNodes.size) return null; // pure roll-to-goto travel (no onward choices) — nothing to gate
+    return { rollNode, outcomesNode, navNodes, rollPath: null, matchedOutcome: null };
+  }
+
+  // Does an ancestor of node carry one of these (lowercased) tag names? Walks up to
+  // the section root, stopping at the document. (A manual sibling of DOM `closest`,
+  // kept explicit like computeFightGate's walk for the XML-parsed section tree.)
+  hasAncestorTag(node, tagSet) {
+    for (let p = node.parentNode; p && p.nodeType === Node.ELEMENT_NODE; p = p.parentNode) {
+      if (tagSet.has(p.tagName.toLowerCase())) return true;
+    }
+    return false;
+  }
+
+  // Tag a rendered nav button as roll-gated, for applyRollGate to act on.
+  tagRollNav(node, btn) {
+    if (this.rollGate && this.rollGate.navNodes.has(node)) btn.dataset.rollnav = '1';
+  }
+
+  // Disable the onward navigation until the mandatory roll resolves, and keep it
+  // suppressed if the matched outcome redirects the player elsewhere. Only ever
+  // ADDS a disable, so it composes with applyFightGate (a fight-in-outcome section
+  // like §1.299 stays gated on both the roll AND the fight).
+  applyRollGate(flow) {
+    const gate = this.rollGate;
+    if (!gate) return;
+    const navs = Array.from(flow.querySelectorAll('[data-rollnav]'));
+    if (!navs.length) return;
+    const roll = gate.rollPath != null ? this.ctx.rolls.get('roll@' + gate.rollPath) : null;
+    let disable, title;
+    if (!roll) {
+      disable = true; title = 'Resolve the roll above first.';
+    } else {
+      const oc = gate.matchedOutcome;
+      const redirect = !!oc && (!!oc.querySelector('goto') || oc.getAttribute('section') != null);
+      disable = redirect; title = 'Your route is decided — follow it.';
+    }
+    if (!disable) return;
+    navs.forEach((btn) => {
+      if (btn.disabled) return; // already gated (fight, cost, edition…) — keep its own reason
+      btn.disabled = true;
+      btn.classList.add('gated');
+      btn.title = title;
     });
   }
 

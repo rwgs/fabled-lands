@@ -6,7 +6,7 @@ stable IDs pointing at the detail sections below (sections are in the order
 the tasks were filed, not work order).
 
 **HIGH**
-- [ ] 104. Travel rolls don't gate the section's onward choices; a "get lost" outcome doesn't suppress them (§1.278/§1.82 + every travel section)
+- [x] 104. Travel rolls don't gate the section's onward choices; a "get lost" outcome doesn't suppress them (§1.278/§1.82 + every travel section)
 - [x] 99. `<fightround>` effects are detached manual widgets instead of combat-round rules
 - [x] 89. Ship actions still use remote vessels, and `<choice sail>` does not sail one
 - [x] 77. Selector-aware `<set item|cache …>` expressions read the sheet instead of the selected item/cache (21 nodes)
@@ -3801,37 +3801,53 @@ sea, salvages the barque (keeps GOOD, not average), shows the good→excellent u
 
 ---
 
-## 104. Travel rolls don't gate the section's onward choices; a "get lost" outcome doesn't suppress them  — HIGH (render)
+## 104. Travel rolls don't gate the section's onward choices; a "get lost" outcome doesn't suppress them  — **done**
 
 *(Filed 2026-07-14 from playtesting §1.278 and §1.82.)* The overland/river/sea
-travel idiom is `<random type="travel">` → `<outcomes>` → a **sibling**
-`<choices>` block of onward destinations. `render.js` draws the `<choices>`
-independently of the roll, so two rules are broken:
+travel idiom is a **mandatory** `<random>` → `<outcomes>` → a sibling `<choices>`
+block of onward destinations. `render.js` drew the `<choices>` independently of
+the roll, so (1) the destinations were live *before* the encounter die was
+rolled — you could leave without rolling — and (2) a "get lost" outcome carrying
+its own `<goto>` (§1.278 → 82, §1.548 → 474) didn't stop the player ignoring it
+and picking a destination anyway.
 
-1. **The roll is not enforced.** The four travel choices are live *before* the
-   player rolls the encounter die — you can leave without ever rolling. There is
-   no roll-gate analogous to `computeFightGate`/`applyFightGate`; nothing marks
-   the section's mandatory `<random>` as blocking downstream navigation.
-2. **A forced redirect doesn't override the choices.** In §278 an outcome of
-   1–2 is `<outcome range="1,2">You get lost. <goto section="82"/>.</outcome>` —
-   getting lost turns you to 82 *instead of* reaching your chosen destination.
-   `renderBranch`→`revealBranch` shows the `→82` continue link, but the sibling
-   `<choices>` stay enabled, so the player can ignore getting lost and pick a
-   destination anyway. §82 has the mirror bug (1–2 poison / choices live before
-   the roll). This pattern recurs in **every travel section across all six
-   books**, so the blast radius is large.
+**Scope — the whole corpus, keyed structurally, not on `type="travel"`.** There
+are exactly 20 sections with both `<outcomes>` and `<choices>`: 14 book-1
+`type="travel"` sections **plus** five with an untyped mandatory `<random>` that
+have the identical bug — book1/668 (mining), book2/136 (lepers), book3/335 &
+book3/607 (safe-keeping "each time you return, roll"), book5/136 (rent, where a
+choice's `shards="rent"` cost is *set by the roll*). The 20th, **§5.674**
+(physician cure), is the counter-example that must **not** be gated: its roll is
+optional — pay-gated (`<random flag="c">`, a "pay to spin" cost) and inside an
+`<if shards="25">` — so declining and leaving via a choice has to stay possible.
+The ~185 other travel sections resolve entirely via outcome-`<goto>`s (no onward
+`<choices>`), so there is nothing to gate there.
 
-Fix (proposed): a general "roll gate" — detect a section whose `<random>`/roll
-feeds an `<outcomes>` table and disable the onward `<choices>` (and any
-"when you are ready" nav) until the roll resolves; once resolved, if the matched
-outcome carries its own `<goto>` (a "get lost"/forced redirect), suppress the
-general choices so only that redirect is offered, otherwise enable them. Keep
-the eligibility test out of the view where practical (mirror `fightGate`). Risk:
-must NOT gate sections where choices are legitimately available alongside an
-optional roll — scope the gate to a *mandatory* travel/encounter roll that feeds
-outcomes. Add headless assertions (choices disabled pre-roll; §278 roll of 1
-leaves only `→82`; roll of 4 enables the four destinations) and run the full
-every-section scan.
+Fix — a general roll gate mirroring `fightGate` (`web/js/render.js`):
+- **`computeRollGate(sectionEl)`** (run in `render()`) returns a gate only when a
+  section has an `<outcomes>` table fed by a **mandatory** `<random>` before it —
+  one with no `price=`/roll-gate `flag=` (excludes §674's pay-to-spin) and not
+  inside an `<if>`/branch/`<group>` wrapper (`ROLLGATE_OPTIONAL_WRAP`, also
+  excludes §674) — *and* there is onward `choice`/`goto`/`return` nav after the
+  roll that sits **outside** the `<outcomes>` (`ROLLGATE_OUTCOME_WRAP`) and isn't
+  a `flee="t"` choice. Empty nav ⇒ null (pure roll-to-goto travel is untouched).
+- **Tagging** — `renderRandom` records the gate roll's positional `rollPath`;
+  `renderBranch`'s `<outcomes>` case records the `matchedOutcome`; the three nav
+  renderers (`renderGoto`/`renderReturn`/`renderChoice`) call a new
+  `tagRollNav` (beside `tagFightNav`) to mark `data-rollnav`.
+- **`applyRollGate(flow)`** (after `applyFightGate`) disables the tagged nav while
+  the roll is unresolved; once resolved it stays suppressed iff the matched
+  outcome carries a redirect (a `<goto>` child or `section=`), else it unlocks.
+  It only ever *adds* a disable, so it composes with the fight gate — a
+  fight-in-outcome section (§1.87/§1.299/§1.60/§1.673) stays gated on **both** the
+  roll and the fight.
+
+Verified: 11 new headless assertions — §278 (four choices gated pre-roll; roll of
+1 → only the `→82` redirect, destinations suppressed; a fresh visit rolling 4 →
+all four unlock, no forced goto), §1.668 (a non-travel mandatory roll gates its
+choices too, then unlocks), and §5.674 (`rollGate === null`; its three choices
+stay live and untagged beside the optional cure roll) — plus the full
+render-every-section scan. `RESULT ALL PASS pass=1004 fail=0`.
 
 ---
 

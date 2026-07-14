@@ -4212,6 +4212,75 @@ async function run() {
       ok('task98: §123 revival turns to the deal section (3/351)', nav123 && nav123.b === 3 && String(nav123.s) === '351', JSON.stringify(nav123));
     }
 
+    // --- task 104: travel/encounter roll gates the onward choices ---
+    // A mandatory <random> → <outcomes> → <choices> section must be rolled before the
+    // onward destinations unlock, and a "get lost" outcome carrying its own <goto>
+    // suppresses those choices so only the redirect is offered.
+    {
+      window.__FL_INSTANT_DICE__ = true;
+      const settle104 = () => new Promise((r) => setTimeout(r, 30));
+      const rnd104 = Math.random;
+
+      // §1.278: die 1 → "you get lost" → §82 (redirect); die 4 → nothing → destinations.
+      const g278 = GameState.create({ name:'T278', gender:'m', profession:'Warrior', book:1, adv });
+      const c278 = document.createElement('div');
+      const st278 = new Story(c278, g278, { navigate(){}, onDeath(){}, notify(){} });
+      const choices278 = () => Array.from(c278.querySelectorAll('.choice'));
+      const goto82 = () => Array.from(c278.querySelectorAll('.goto')).find((b) => b.textContent.trim() === '82');
+      st278.begin(await data.getSection(1,'278'), 1, '278');
+      ok('§278 draws four onward choices', choices278().length === 4, `n=${choices278().length}`);
+      ok('§278 choices are all gated before the travel roll',
+         choices278().length === 4 && choices278().every((b) => b.disabled && b.dataset.rollnav === '1'),
+         choices278().map((b) => b.disabled).join(','));
+      ok('§278 shows the travel roll button', !!c278.querySelector('.btn-roll'));
+
+      Math.random = () => 0; // die = 1 → outcome 1,2 → get lost → goto 82
+      c278.querySelector('.btn-roll').click(); await settle104();
+      ok('§278 rolling 1 reveals the "get lost" redirect to 82', !!goto82() && goto82().disabled === false);
+      ok('§278 a redirect keeps the destinations suppressed',
+         choices278().length === 4 && choices278().every((b) => b.disabled),
+         choices278().map((b) => b.disabled).join(','));
+
+      st278.begin(await data.getSection(1,'278'), 1, '278'); // fresh visit
+      Math.random = () => 0.5; // die = 4 → outcome 3,4 → nothing happens (no redirect)
+      c278.querySelector('.btn-roll').click(); await settle104();
+      ok('§278 rolling 4 unlocks all four destinations',
+         choices278().length === 4 && choices278().every((b) => !b.disabled),
+         choices278().map((b) => b.disabled).join(','));
+      ok('§278 a non-redirect outcome offers no forced goto', !goto82());
+
+      // §1.668 (mining, a plain untyped <random>): the gate is structural, not keyed on
+      // type="travel", so a non-travel mandatory roll gates its onward choices too.
+      const g668 = GameState.create({ name:'T668', gender:'m', profession:'Warrior', book:1, adv });
+      g668.data.stamina = 20; g668.data.staminaMax = 20;
+      const c668 = document.createElement('div');
+      const st668 = new Story(c668, g668, { navigate(){}, onDeath(){}, notify(){} });
+      const choices668 = () => Array.from(c668.querySelectorAll('.choice'));
+      st668.begin(await data.getSection(1,'668'), 1, '668');
+      ok('§668 (non-travel roll) gates its onward choices before the roll',
+         choices668().length === 4 && choices668().every((b) => b.disabled && b.dataset.rollnav === '1'),
+         `n=${choices668().length}`);
+      Math.random = () => 0.9; // 6+6 = 12 → silver nugget (no redirect) → unlock
+      c668.querySelector('.btn-roll').click(); await settle104();
+      ok('§668 unlocks the choices once the roll resolves', choices668().every((b) => !b.disabled));
+
+      // §5.674 (physician): the cure roll is OPTIONAL (pay-gated flag="c"), so declining
+      // and leaving must stay possible — its choices must NOT be roll-gated.
+      const g674t = GameState.create({ name:'T674', gender:'m', profession:'Warrior', book:5, adv });
+      g674t.data.shards = 100;
+      const c674t = document.createElement('div');
+      const st674t = new Story(c674t, g674t, { navigate(){}, onDeath(){}, notify(){} });
+      st674t.begin(await data.getSection(5,'674'), 5, '674');
+      const choices674 = Array.from(c674t.querySelectorAll('.choice'));
+      ok('§674 gate is not built for an optional pay-gated roll', st674t.rollGate === null);
+      ok('§674 onward choices stay live beside the optional cure roll',
+         choices674.length === 3 && choices674.every((b) => !b.disabled && b.dataset.rollnav !== '1'),
+         `n=${choices674.length}`);
+
+      Math.random = rnd104;
+      window.__FL_INSTANT_DICE__ = false;
+    }
+
   } catch (e) {
     out.push('FATAL ' + (e.stack || e.message));
     fail++;
