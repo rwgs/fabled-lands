@@ -26,7 +26,7 @@ the tasks were filed, not work order).
 - [x] 71. `<lose staminato="N">` never applies — the handler is gated on a `stamina=` attr it lacks (16 sections)
 
 **MEDIUM**
-- [ ] 105. `<if ticks="N">` reads the live count — this visit's own `<tick/>` flips the guard on a mid-visit rerender, re-showing the "already ticked → goto" redirect (§1.496)
+- [x] 105. `<if ticks="N">` reads the live count — this visit's own `<tick/>` flips the guard on a mid-visit rerender, re-showing the "already ticked → goto" redirect (§1.496)
 - [x] 106. Light mode is force-darkened on Chrome/Edge — Chromium "Auto Dark Theme"; `color-scheme: light` doesn't opt out, needs `only light` *(fixed; leather-chrome-in-both-themes remains an intentional design note)*
 - [x] 93. Item group provenance and rolled `itemAt=` losses are not represented
 - [x] 94. `quantity=` is ignored on rewards, cargo ticks and market stock
@@ -3851,35 +3851,45 @@ render-every-section scan. `RESULT ALL PASS pass=1004 fail=0`.
 
 ---
 
-## 105. `<if ticks="N">` reads the live count — this visit's own `<tick/>` flips the guard on a mid-visit rerender  — MEDIUM (engine/render)
+## 105. `<if ticks="N">` reads the live count — this visit's own `<tick/>` flips the guard on a mid-visit rerender  — **done**
 
 *(Filed 2026-07-14 from playtesting §1.496; §1.310 is the same idiom.)* The
 standard box idiom is `<if ticks="1">…goto X immediately…</if> If not, <tick/>,
-and read on.` `evaluateCondition`'s `ticks=` handler (`engine.js` ~L211) tests
+and read on.` `evaluateCondition`'s `ticks=` handler (`engine.js` ~L211) tested
 the **live** `state.tickCount()`. On entry the `<if>` (first child) is walked
-before the bare `<tick/>`, so it correctly sees `tickCount = 0`, hides the
-redirect, and the `<tick/>` then sets `tickCount = 1` (task 27 caps it; task 70
-draws the box ☑ this visit — intended).
+before the bare `<tick/>`, so it correctly saw `tickCount = 0`, hid the redirect,
+and the `<tick/>` then set `tickCount = 1` (task 27 caps it; task 70 draws the
+box ☑ this visit — intended).
 
-The defect appears on any **mid-visit rerender**: §496 lets you take a
+The defect appeared on any **mid-visit rerender**: §496 lets you take a
 `<weapon name="magic spear">`, whose Take button calls `rerender()` → `render()`
 (not `begin()`, so `tickCount` stays 1). On that re-walk `<if ticks="1">` now
-matches, so *"If there is a tick in the box, [→317] immediately."* wrongly
-appears on the **same visit**, alongside the loot and the real `→85`. §310 shows
+matched, so *"If there is a tick in the box, [→317] immediately."* wrongly
+appeared on the **same visit**, alongside the loot and the real `→85`. §310 shows
 *only* the box-ticked-on-entry display (task 70's intended behaviour) because it
 has no rerender trigger — no functional defect there; that display is by design.
 
 Root cause: JaFL processes the section sequentially (the `ticks` guard is read
 once, before the `<tick>`, and the section is never re-run within a visit); the
-port's rerender-in-place re-evaluates the guard against the now-incremented
-count. Fix (proposed): snapshot the current section's tick count at entry (in
-`Story.begin`, alongside `setSectionBoxes`) and evaluate `<if ticks="N">`
-against that **entry snapshot** rather than the live count, so this visit's own
-`<tick/>` cannot retroactively satisfy the guard and rerenders are stable. A
-genuine later visit re-enters via `begin()`, re-snapshots (already 1) and fires
-the redirect correctly. Add a headless assertion (enter §496, force a rerender
-by taking the spear, assert the `→317` redirect is NOT shown; a second visit
-shows it) and run the full every-section scan.
+port's rerender-in-place re-evaluated the guard against the now-incremented count.
+
+Fix — evaluate the guard against an **entry snapshot**:
+- **`state.js`** — new transient `setEntryTicks(n)` / `entryTickCount()`. The
+  snapshot is null/undefined ⇒ `entryTickCount()` falls back to the live
+  `tickCount()`, so direct headless `evaluateCondition` calls (task 27's
+  guard-eval) are unchanged.
+- **`render.js`** — `begin()` snapshots `setEntryTicks(this.state.tickCount())`
+  once per visit (before `render()` walks the children / runs the `<tick/>`), so
+  it survives in-place rerenders but a genuine re-entry re-snapshots. Uses the
+  no-args box key — the same one `addTick` and the guard use — and the position
+  is already current (navigate calls `goTo` before `begin`).
+- **`engine.js`** — the `ticks=` handler now reads `state.entryTickCount()`.
+
+Verified: 5 new headless assertions on §496 (entry ticks the box yet the ticks=1
+redirect stays inactive; taking the spear rerenders without flipping the guard;
+the spear is taken; a genuine second visit *does* activate the →317 redirect) +
+the existing task-27/task-70 tick tests still green + the full every-section
+scan. `RESULT ALL PASS pass=1009 fail=0`.
 
 ---
 

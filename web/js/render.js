@@ -221,6 +221,11 @@ export class Story {
       const p = n.getAttribute('price'); if (p && this.state.getFlag(p)) this.state.setFlag(p, false);
       const f = n.getAttribute('flag'); if (f && this.state.getFlag(f)) this.state.setFlag(f, false);
     });
+    // Snapshot the box-tick count as this section is ENTERED (before its <tick/> runs),
+    // so <if ticks="N"> reads the entry count and a tick applied this visit can't flip
+    // the guard on a mid-visit rerender (task 105). Position is already current here
+    // (navigate() calls goTo before begin), matching addTick's no-args box key.
+    this.state.setEntryTicks(this.state.tickCount());
     this.render();
   }
 

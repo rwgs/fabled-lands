@@ -208,7 +208,9 @@ export function evaluateCondition(el, state) {
   const safeAdd = get('safeAddGod');
 
   add(get('codeword'), () => matchCodewords(state, get('codeword')));
-  add(get('ticks'), () => state.tickCount() === resolveValue(state, get('ticks')));
+  // Entry snapshot, not the live count: this visit's own <tick/> must not satisfy the
+  // guard on a mid-visit rerender (task 105). Falls back to live when unset (headless).
+  add(get('ticks'), () => state.entryTickCount() === resolveValue(state, get('ticks')));
   add(get('shards'), () => money >= resolveValue(state, get('shards')));
   add(get('item'), () => {
     // "?" = any possession, optionally tag-filtered (e.g. <if item="?" tags="light">

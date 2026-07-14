@@ -580,6 +580,17 @@ export class GameState {
   // The current section's boxes= count, set by the renderer on entry (transient,
   // not persisted). Caps addTick so a repeat visit can't over-tick — see below.
   setSectionBoxes(n) { this._sectionBoxes = n > 0 ? n : 0; }
+  // Snapshot of THIS section's box-tick count as it was ENTERED — set by the renderer
+  // at begin() (before any in-section <tick/> runs), so an <if ticks="N"> guard can be
+  // evaluated against the entry count rather than the live one. JaFL reads the guard
+  // once, sequentially before the <tick>; the port re-renders in place (e.g. taking an
+  // item), so a tick applied THIS visit would otherwise flip a live-count guard and
+  // wrongly re-show an "already ticked → goto" redirect on the same visit (task 105).
+  // Uses the same no-args box key as addTick / the guard, so the caller must have the
+  // section's position current (navigate()/tests set it before begin). Transient, not
+  // persisted; null/undefined ⇒ fall back to the live count (headless/direct use).
+  setEntryTicks(n) { this._entryTicks = n; }
+  entryTickCount() { return this._entryTicks == null ? this.tickCount() : this._entryTicks; }
   addTick(book, section, n = 1) {
     const k = this.boxKey(book, section);
     let next = (this.data.boxes[k] || 0) + n;
