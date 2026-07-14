@@ -1,10 +1,13 @@
 /* Fabled Lands — classic-fantasy, mobile-first styling. */
 
 :root {
-  /* Tell mobile browsers (Chrome "Auto dark theme" et al.) this page manages
-     its own colours via data-theme, so they don't algorithmically darken the
-     light surfaces when the phone OS is in dark mode. Flipped to dark below. */
-  color-scheme: light;
+  /* Tell Chromium's "Auto Dark Theme" (Chrome/Edge, esp. Android with the OS in
+     dark mode) NOT to algorithmically darken our light surfaces — this page
+     manages its own colours via data-theme. The `only` keyword is required:
+     plain `color-scheme: light` marks the page light-*only* and is still
+     force-darkened; `only light` is the documented opt-out. (Firefox has no
+     such feature, so light mode already worked there.) Flipped to dark below. */
+  color-scheme: only light;
 
   --leather: #2b1a0f;
   --leather-2: #3a2415;

@@ -27,7 +27,7 @@ the tasks were filed, not work order).
 
 **MEDIUM**
 - [ ] 105. `<if ticks="N">` reads the live count — this visit's own `<tick/>` flips the guard on a mid-visit rerender, re-showing the "already ticked → goto" redirect (§1.496)
-- [ ] 106. Light mode barely changes the mobile app — header, sheet drawer, toasts & title are leather-dark in both themes (full-screen sheet drawer dominates a phone)
+- [x] 106. Light mode is force-darkened on Chrome/Edge — Chromium "Auto Dark Theme"; `color-scheme: light` doesn't opt out, needs `only light` *(fixed; leather-chrome-in-both-themes remains an intentional design note)*
 - [x] 93. Item group provenance and rolled `itemAt=` losses are not represented
 - [x] 94. `quantity=` is ignored on rewards, cargo ticks and market stock
 - [x] 95. Item `replace=` rewards add a duplicate instead of transforming the possession
@@ -3867,40 +3867,43 @@ shows it) and run the full every-section scan.
 
 ---
 
-## 106. Light mode barely changes the mobile app — header, sheet drawer, toasts and title are leather-dark in both themes  — MEDIUM (render/css)
+## 106. Light mode is force-darkened on Chrome/Edge — Chromium "Auto Dark Theme" not opted out  — MEDIUM (css)
 
-*(Filed 2026-07-14 from a mobile bug report: "light mode still not working on
-mobile app.")* The theme *mechanism* works: `index.html` sets `data-theme`
-before first paint (saved `fl-theme`, else OS preference), the header toggle
-persists it, and the **reading surfaces** (story pane, story card, modals,
-inputs, panels, buttons, map tabs) re-skin via the `--reading-bg`/`--card`/
-`--field`/`--panel`/`--ink` tokens overridden under `:root[data-theme="dark"]`.
-There is **no** `@media (prefers-color-scheme)` override, so light mode is not
-being clobbered by the OS.
+*(Filed 2026-07-14 from a mobile bug report; narrowed after the reporter
+confirmed light mode is correct in Firefox but wrong in Chrome **and** Edge.)*
+The theme *mechanism* is fine: `index.html` sets `data-theme` before first paint,
+the header toggle persists `fl-theme`, and the reading surfaces re-skin via the
+`--reading-bg`/`--card`/`--field`/`--ink` tokens overridden under
+`:root[data-theme="dark"]`. Firefox (Gecko) renders light mode correctly.
 
-What "isn't working" is that, by explicit design, several prominent surfaces are
-hard-coded leather-dark in **both** themes and never re-skin: `.game-header`,
-the adventure sheet `.sheet-pane` (`background: linear-gradient(var(--leather-2),
-var(--leather)); color: var(--parchment)` plus many hard-coded `#d8c49a`/
-`rgba(255,255,255,0.05)` internals), `.toast`, and the title/create/saves
-screens. On desktop this reads fine — the sheet is a slim side column beside a
-wide light reading pane. On **mobile** (`@media (max-width:899px)`) the sheet is
-a full-height drawer at `min(340px,88vw)`; opening it to check stats — a very
-common action — fills ~88% of the screen with dark, and the always-dark header
-is most of the rest, so light mode looks like it isn't applied. Also
-`<meta name="theme-color" content="#2b1a0f">` is fixed dark (never updated on
-toggle) and iOS `apple-mobile-web-app-status-bar-style=black-translucent`, so the
-browser/status-bar chrome stays dark too.
+Chrome and Edge are both Chromium (Blink), and both wrongly darken light mode:
+**Chromium's "Auto Dark Theme" (force-dark)** algorithmically darkens the page
+when the OS/browser is in dark mode, unless the page opts out. `style.css` *tried*
+to opt out — `:root { color-scheme: light }` with a comment to that effect — but
+that value does **not** disable force-dark: Chromium only skips a page whose
+declared `color-scheme` **contains `dark`** or uses the **`only`** keyword. A bare
+`color-scheme: light` marks the page light-*only* and is exactly what force-dark
+targets, so the light surfaces got inverted/darkened. The app's *dark* theme was
+unaffected (`color-scheme: dark` contains `dark`, so it was already opted out) —
+which is why only light mode looked broken.
 
-This is a **design decision, not a mechanism bug** — surface options before
-implementing (don't pick silently): (a) leave the leather chrome as the intended
-look in both themes, documenting it; (b) tokenize the sheet + header colours
-(e.g. a `--chrome-bg`/`--chrome-fg` pair overridden per `data-theme`) so light
-mode also lightens the sheet drawer — larger CSS change touching many hard-coded
-values; (c) re-skin only the mobile full-screen sheet drawer in light mode, keep
-the slim desktop chrome leather; (d) update `theme-color`/status-bar to follow
-the theme. First rule out a stale PWA cache on the device (see §416 / task 68,
-already fixed in source) — a cache refresh should precede any change.
+**Fixed 2026-07-14.** Changed the light `:root` declaration to
+`color-scheme: only light;` (the documented Chromium opt-out) and rewrote the
+comment to explain the `only` keyword is required. Dark theme's `color-scheme:
+dark` is unchanged. Web-only, so `stamp-version.ps1` bumped the build/SW cache
+key (→ `26.07.14.edcd53d`) — the reporter must let the Chrome/Edge PWA pull the
+new bundle (close/reopen or clear site data) for the fix to take. Suite green:
+`RESULT ALL PASS pass=993 fail=0`. (Force-dark is a browser-chrome feature the
+headless scan can't exercise; the run only confirms the CSS change renders
+cleanly — verify the actual light/dark appearance on-device.)
+
+Not part of this fix, kept as a design note: the `.game-header`, adventure sheet
+`.sheet-pane`, `.toast`, and title/create/saves screens are hard-coded
+leather-dark in **both** themes by design (they don't use the re-skinnable
+tokens). On mobile the sheet is a full-screen drawer, so opening it still shows
+dark even in light mode. If lightening the chrome in light mode is wanted, file a
+follow-up: tokenize those surfaces (a `--chrome-bg`/`--chrome-fg` pair per
+`data-theme`), and optionally make `<meta name="theme-color">` follow the theme.
 
 ---
 
@@ -3916,13 +3919,13 @@ Filed 2026-07-14 from a playtest bug run (six reports): tasks **104–106**.
 corpus) and **105** (`<if ticks="N">` reads the live count, so a mid-visit
 rerender flips the guard and re-shows the redirect — §1.496; §1.310 is only the
 by-design box-on-entry display from task 70) are confirmed against current
-source. **106** (light mode leaves the header/sheet drawer/toasts/title
-leather-dark in both themes; the mobile full-screen sheet drawer makes it read as
-"not working") is a design decision surfaced with options. Two further reports
-were **not** filed: §1.416 ("can't cross to other books at Rank ≥ 4") was already
-fixed by task 68 and works in current source, and the light-mode report both
-point to a **stale PWA cache** on the device — a cache refresh should be ruled
-out first.
+source. **106** was first framed as the leather-chrome-in-both-themes design
+question, then — after the reporter confirmed light mode is fine in Firefox but
+wrong in Chrome and Edge — root-caused to Chromium "Auto Dark Theme" force-dark
+(the `color-scheme: light` opt-out is a no-op; needs `only light`) and **fixed
+the same day**. §1.416 ("can't cross to other books at Rank ≥ 4") was **not**
+filed — already fixed by task 68 and works in current source (the reporter was
+on a stale PWA cache).
 
 Reviewed 2026-07-06: every previously open item (3–13) was re-verified against
 the current code and is still accurate; items 15–36 were added from a full
