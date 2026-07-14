@@ -6,108 +6,35 @@ stable IDs pointing at the detail sections below (sections are in the order
 the tasks were filed, not work order).
 
 **HIGH**
-- [x] 104. Travel rolls don't gate the section's onward choices; a "get lost" outcome doesn't suppress them (§1.278/§1.82 + every travel section)
-- [x] 99. `<fightround>` effects are detached manual widgets instead of combat-round rules
-- [x] 89. Ship actions still use remote vessels, and `<choice sail>` does not sail one
-- [x] 77. Selector-aware `<set item|cache …>` expressions read the sheet instead of the selected item/cache (21 nodes)
-- [x] 76. Blessings are stored as inert labels — ability/Luck/travel benefits cannot be used *(core rerolls done; combat Defence/Wrath split → task 80)*
-- [x] 74. Standalone `force="f"` effects auto-apply — missions/initiations cannot be declined; choose-one losses over-apply
-- [x] 73. Ship dock/current-vessel state is not maintained — any owned ship can sail or trade from anywhere *(core done; todock= + sailing-ship pointer split → task 81)*
-- [x] 45. Multi-fight sections: the fight gate & death-deferral track only the *last* `<fight>`
-- [x] 46. `<set var … modifier="natural">` discards the value — book-2 rank ceremonies auto-succeed
-- [x] 47. `<choice item="?" tags=…>` is never enabled — light-gated passages hard-locked
-- [x] 48. Group fights: Surrender/flee throws a TypeError; no Flee button; no target choice
-- [x] 49. `special="attack|defence"` grant permanent, save-persisted bonuses
-- [x] 50. Var-keyed `<success>/<failure>` branches fire on entry (unset/stale vars)
-- [x] 51. `<difficulty|rankcheck flag=…>` roll gates unimplemented; shared `<success>` binds only the last roll
-- [x] 52. `removeCodeword` leaves the codeword's *value* behind — bonus counters never reset
-- [x] 68. `<if ability="rank|stamina">` always reads 0 — Rank gates never open (§416 + 11 more)
-- [x] 69. Bare post-fight `<lose>/<gain>` apply on entry, not on the fight outcome (§570 + 7 more)
-- [x] 71. `<lose staminato="N">` never applies — the handler is gated on a `stamina=` attr it lacks (16 sections)
+
+*(none open — completed tasks are listed under **Done**.)*
 
 **MEDIUM**
-- [x] 105. `<if ticks="N">` reads the live count — this visit's own `<tick/>` flips the guard on a mid-visit rerender, re-showing the "already ticked → goto" redirect (§1.496)
-- [x] 106. Light mode is force-darkened on Chrome/Edge — Chromium "Auto Dark Theme"; `color-scheme: light` doesn't opt out, needs `only light` *(fixed; leather-chrome-in-both-themes remains an intentional design note)*
-- [x] 93. Item group provenance and rolled `itemAt=` losses are not represented
-- [x] 94. `quantity=` is ignored on rewards, cargo ticks and market stock
-- [x] 95. Item `replace=` rewards add a duplicate instead of transforming the possession
-- [x] 96. Hidden item rewards inside `<group>` choices are never granted
-- [x] 98. Resurrection arrangements ignore replacement, supplemental and hidden semantics
-- [x] 100. The two live `<while>` loops execute only one rendered pass
-- [x] 92. Eight live `<adjust>` variants are ignored or applied unconditionally
-- [x] 91. COMBAT blessing cannot reroll an attack, and Defence blessing leaks between fights
-- [x] 90. Permanent Safety from Storms is deleted by storm-avoidance `<lose blessing>` nodes
-- [x] 81. Ships: honour `todock=` and track which at-large ship is being sailed *(split from task 73)*
-- [x] 80. Combat blessings: expose Defence through Faith (+3, one fight) and Divine Wrath (1d pre-damage) as fight-widget buttons *(split from task 76)*
-- [x] 75. Live `<tick>` forms for equipment, profession changes and patterned titles are incomplete/inert
-- [x] 79. Keeping a preview or importing a save reports success when persistence fails
+
+*(none open — completed tasks are listed under **Done**.)*
+
+**LOW**
+
+*(none open — completed tasks are listed under **Done**.)*
+
+**Done**
+
+*All backlog items are complete. Listed by task number (the stable ID pointing at
+the detail section below); detail sections remain in filed order, not this order.*
+
+- [x] 1. Gate combat progression / model fight outcomes
+- [x] 2. Finish the logic/view split (combat/market/rest)
+- [x] 3. Fix multi-attribute `<if>` conditions
+- [x] 4. Prevent silent save-slot overwrite
 - [x] 5. Implement `<items group … limit="N">` "choose up to N" pickup
 - [x] 6. Harden save import and migration
 - [x] 7. Surface persistence failures to the player
 - [x] 8. Make service-worker upgrades atomic
-- [x] 24. Canonicalise ship types (`brig`, `gall`) and fix crew-upgrade steps
-- [x] 25. Fix value/expression parsing: vars containing "d", unary minus, division
-- [x] 26. Implement the remaining `<fight>` attributes
-- [x] 27. Cap visit-box ticks and make `ticks=` guards robust
-- [x] 28. Honour `dead="t"` on `<goto>`/`<choice>`
-- [x] 29. Market & item polish: currency items, pipe names, headers *(parts 2 & 5 split → 40, 41)*
-- [x] 30. Gate `<random flag=…>` rolls behind their payment
-- [x] 31. `<rest>` with no `stamina=` should restore to full
-- [x] 40. `<market currency="…">` alternate-currency markets
-- [x] 41. Item `<effect>` system (use/aura/wielded/ability) and `<sold>` sell-hooks
-- [x] 43. price/flag "choose one" purchases over-apply every linked reward *(moved from LOW 2026-07-07; scope grew — see detail)*
-- [x] 53. `<difficulty modifier="noweapon">` still counts the weapon bonus
-- [x] 54. Mid-fight escape brackets (tick…lose codeword) collapse — surrender/flee routes unreachable
-- [x] 55. `<choice item=… pay="t">` doesn't consume the item
-- [x] 56. `hidden="t"` payments render a phantom "Pay" button instead of arming silently
-- [x] 57. Adventure Sheet: curses all display as "curse"; diseases/poisons invisible
-- [x] 58. Market `<sold>` hooks match the shop row's tags, not the sold item's
-- [x] 59. `<tick god=…>` drops `<effect>` children — Sig initiates never get +1 THIEVERY
-- [x] 60. Affliction `<effect>` forms `divide`/`target`/`stamina` inert; item `<curse>` children never attach
-- [x] 61. book6/628: the rerunnable `<set>` clobbers the roll's var — inn rest/dysentery never fires
-- [x] 64. Asset-only releases do not invalidate the PWA cache
-- [x] 70. Visit box renders unticked on the visit it ticks; bare `<tick/>` prints "If not, , and read on" (§496 + widespread)
-
-**LOW**
-- [x] 88. book5/386: the hidden `removetag="Tz"` cleanup fires on entry, so Targdaz's weapon-enchant roll/outcomes never land (weapon never changes)
-- [x] 97. Molhern's `itemcache` ignores its `<include>` / `<exclude>` filters
-- [x] 101. §5.114's `<sectionview>` oracle cannot display its referenced section
-- [x] 102. §1.338's standalone `<price>` does not charge for or complete the poison cure
-- [x] 103. §4.658: `initialCrew="oldcrew"` ignores the `oldcrew` variable — the salvaged barque's crew resets to average
-- [x] 87. Fight widget "Your Combat" omits the per-fight attack bonus (`special="attack"`), unlike the Defence line
-- [x] 86. Add a full-section render integration test for book5/386 (currently covered only by synthetic ticks) *(added; surfaced the §386 enchant-cycle bug → task 88)*
-- [x] 85. book6/135 source: `tag="keep"` is a stray/misnamed attribute (likely meant `tags=`); harmless but should be cleaned
-- [x] 84. De-flake the "fight attack produces a log line" test (timing-dependent on the 900 ms dice animation)
-- [x] 83. Combat blessings (Wrath/Defence) buttons appear only on the single-fight widget, not group fights *(split from task 80)*
-- [x] 82. Test harness: a duplicate top-level `const` in `run()` silently aborts the whole suite (reads as a hang, not a failure)
-- [x] 78. Validate numeric `<section name>` against its filename; fix five mismatched source files
 - [x] 9. Centralise tag dispatch into a registry
 - [x] 10. Dice RNG quality / reproducibility
 - [x] 11. Harden the per-visit memoization assumption
 - [x] 12. Add headless unit tests for the extracted rules
 - [x] 13. Optional: build-time XML validation
-- [x] 32. Implement or explicitly stub the remaining unhandled tags
-- [x] 33. Narrate sections without `<p>` wrappers (TTS)
-- [x] 34. Finish moving rules out of the view layer
-- [x] 35. iOS home-screen icons: provide PNG apple-touch-icon
-- [x] 36. Minor rule divergences (grab-bag)
-- [x] 37. Fix the `safeAddGodd` typo in the source XML
-- [x] 38. Gate cache widgets on `lock`/`unlock` under the single-pass render (book1/91 gamble)
-- [x] 39. Defer confiscate-and-return `<transfer … from=>` until a fight resolves (book2/462)
-- [x] 65. Rules modal emits invalid table heading markup
-- [x] 66. Add a CI workflow that runs the headless smoke suite
-- [x] 67. README: align the illustration docs with the shipped build
-- [x] 42. Inner `<difficulty>`/`<random>`/`<rankcheck>` rolls inside a `<group>` are unrun
-- [x] 44. Fold the ring of ultimate power's `Rank`/`Stamina` auras (book5/564)
-- [x] 62. Render `<image file=…>` and use-effect images (map of Bazalek, book3/75)
-- [x] 63. Heterogeneous "choose one" rewards (item / Shards / resurrection) over-apply (book1/597)
-- [x] 72. "codeword gained" notification fires even when the codeword was already held
-
-**Done**
-- [x] 1. Gate combat progression / model fight outcomes
-- [x] 2. Finish the logic/view split (combat/market/rest)
-- [x] 3. Fix multi-attribute `<if>` conditions
-- [x] 4. Prevent silent save-slot overwrite
 - [x] 14. Fix save-card button overflow on mobile
 - [x] 15. Fix `<gain>`/`<lose>`/`<tick>` ability effects (rank, stamina, "?", "*", fatal)
 - [x] 16. Make wildcard/choice losses actually take things
@@ -118,6 +45,89 @@ the tasks were filed, not work order).
 - [x] 21. Fix `<flee>`/`<fightdamage>`: no render-time auto-apply, find them anywhere, honour `flee="t"`, `type="replace"`
 - [x] 22. Render `<success>`/`<failure>`/`<outcome>` children of `<choices>`
 - [x] 23. Make inline `<buy>`/`<sell>` functional (ships, tools, quantity, item sells)
+- [x] 24. Canonicalise ship types (`brig`, `gall`) and fix crew-upgrade steps
+- [x] 25. Fix value/expression parsing: vars containing "d", unary minus, division
+- [x] 26. Implement the remaining `<fight>` attributes
+- [x] 27. Cap visit-box ticks and make `ticks=` guards robust
+- [x] 28. Honour `dead="t"` on `<goto>`/`<choice>`
+- [x] 29. Market & item polish: currency items, pipe names, headers *(parts 2 & 5 split → 40, 41)*
+- [x] 30. Gate `<random flag=…>` rolls behind their payment
+- [x] 31. `<rest>` with no `stamina=` should restore to full
+- [x] 32. Implement or explicitly stub the remaining unhandled tags
+- [x] 33. Narrate sections without `<p>` wrappers (TTS)
+- [x] 34. Finish moving rules out of the view layer
+- [x] 35. iOS home-screen icons: provide PNG apple-touch-icon
+- [x] 36. Minor rule divergences (grab-bag)
+- [x] 37. Fix the `safeAddGodd` typo in the source XML
+- [x] 38. Gate cache widgets on `lock`/`unlock` under the single-pass render (book1/91 gamble)
+- [x] 39. Defer confiscate-and-return `<transfer … from=>` until a fight resolves (book2/462)
+- [x] 40. `<market currency="…">` alternate-currency markets
+- [x] 41. Item `<effect>` system (use/aura/wielded/ability) and `<sold>` sell-hooks
+- [x] 42. Inner `<difficulty>`/`<random>`/`<rankcheck>` rolls inside a `<group>` are unrun
+- [x] 43. price/flag "choose one" purchases over-apply every linked reward *(moved from LOW 2026-07-07; scope grew — see detail)*
+- [x] 44. Fold the ring of ultimate power's `Rank`/`Stamina` auras (book5/564)
+- [x] 45. Multi-fight sections: the fight gate & death-deferral track only the *last* `<fight>`
+- [x] 46. `<set var … modifier="natural">` discards the value — book-2 rank ceremonies auto-succeed
+- [x] 47. `<choice item="?" tags=…>` is never enabled — light-gated passages hard-locked
+- [x] 48. Group fights: Surrender/flee throws a TypeError; no Flee button; no target choice
+- [x] 49. `special="attack|defence"` grant permanent, save-persisted bonuses
+- [x] 50. Var-keyed `<success>/<failure>` branches fire on entry (unset/stale vars)
+- [x] 51. `<difficulty|rankcheck flag=…>` roll gates unimplemented; shared `<success>` binds only the last roll
+- [x] 52. `removeCodeword` leaves the codeword's *value* behind — bonus counters never reset
+- [x] 53. `<difficulty modifier="noweapon">` still counts the weapon bonus
+- [x] 54. Mid-fight escape brackets (tick…lose codeword) collapse — surrender/flee routes unreachable
+- [x] 55. `<choice item=… pay="t">` doesn't consume the item
+- [x] 56. `hidden="t"` payments render a phantom "Pay" button instead of arming silently
+- [x] 57. Adventure Sheet: curses all display as "curse"; diseases/poisons invisible
+- [x] 58. Market `<sold>` hooks match the shop row's tags, not the sold item's
+- [x] 59. `<tick god=…>` drops `<effect>` children — Sig initiates never get +1 THIEVERY
+- [x] 60. Affliction `<effect>` forms `divide`/`target`/`stamina` inert; item `<curse>` children never attach
+- [x] 61. book6/628: the rerunnable `<set>` clobbers the roll's var — inn rest/dysentery never fires
+- [x] 62. Render `<image file=…>` and use-effect images (map of Bazalek, book3/75)
+- [x] 63. Heterogeneous "choose one" rewards (item / Shards / resurrection) over-apply (book1/597)
+- [x] 64. Asset-only releases do not invalidate the PWA cache
+- [x] 65. Rules modal emits invalid table heading markup
+- [x] 66. Add a CI workflow that runs the headless smoke suite
+- [x] 67. README: align the illustration docs with the shipped build
+- [x] 68. `<if ability="rank|stamina">` always reads 0 — Rank gates never open (§416 + 11 more)
+- [x] 69. Bare post-fight `<lose>/<gain>` apply on entry, not on the fight outcome (§570 + 7 more)
+- [x] 70. Visit box renders unticked on the visit it ticks; bare `<tick/>` prints "If not, , and read on" (§496 + widespread)
+- [x] 71. `<lose staminato="N">` never applies — the handler is gated on a `stamina=` attr it lacks (16 sections)
+- [x] 72. "codeword gained" notification fires even when the codeword was already held
+- [x] 73. Ship dock/current-vessel state is not maintained — any owned ship can sail or trade from anywhere *(core done; todock= + sailing-ship pointer split → task 81)*
+- [x] 74. Standalone `force="f"` effects auto-apply — missions/initiations cannot be declined; choose-one losses over-apply
+- [x] 75. Live `<tick>` forms for equipment, profession changes and patterned titles are incomplete/inert
+- [x] 76. Blessings are stored as inert labels — ability/Luck/travel benefits cannot be used *(core rerolls done; combat Defence/Wrath split → task 80)*
+- [x] 77. Selector-aware `<set item|cache …>` expressions read the sheet instead of the selected item/cache (21 nodes)
+- [x] 78. Validate numeric `<section name>` against its filename; fix five mismatched source files
+- [x] 79. Keeping a preview or importing a save reports success when persistence fails
+- [x] 80. Combat blessings: expose Defence through Faith (+3, one fight) and Divine Wrath (1d pre-damage) as fight-widget buttons *(split from task 76)*
+- [x] 81. Ships: honour `todock=` and track which at-large ship is being sailed *(split from task 73)*
+- [x] 82. Test harness: a duplicate top-level `const` in `run()` silently aborts the whole suite (reads as a hang, not a failure)
+- [x] 83. Combat blessings (Wrath/Defence) buttons appear only on the single-fight widget, not group fights *(split from task 80)*
+- [x] 84. De-flake the "fight attack produces a log line" test (timing-dependent on the 900 ms dice animation)
+- [x] 85. book6/135 source: `tag="keep"` is a stray/misnamed attribute (likely meant `tags=`); harmless but should be cleaned
+- [x] 86. Add a full-section render integration test for book5/386 (currently covered only by synthetic ticks) *(added; surfaced the §386 enchant-cycle bug → task 88)*
+- [x] 87. Fight widget "Your Combat" omits the per-fight attack bonus (`special="attack"`), unlike the Defence line
+- [x] 88. book5/386: the hidden `removetag="Tz"` cleanup fires on entry, so Targdaz's weapon-enchant roll/outcomes never land (weapon never changes)
+- [x] 89. Ship actions still use remote vessels, and `<choice sail>` does not sail one
+- [x] 90. Permanent Safety from Storms is deleted by storm-avoidance `<lose blessing>` nodes
+- [x] 91. COMBAT blessing cannot reroll an attack, and Defence blessing leaks between fights
+- [x] 92. Eight live `<adjust>` variants are ignored or applied unconditionally
+- [x] 93. Item group provenance and rolled `itemAt=` losses are not represented
+- [x] 94. `quantity=` is ignored on rewards, cargo ticks and market stock
+- [x] 95. Item `replace=` rewards add a duplicate instead of transforming the possession
+- [x] 96. Hidden item rewards inside `<group>` choices are never granted
+- [x] 97. Molhern's `itemcache` ignores its `<include>` / `<exclude>` filters
+- [x] 98. Resurrection arrangements ignore replacement, supplemental and hidden semantics
+- [x] 99. `<fightround>` effects are detached manual widgets instead of combat-round rules
+- [x] 100. The two live `<while>` loops execute only one rendered pass
+- [x] 101. §5.114's `<sectionview>` oracle cannot display its referenced section
+- [x] 102. §1.338's standalone `<price>` does not charge for or complete the poison cure
+- [x] 103. §4.658: `initialCrew="oldcrew"` ignores the `oldcrew` variable — the salvaged barque's crew resets to average
+- [x] 104. Travel rolls don't gate the section's onward choices; a "get lost" outcome doesn't suppress them (§1.278/§1.82 + every travel section)
+- [x] 105. `<if ticks="N">` reads the live count — this visit's own `<tick/>` flips the guard on a mid-visit rerender, re-showing the "already ticked → goto" redirect (§1.496)
+- [x] 106. Light mode is force-darkened on Chrome/Edge — Chromium "Auto Dark Theme"; `color-scheme: light` doesn't opt out, needs `only light` *(fixed; leather-chrome-in-both-themes remains an intentional design note)*
 
 ---
 
