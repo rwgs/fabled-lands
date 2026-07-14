@@ -940,12 +940,9 @@ function setSelector(el) {
   return { kind, pattern, tags: el.getAttribute('tags'), bonus: el.getAttribute('bonus'), cache, hasItemSel };
 }
 
-// Items matching a set-node selector, drawn from the selected pool (a named cache or the
-// sheet), narrowed by the selector's kind (weapon/armour/tool), name/tag pattern (reusing
-// the shared matchItemQuery) and an optional bonus filter ("N" / "N+").
-function setSelectorMatches(state, sel) {
-  if (!sel || !sel.hasItemSel) return [];
-  const pool = sel.cache != null ? state.cacheItems(sel.cache) : state.data.items;
+// Items in `pool` matched by a parsed selector: kind (weapon/armour/tool), name/tag
+// pattern (reusing the shared matchItemQuery) and an optional bonus filter ("N"/"N+").
+function matchesSelectorPool(pool, sel) {
   let items = sel.kind ? pool.filter((it) => it.kind === sel.kind) : pool;
   items = matchItemQuery(items, sel.pattern, sel.tags);
   if (sel.bonus != null) {
@@ -953,6 +950,23 @@ function setSelectorMatches(state, sel) {
     if (m) { const b = parseInt(m[1], 10); items = m[2] ? items.filter((it) => (it.bonus || 0) >= b) : items.filter((it) => (it.bonus || 0) === b); }
   }
   return items;
+}
+
+// Items matching a set-node selector, drawn from the selected pool (a named cache or the
+// sheet), narrowed by the selector's kind, name/tag pattern and optional bonus filter.
+function setSelectorMatches(state, sel) {
+  if (!sel || !sel.hasItemSel) return [];
+  const pool = sel.cache != null ? state.cacheItems(sel.cache) : state.data.items;
+  return matchesSelectorPool(pool, sel);
+}
+
+/** Items in `pool` matched by an `<include>`/`<exclude>` (or `<set>`) selector
+ *  element — its kind (weapon/armour/tool or item="?"), name/tag pattern and optional
+ *  bonus ("N"/"N+"). Empty when the element carries no item selector. Shared by the
+ *  filtered item-cache eligibility test (§2.617 Molhern's smithy). (task 97) */
+export function filterMatches(pool, el) {
+  const sel = setSelector(el);
+  return (sel && sel.hasItemSel) ? matchesSelectorPool(pool, sel) : [];
 }
 
 // The bonus of the single selected weapon/armour/tool for value="weapon|armour|tool".

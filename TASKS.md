@@ -67,7 +67,7 @@ the tasks were filed, not work order).
 
 **LOW**
 - [x] 88. book5/386: the hidden `removetag="Tz"` cleanup fires on entry, so Targdaz's weapon-enchant roll/outcomes never land (weapon never changes)
-- [ ] 97. Molhern's `itemcache` ignores its `<include>` / `<exclude>` filters
+- [x] 97. Molhern's `itemcache` ignores its `<include>` / `<exclude>` filters
 - [ ] 101. §5.114's `<sectionview>` oracle cannot display its referenced section
 - [ ] 102. §1.338's standalone `<price>` does not charge for or complete the poison cure
 - [ ] 103. §4.658: `initialCrew="oldcrew"` ignores the `oldcrew` variable — the salvaged barque's crew resets to average
@@ -3567,6 +3567,21 @@ exclude children, so ordinary items, already-worked equipment and maxed equipmen
 can all enter the flow. Apply the declared type/tag/bonus filters to the eligible
 list while preserving `itemlimit="1"` and the existing return path. Add a focused
 DOM/state test with eligible and rejected possessions. Stamp and run all sections.
+
+**Done 2026-07-13.** `renderItemCache`'s deposit list now honours the cache's
+`<include>`/`<exclude>` children (JaFL `Node.modifyItemMatches`): with includes
+present it starts each item out and lets includes add, then excludes remove — later
+filters win, per document order. An eligible possession gets an enabled *Store*
+button; a *candidate* of the right kind that an exclude rejects shows a **disabled**
+button titled with that filter's `reason=` ("Molhern has already worked on this
+item!", "This item is good enough already!"); an item that matches no include at all
+(an ordinary item) is not offered. `itemlimit="1"` and the §2.665 return path are
+unchanged. The kind/tag/bonus matching is a new DOM-free `engine.filterMatches(pool,
+el)`, factored out of the existing `<set>`-selector matcher (`matchesSelectorPool`)
+so both share one implementation. Focused DOM/state test on §2.617 covers an
+eligible weapon + armour, a Molherned and a bonus-6 rejection (each with its reason),
+a hidden ordinary item, and storing one weapon hitting the itemlimit. Suite green:
+`RESULT ALL PASS pass=972 fail=0`.
 
 ---
 

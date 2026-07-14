@@ -10,7 +10,7 @@ import {
   evaluateCondition, applyEffect, applyEffectBody, boolAttr, resolveValue, isDiceExpr,
   rollDifficulty, rollRankCheck, rollTraining, rollDice, matchRange, childAdjustment,
   applyRest, buyResurrectionDeal, reviveWithResurrection, abilityChoiceOptions, readItemEffects,
-  whileLoopDone,
+  whileLoopDone, filterMatches,
 } from './engine.js';
 import { makeFight, fightRound, groupFightRound, isDefeated, useWrathBlessing, useDefenceBlessing, rerollAttack } from './combat.js';
 import { shopKind, goodsFrom, ownsGoods, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo, canUpgradeCrew, payChoiceCost } from './market.js';
@@ -3351,21 +3351,47 @@ export class Story {
     });
     box.appendChild(list);
 
-    // Deposit a carried possession (unless the stash is at its item limit).
+    // Deposit a carried possession (unless the stash is at its item limit). The cache's
+    // <include>/<exclude> filters (JaFL Node.modifyItemMatches) decide which possessions
+    // may be stored: §2.617 (Molhern's smithy) takes one weapon or armour, excluding
+    // already-Molherned or bonus-6+ equipment. An item is eligible if the include set
+    // accepts it and no exclude rejects it; with includes present, start out and let each
+    // include add, then excludes remove (carrying their reason= for the tooltip). A
+    // rejected candidate (right kind, but excluded) shows a disabled button with the
+    // reason; an item of the wrong kind entirely is simply not offered. (task 97)
+    const filters = Array.from(node.children).filter((c) => /^(include|exclude)$/i.test(c.tagName));
+    const classify = (it) => {
+      if (!filters.length) return { eligible: true, candidate: true, reason: null };
+      let member = filters[0].tagName.toLowerCase() === 'exclude'; // exclude-first ⇒ start included
+      let candidate = member, reason = null;
+      for (const f of filters) {
+        if (!filterMatches([it], f).length) continue;
+        if (f.tagName.toLowerCase() === 'include') { member = true; candidate = true; }
+        else { member = false; reason = f.getAttribute('reason') || reason; }
+      }
+      return { eligible: member, candidate, reason };
+    };
     const atLimit = limit > 0 && stored.length >= limit;
     const carried = this.state.data.items;
     if (carried.length && !atLimit) {
       const dep = document.createElement('div');
       dep.className = 'cache-deposit';
       carried.slice().forEach((it) => {
+        const { eligible, candidate, reason } = classify(it);
+        if (!candidate) return; // not the kind of thing this cache accepts — don't offer it
         const store = document.createElement('button');
         store.className = 'btn-mini';
         store.textContent = 'Store ' + itemLabel(it);
-        store.addEventListener('click', () => {
-          const removed = this.state.removeItemById(it.id);
-          if (removed) this.state.cacheAddItem(name, removed);
-          this.rerender();
-        });
+        if (!eligible) {
+          store.disabled = true;
+          store.title = reason || 'This cannot be stored here.';
+        } else {
+          store.addEventListener('click', () => {
+            const removed = this.state.removeItemById(it.id);
+            if (removed) this.state.cacheAddItem(name, removed);
+            this.rerender();
+          });
+        }
         dep.appendChild(store);
       });
       box.appendChild(dep);

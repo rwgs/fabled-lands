@@ -388,6 +388,32 @@ async function run() {
     const s468 = await data.getSection(4,'468'); story20i.begin(s468,4,'468');
     ok('§468 renders an item-cache widget', !!c20i.querySelector('.item-cache'));
 
+    // task 97: §2.617 (Molhern's smithy) is the only filtered item cache — it takes one
+    // weapon or suit of armour, excluding already-Molherned or bonus-6+ equipment. The
+    // <include>/<exclude> filters must gate which possessions the deposit UI offers.
+    {
+      const g617 = GameState.create({ name:'M617', gender:'m', profession:'Warrior', book:2, adv });
+      g617.data.items = [];
+      g617.addItem(makeItem('weapon', 'iron sword', 2));                     // eligible
+      g617.addItem(makeItem('armour', 'leather jerkin', 1));                 // eligible
+      g617.addItem(makeItem('weapon', 'blessed axe', 3, null, ['Molherned'])); // excluded: already worked
+      g617.addItem(makeItem('weapon', 'master blade', 6));                   // excluded: bonus 6+
+      g617.addItem(makeItem('item', 'healing potion'));                      // not a candidate at all
+      const c617 = document.createElement('div');
+      const story617 = new Story(c617, g617, { navigate(){}, onDeath(){}, notify(){} });
+      story617.begin(await data.getSection(2,'617'), 2, '617');
+      const depBtn = (name) => Array.from(c617.querySelectorAll('.cache-deposit button')).find((b) => new RegExp(name, 'i').test(b.textContent));
+      ok('§2.617 offers a plain weapon (enabled Store)', (() => { const b = depBtn('iron sword'); return !!b && !b.disabled; })());
+      ok('§2.617 offers a suit of armour (enabled Store)', (() => { const b = depBtn('leather jerkin'); return !!b && !b.disabled; })());
+      ok('§2.617 rejects an already-Molherned weapon (disabled, with reason)', (() => { const b = depBtn('blessed axe'); return !!b && b.disabled && /already worked/i.test(b.title); })(), (() => { const b = depBtn('blessed axe'); return b ? `dis=${b.disabled} title=${b.title}` : 'no button'; })());
+      ok('§2.617 rejects a bonus-6 weapon (disabled, with reason)', (() => { const b = depBtn('master blade'); return !!b && b.disabled && /good enough already/i.test(b.title); })());
+      ok('§2.617 does not offer an ordinary (non weapon/armour) item at all', !depBtn('healing potion'));
+      // Storing an eligible item caches it and hits itemlimit="1" (deposit UI then closes).
+      depBtn('iron sword').click();
+      ok('§2.617 storing a weapon caches it and enforces itemlimit=1', g617.cacheItems('2.617').length === 1 && !g617.hasItem('iron sword') && !c617.querySelector('.cache-deposit'),
+        `cache=${g617.cacheItems('2.617').length} deposit=${!!c617.querySelector('.cache-deposit')}`);
+    }
+
     // ranges
     ok('range 0-4 ~3', eng.matchRange('0-4', 3));
     ok('range 1,2 ~2', eng.matchRange('1,2', 2));
