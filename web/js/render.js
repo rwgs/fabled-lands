@@ -104,6 +104,13 @@ export class Story {
     // (gone ashore) exempts nothing, so every at-large ship docks and the voyage ends. (task 81)
     const rawNavigate = opts.navigate;
     this.navigate = (book, section) => {
+      // End-of-section cleanups deferred during the visit (a hidden <tick removetag>):
+      // apply them now, on the way out, so a selection tag survives the whole visit for
+      // its own roll/outcome ticks and is still stripped exactly once. (task 88)
+      if (this.deferredCleanups && this.deferredCleanups.size) {
+        for (const n of this.deferredCleanups.values()) applyEffect(n, this.state, {});
+        this.deferredCleanups.clear();
+      }
       if (this.sectionTodock) {
         this.state.applyTodock(this.sectionTodock, this._sailExempt != null ? this._sailExempt : null);
         if (this._sailExempt == null) this.state.data.sailingShipId = null;
@@ -125,6 +132,7 @@ export class Story {
     this.inWhileIter = false;
     this.whileIterPending = false;
     this.whileIterPendingVars = null;
+    this.deferredCleanups = new Map(); // hidden removetag cleanups to apply on leaving (task 88)
   }
 
   /** Begin a fresh visit of a section element. */
@@ -142,6 +150,7 @@ export class Story {
     // so a `<while var>` loop starts undefined and a roll var can't be read stale from
     // an earlier section (§6.700's `<if var="x" equals="6">` gate, §5.218's free). (task 100)
     this.state.clearVars();
+    this.deferredCleanups = new Map(); // fresh per visit (task 88)
     // Record the player's location from the section's dock= attribute and berth any
     // at-large ship here (it was sailed in); a section without dock= is inland/at sea,
     // so the location clears and no ship is "here" unless it is at large. (task 73)
@@ -883,6 +892,18 @@ export class Story {
         if (span.textContent.trim()) container.appendChild(span);
       }
       return null;
+    }
+
+    // A hidden <tick removetag="X"> is an end-of-section tag cleanup (§5.386's Targdaz
+    // enchant tags a weapon "Tz", routes its interactive roll/outcomes to that weapon,
+    // then strips the tag). Applying it on entry — as any hidden effect would — removes
+    // the selection tag before the roll and <outcomes> can target the weapon, so the
+    // raise/lower/destroy never lands; a stray tag would also leak onto the weapon for a
+    // later re-visit. Defer it to when the section is left (see the navigate wrapper) so
+    // the tag survives the whole visit for its own ticks and is stripped exactly once. (task 88)
+    if (this.isDeferredTagCleanup(node)) {
+      this.deferredCleanups.set('cleanup@' + path, node);
+      return null; // hidden bookkeeping: renders nothing; applied on leaving the section
     }
 
     const price = node.getAttribute('price');
@@ -2432,6 +2453,14 @@ export class Story {
     if (!cw.split(/[|,]/).some((c) => this.escapeCodewords.has(c.trim()))) return false;
     if (!this.sectionFights.length) return false; // before the fight → an entry clear, apply now
     return this.aggregateFightOutcome(this.sectionFights) !== 'win';
+  }
+
+  // A hidden <tick removetag="X"> — an end-of-section selection-tag cleanup that must
+  // not run until the tag has done its job (§5.386). Deferred to the section exit. (task 88)
+  isDeferredTagCleanup(node) {
+    return node.tagName.toLowerCase() === 'tick'
+      && boolAttr(node.getAttribute('hidden'))
+      && node.getAttribute('removetag') != null;
   }
 
   // A dead=-gated <if> chain positioned AFTER a fight is that fight's win/lose

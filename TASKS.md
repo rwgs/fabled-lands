@@ -66,7 +66,7 @@ the tasks were filed, not work order).
 - [x] 70. Visit box renders unticked on the visit it ticks; bare `<tick/>` prints "If not, , and read on" (§496 + widespread)
 
 **LOW**
-- [ ] 88. book5/386: the hidden `removetag="Tz"` cleanup fires on entry, so Targdaz's weapon-enchant roll/outcomes never land (weapon never changes)
+- [x] 88. book5/386: the hidden `removetag="Tz"` cleanup fires on entry, so Targdaz's weapon-enchant roll/outcomes never land (weapon never changes)
 - [ ] 97. Molhern's `itemcache` ignores its `<include>` / `<exclude>` filters
 - [ ] 101. §5.114's `<sectionview>` oracle cannot display its referenced section
 - [ ] 102. §1.338's standalone `<price>` does not charge for or complete the poison cure
@@ -3195,6 +3195,22 @@ survives long enough for its own outcome ticks — likely a shared mechanism for
 "end-of-section cleanup" hidden ticks. Related single-pass ordering limitations:
 task 20 (lock/unlock bracket), task 61 (rerunnable `<set>` clobbers a roll var).
 Then update `_test.html`'s §5.386 part (c) to expect the enchant/outcome to land.
+
+**Done 2026-07-13.** A hidden `<tick removetag="X">` is now recognised as an
+end-of-section tag cleanup (`isDeferredTagCleanup` in render.js) and **deferred to
+the section exit** rather than applied on entry: `renderPassive` records it in
+`this.deferredCleanups` (reset per visit), and the `navigate` wrapper (the single
+"leaving" hook, alongside `todock=`) applies each recorded cleanup once on the way
+out. So Tz stays on the chosen weapon for the whole visit — the `<if var="x"
+greaterthan="bonus">` +1, the `<outcomes>` −1/`<lose weapon>` destroy all now match
+it — and the tag is stripped exactly once when the player leaves, never leaking onto
+the weapon for a later re-visit. §5.386 test rewritten: (c) a low roll (2-6) now
+destroys the tagged weapon; (d) a high roll raises then the 7-12 outcome lowers
+(net unchanged), the Tz tag survives mid-visit, and leaving via →245 strips it. The
+secondary quirk (roll widgets shown grayed/disabled for a bonus-6 weapon under the
+inactive `<if var="bonus" lessthan="6">`) is left as-is — it is the app's standard
+inactive-branch rendering and does nothing. Suite green: `RESULT ALL PASS pass=966
+fail=0`.
 
 ---
 
