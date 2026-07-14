@@ -30,7 +30,7 @@ the tasks were filed, not work order).
 - [x] 95. Item `replace=` rewards add a duplicate instead of transforming the possession
 - [x] 96. Hidden item rewards inside `<group>` choices are never granted
 - [x] 98. Resurrection arrangements ignore replacement, supplemental and hidden semantics
-- [ ] 100. The two live `<while>` loops execute only one rendered pass
+- [x] 100. The two live `<while>` loops execute only one rendered pass
 - [x] 92. Eight live `<adjust>` variants are ignored or applied unconditionally
 - [x] 91. COMBAT blessing cannot reroll an attack, and Defence blessing leaks between fights
 - [x] 90. Permanent Safety from Storms is deleted by storm-avoidance `<lose blessing>` nodes
@@ -3652,6 +3652,25 @@ after each iteration; interactive rolls must resume the loop rather than creatin
 all iterations at render time. Add deterministic termination tests for both live
 sections and an iteration guard that reports malformed non-progressing content
 instead of freezing the page. Stamp and run all sections.
+
+**Done 2026-07-13.** `renderWhile` (render.js) walks one iteration per completed
+pass plus the current live one, each under its own `~i` path namespace so its
+roll/effects/branches memoise independently; `activeRoll` is reset per pass so a
+shared `<success>/<failure>` binds to that pass's roll. A pass advances only when
+its interactive roll resolves (the roll renderers set `whileIterPending`), and a
+resolved `<random>` re-asserts its var each render (`state.restoreVar`) so §6.700's
+per-iteration `<lose stamina="x">`/`<if var="x" equals="6">` read *that* six even
+after the live value moves on; `pendingRollVar` treats a var re-rolled this pass as
+stale (via `whileIterPendingVars`). The terminal test is the DOM-free
+`engine.whileLoopDone` (loop until the var is *assigned*, per JaFL WhileNode). A
+live, unterminated loop sets `this.blocked` (JaFL holds execution until the loop
+ends — §5.218 hides the troll fight until you wriggle free; §6.700 hides the →529
+exit until the six-damage stops), and a 100-iteration guard `console.warn`s and
+aborts a non-progressing body. Variables are now cleared on section entry
+(`state.clearVars`) so the loop var starts undefined (JaFL vars are section-local).
+Headless end-to-end tests drive both sections deterministically (§5.218 via a
+cursed/boosted COMBAT ability, §6.700 via forcing seeds 4→6 and 7→1). Suite green:
+`RESULT ALL PASS pass=963 fail=0`.
 
 ---
 

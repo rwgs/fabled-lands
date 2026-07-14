@@ -10,6 +10,7 @@ import {
   evaluateCondition, applyEffect, applyEffectBody, boolAttr, resolveValue, isDiceExpr,
   rollDifficulty, rollRankCheck, rollTraining, rollDice, matchRange, childAdjustment,
   applyRest, buyResurrectionDeal, reviveWithResurrection, abilityChoiceOptions, readItemEffects,
+  whileLoopDone,
 } from './engine.js';
 import { makeFight, fightRound, groupFightRound, isDefeated, useWrathBlessing, useDefenceBlessing, rerollAttack } from './combat.js';
 import { shopKind, goodsFrom, ownsGoods, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo, canUpgradeCrew, payChoiceCost } from './market.js';
@@ -82,7 +83,10 @@ const TAG_RENDERERS = {
   // Explicit entries let the default case become strict later.
   field:           'renderField',
   extrachoice:     'renderExtraChoice',
-  while:           'renderChildrenOnly',
+  // <while var="V"> repeats its body until V is assigned (task 100): each pass is a
+  // fresh iteration with its own roll/effects, and a live unterminated loop blocks
+  // the rest of the section (JaFL WhileNode holds execution until the loop ends).
+  while:           'renderWhile',
   // <fightround> is a combat-round RULE (task 99): its body executes headlessly
   // between rounds (combat.fightRound), so it renders as inert prose — visible
   // words, no live roll widgets the player could work out of sequence.
@@ -114,6 +118,13 @@ export class Story {
     this.sectionEl = null;
     this.sectionTodock = null;  // current section's todock= (task 81)
     this._sailExempt = null;    // ship id exempted from todock on a sail exit (task 81)
+    // <while> loop iteration state (task 100), live only while renderWhile is walking
+    // an iteration body: whether the current pass is still waiting on an interactive
+    // roll, and which roll vars that pass has not yet resolved (so a re-rolled var is
+    // treated as stale until this pass rolls it — see pendingRollVar).
+    this.inWhileIter = false;
+    this.whileIterPending = false;
+    this.whileIterPendingVars = null;
   }
 
   /** Begin a fresh visit of a section element. */
@@ -127,6 +138,10 @@ export class Story {
     // Likewise a per-fight attack/Defence bonus from <tick special="attack|defence">
     // (task 49) applies only to the current section's fight — clear it on entry.
     this.state.clearFightBonuses();
+    // Variables are section-local (JaFL clears them per section): reset them on entry
+    // so a `<while var>` loop starts undefined and a roll var can't be read stale from
+    // an earlier section (§6.700's `<if var="x" equals="6">` gate, §5.218's free). (task 100)
+    this.state.clearVars();
     // Record the player's location from the section's dock= attribute and berth any
     // at-large ship here (it was sailed in); a section without dock= is inland/at sea,
     // so the location clears and no ship is "here" unless it is at large. (task 73)
@@ -553,11 +568,66 @@ export class Story {
 
   // An explicit no-op case for a tag whose automated mechanic is deferred: render
   // the inner prose (exactly what the default recursion did) so no text is lost,
-  // and no more. Used by <while>/<fightround>/<sectionview> (task 32). Making the
-  // dispatch explicit lets the default case tighten to a strict warning later.
+  // and no more. Used by <sectionview> (task 32), and by <while> when it sits in an
+  // untaken branch (grayed, not looping). Making the dispatch explicit lets the
+  // default case tighten to a strict warning later.
   renderChildrenOnly(container, node, path) {
     this.appendChildren(container, node, path);
     return null;
+  }
+
+  // <while var="V"> — repeat the body until V is assigned a value (JaFL WhileNode:
+  // "while no value has been assigned to this variable, the block will keep looping").
+  // The section re-renders on every state change, so rather than pre-building every
+  // iteration we render one per completed pass plus the current live one, each under
+  // its own path namespace (`~i`) so its roll/effects/branches memoize independently.
+  // A pass advances only when its interactive roll resolves; the resolved roll re-
+  // asserts its var (renderRandom) so a var re-rolled each pass reads correctly per
+  // iteration even though the live value has moved on. A live, unterminated loop
+  // blocks the rest of the section (as JaFL holds execution until the loop ends), and
+  // an iteration guard aborts a non-progressing (malformed) body instead of freezing.
+  renderWhile(container, node, path) {
+    // In an untaken conditional branch the loop isn't running — show the body once,
+    // grayed (the branch wrapper disables its controls); don't loop or block.
+    if (this.inactive) return this.renderChildrenOnly(container, node, path);
+
+    const wrap = document.createElement('span');
+    wrap.className = 'while-loop';
+    container.appendChild(wrap);
+
+    const MAX_ITERS = 100; // backstop for a malformed body that never assigns var=
+    const prevActiveRoll = this.activeRoll;
+    const prevInWhile = this.inWhileIter;
+    const prevPendingVars = this.whileIterPendingVars;
+    this.inWhileIter = true;
+
+    let i = 0, pending = false, terminated = false;
+    for (; i < MAX_ITERS; i++) {
+      if (whileLoopDone(node, this.state)) { terminated = true; break; } // var assigned → stop
+      if (this.state.isDead()) break;                                    // died mid-loop → stop
+      const iterEl = document.createElement('span');
+      iterEl.className = 'while-iter';
+      // Each pass rolls afresh: its own roll owns any shared <success>/<failure>
+      // branch, and its roll-dependent effects wait for THIS pass's roll.
+      this.activeRoll = null;
+      this.whileIterPending = false;
+      this.whileIterPendingVars = new Set();
+      this.appendChildren(iterEl, node, path + '~' + i);
+      const iterPending = this.whileIterPending;
+      wrap.appendChild(iterEl);
+      if (iterPending) { pending = true; break; } // an unresolved roll — wait for the player
+    }
+
+    this.activeRoll = prevActiveRoll;
+    this.inWhileIter = prevInWhile;
+    this.whileIterPendingVars = prevPendingVars;
+
+    if (i >= MAX_ITERS && !terminated) {
+      console.warn(`[render] <while var="${node.getAttribute('var')}"> hit the ${MAX_ITERS}-iteration guard without assigning its variable — aborting to avoid a freeze (malformed, non-progressing body?).`);
+    }
+    // A live loop that has not yet terminated holds back the rest of the section.
+    if (!terminated) this.blocked = true;
+    return wrap;
   }
 
   // Surface the player's active extra choices (<extrachoice>) at this section: a
@@ -1108,6 +1178,10 @@ export class Story {
       const s = String(v).trim();
       if (/^-?\d/.test(s) || isDiceExpr(s)) continue; // numeric literal or dice expr
       const bare = s.replace(/^[+-]/, '');            // a signed var ref ("-hang") → "hang" (task 50)
+      // Inside a <while> pass, a var this iteration re-rolls is STALE until this
+      // pass's roll resolves — defer even though hasVar() is true from a prior pass
+      // (§6.700's per-iteration `<lose stamina="x">` must use this six, not the last). (task 100)
+      if (this.whileIterPendingVars && this.whileIterPendingVars.has(bare)) return bare;
       if (this.state.hasVar(bare)) continue;          // already set (e.g. by an earlier <set>/roll)
       if (this.sectionEl && this.sectionEl.querySelector(`random[var="${bare}"], rankcheck[var="${bare}"], difficulty[var="${bare}"]`)) return bare;
     }
@@ -1938,6 +2012,9 @@ export class Story {
     const { flag, gated, armed } = this.rollGateState(node, key);
     let stored = this.ctx.rolls.get(key);
     if (gated && armed && stored) { this.ctx.rolls.delete(key); stored = null; }
+    // An unresolved roll inside a <while> pass holds the loop until the player rolls
+    // it (§5.218's per-pass COMBAT re-attempt to wriggle free). (task 100)
+    if (this.inWhileIter && !this.inactive && !stored) this.whileIterPending = true;
     if (stored) {
       const abLabel = (stored.ability || spec.split('|')[0] || '').toUpperCase();
       this.showDiceResult(widget, stored.dice, `${abLabel} ${stored.abilityScore >= 0 ? '+' : ''}${stored.abilityScore} = ${stored.total} vs ${level}`, stored.success ? 'Success' : 'Failure', stored.success);
@@ -2024,8 +2101,18 @@ export class Story {
     // Re-arm: a new payment (flag set again) after a prior spin drops the old result
     // so the player can roll afresh — the per-visit "spin again" cycle.
     if (gated && armed && stored) { this.ctx.rolls.delete(key); stored = null; }
+    // A <while> pass that has not yet rolled blocks the loop and marks its var stale
+    // (so its downstream `<lose stamina="x">` waits for THIS six, not the last). (task 100)
+    if (this.inWhileIter && !this.inactive && !stored) {
+      this.whileIterPending = true;
+      if (varName && this.whileIterPendingVars) this.whileIterPendingVars.add(varName);
+    }
 
     if (stored) {
+      // Re-assert this roll's value into its var on every render so a var re-rolled
+      // by a later <while> pass still reads correctly here in document order — the
+      // authoritative value is already saved, so replay it without a fresh save. (task 100)
+      if (varName && this.state.getVar(varName) !== stored.total) this.state.restoreVar(varName, stored.total);
       this.showDiceResult(widget, stored.dice, `Rolled ${stored.total}`, '', true);
       // Luck rerolls any dice result; Safe Travel rerolls a type="travel" encounter.
       const travel = (node.getAttribute('type') || '').toLowerCase() === 'travel';
@@ -2065,6 +2152,7 @@ export class Story {
     const { flag, gated, armed } = this.rollGateState(node, key);
     let stored = this.ctx.rolls.get(key);
     if (gated && armed && stored) { this.ctx.rolls.delete(key); stored = null; }
+    if (this.inWhileIter && !this.inactive && !stored) this.whileIterPending = true; // hold a <while> pass (task 100)
     if (stored) {
       this.showDiceResult(widget, stored.dice, `Rolled ${stored.total} vs Rank ${this.state.rankValue()}`, stored.success ? 'Success' : 'Failure', stored.success);
       this.appendBlessingReroll(widget, { success: stored.success, kind: 'check' }, () => {
@@ -2100,6 +2188,7 @@ export class Story {
     widget.className = 'roll';
     container.appendChild(widget);
     const stored = this.ctx.rolls.get(key);
+    if (this.inWhileIter && !this.inactive && !stored) this.whileIterPending = true; // hold a <while> pass (task 100)
     if (stored) {
       const ab = stored.ability;
       this.showDiceResult(widget, stored.dice, `Rolled ${stored.total} vs ${ab.toUpperCase()} ${stored.natural}`, stored.success ? `+1 ${ab.toUpperCase()}` : 'No gain', stored.success);

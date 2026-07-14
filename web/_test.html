@@ -522,6 +522,82 @@ async function run() {
     ok('§123 reveals a swim outcome (→53 or →76) after rolling', /Continue → (53|76)/.test(container.textContent),
        (container.querySelector('.choices') || container).textContent.replace(/\s+/g,' ').slice(0, 200));
 
+    // --- task 100: <while> loops repeat until their var is assigned -----------
+    {
+      // DOM-free terminal test: a <while var> keeps looping while its var is
+      // UNassigned; assigning any value (even 0) stops it (JaFL isVariableDefined).
+      const gW = GameState.create({ name:'W', gender:'m', profession:'Warrior', book:5, adv });
+      const wnode = parse('<while var="free"/>');
+      ok('whileLoopDone: unset var keeps looping', eng.whileLoopDone(wnode, gW) === false);
+      gW.setVar('free', 1);
+      ok('whileLoopDone: an assigned var stops the loop', eng.whileLoopDone(wnode, gW) === true);
+      gW.setVar('free', 0);
+      ok('whileLoopDone: assigned 0 still counts as assigned', eng.whileLoopDone(wnode, gW) === true);
+      ok('whileLoopDone: no var= never loops', eng.whileLoopDone(parse('<while/>'), gW) === true);
+
+      // Variables are section-local: entering a section clears leftovers so a leaked
+      // loop var cannot skip the loop.
+      const gClr = GameState.create({ name:'CV', gender:'m', profession:'Warrior', book:1, adv });
+      gClr.setVar('y', 5);
+      const storyClr = new Story(document.createElement('div'), gClr, { navigate(){}, onDeath(){}, notify(){} });
+      storyClr.begin(await data.getSection(1,'1'), 1, '1');
+      ok('entering a section clears leftover variables', !gClr.hasVar('y'), 'vars=' + JSON.stringify(gClr.data.vars));
+
+      window.__FL_INSTANT_DICE__ = true;
+      const nextRoll = (c) => Array.from(c.querySelectorAll('.btn-roll')).find(b => !b.disabled);
+      const loopRoll = (c) => Array.from(c.querySelectorAll('.while-loop .btn-roll')).find(b => !b.disabled);
+      const settle = () => new Promise(r => setTimeout(r, 30));
+
+      // §5.218 — fail the troll's grapple, then loop a COMBAT re-attempt until you
+      // wriggle free. Outcomes are forced through the COMBAT ability (cursed = always
+      // fail; 12 = always beat the level-12 grapple) so the test needs no dice control.
+      const g218 = GameState.create({ name:'T', gender:'m', profession:'Warrior', book:5, adv });
+      g218.data.stamina = 999; g218.data.staminaMax = 999;    // survive repeated choke damage
+      g218.setAbilityFlag('combat', 'cursed', true);           // every COMBAT roll fails
+      const c218 = document.createElement('div');
+      const story218 = new Story(c218, g218, { navigate(){}, onDeath(){}, notify(){} });
+      story218.begin(await data.getSection(5,'218'), 5, '218');
+      ok('§5.218 shows the grapple roll and (pre-fail) the fight', !!nextRoll(c218) && !!c218.querySelector('.fight'));
+      nextRoll(c218).click(); await settle();                  // fail the initial grapple
+      const stEnter = g218.data.stamina;
+      ok('§5.218 failing the grapple opens the wriggle-free loop', !!nextRoll(c218) && !g218.hasVar('free'));
+      ok('§5.218 a live loop hides the fight until you are free', !c218.querySelector('.fight'));
+      nextRoll(c218).click(); await settle();                  // fail a loop attempt
+      ok('§5.218 a failed loop attempt repeats (does not stop after one pass)', !!nextRoll(c218) && !g218.hasVar('free'));
+      ok('§5.218 each failed attempt costs 3 Stamina', g218.data.stamina === stEnter - 3, `stam=${g218.data.stamina} was=${stEnter}`);
+      nextRoll(c218).click(); await settle();                  // and again
+      ok('§5.218 keeps looping while you keep failing', !!nextRoll(c218) && !g218.hasVar('free') && g218.data.stamina === stEnter - 6);
+      g218.setAbilityFlag('combat', 'cursed', false); g218.data.abilities.combat = 12; // now succeed
+      loopRoll(c218).click(); await settle();                  // wriggle free
+      ok('§5.218 succeeding assigns free and ends the loop (no live loop roll)', g218.hasVar('free') && !loopRoll(c218), `free=${g218.hasVar('free')} loopRoll=${!!loopRoll(c218)}`);
+      ok('§5.218 the fight reappears once you are free', !!c218.querySelector('.fight'));
+
+      // §6.700 — a die of Stamina damage; on a six keep re-rolling & losing until a
+      // non-six. Reseed before each click to force the single die (6 to keep looping,
+      // 1 to break out); assert the seeds first so a PRNG mismatch fails loudly here.
+      eng.seedRng(4); ok('§6.700 forcing seed 4 rolls a 6', eng.rollD6() === 6);
+      eng.seedRng(7); ok('§6.700 forcing seed 7 rolls a 1', eng.rollD6() === 1);
+      const g700 = GameState.create({ name:'S', gender:'m', profession:'Warrior', book:6, adv });
+      g700.data.stamina = 999; g700.data.staminaMax = 999;
+      const c700 = document.createElement('div');
+      const hasExit = () => !!c700.querySelector('.goto');
+      const story700 = new Story(c700, g700, { navigate(){}, onDeath(){}, notify(){} });
+      story700.begin(await data.getSection(6,'700'), 6, '700');
+      const st700 = g700.data.stamina;
+      ok('§6.700 shows the initial die and (no six yet) the exit', !!nextRoll(c700) && hasExit() && !g700.hasVar('y'));
+      eng.seedRng(4); nextRoll(c700).click(); await settle();  // initial roll = 6
+      ok('§6.700 the initial six costs 6 Stamina', g700.data.stamina === st700 - 6, `stam=${g700.data.stamina}`);
+      ok('§6.700 a six opens the re-roll loop and blocks the exit', !!nextRoll(c700) && !g700.hasVar('y') && !hasExit());
+      eng.seedRng(4); nextRoll(c700).click(); await settle();  // loop roll = 6 → repeat
+      ok('§6.700 another six repeats the loop (fresh roll) and takes 6 more', !!nextRoll(c700) && !g700.hasVar('y') && g700.data.stamina === st700 - 12);
+      eng.seedRng(7); nextRoll(c700).click(); await settle();  // loop roll = 1 → stop
+      ok('§6.700 a non-six ends the loop and reopens the exit', g700.hasVar('y') && !nextRoll(c700) && hasExit());
+      ok('§6.700 the final die costs its 1 Stamina (13 lost overall)', g700.data.stamina === st700 - 13, `stam=${g700.data.stamina}`);
+
+      eng.seedRng(null);                  // revert to Math.random for later tests
+      window.__FL_INSTANT_DICE__ = false; // restore
+    }
+
     // --- interaction: clicking a choice navigates ---
     let navd = null;
     const story3 = new Story(container, gs, { navigate:(b,s)=>{navd={b,s};}, onDeath(){}, notify(){} });

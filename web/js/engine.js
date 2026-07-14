@@ -277,6 +277,17 @@ export function evaluateCondition(el, state) {
   return final;
 }
 
+/** JaFL WhileNode semantics: a `<while var="V">` block loops UNTIL V has been
+ *  assigned a value (`isVariableDefined`) — "while no value has been assigned to
+ *  this variable, the block will keep looping". Returns true once the loop should
+ *  STOP. The interactive driving (per-iteration rolls, effects) lives in the view,
+ *  but the terminal test is a pure state read so it can be checked headlessly. A
+ *  `<while>` with no var= never loops (nothing could ever un-set it). (task 100) */
+export function whileLoopDone(node, state) {
+  const v = node.getAttribute('var');
+  return !v || state.hasVar(v);
+}
+
 // Attributes evaluateCondition understands: condition attributes plus the
 // comparators/modifiers/structural attributes that legitimately accompany them.
 const KNOWN_IF_ATTRS = new Set([

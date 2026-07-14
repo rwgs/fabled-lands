@@ -601,6 +601,17 @@ export class GameState {
   getVar(name) { return this.data.vars[name] || 0; }
   setVar(name, v) { this.data.vars[name] = v; this.changed(); }
   hasVar(name) { return Object.prototype.hasOwnProperty.call(this.data.vars, name); }
+  // Variables are section-local in JaFL (each SectionNode owns its own map, cleared
+  // on entry); the port kept them on the save so they leaked across sections. Clear
+  // them when a section begins so a `<while var>` loop (and any roll/computation var)
+  // starts undefined — else a value left by an earlier section could skip the loop
+  // or fire a `<if var>` gate before its roll. No-op (no save) when already empty. (task 100)
+  clearVars() { if (Object.keys(this.data.vars).length) { this.data.vars = {}; this.changed(); } }
+  // Replay a roll's already-persisted value into a variable during a re-render
+  // without flagging another save — used so each `<while>` iteration's downstream
+  // reads see THAT pass's rolled value (the live var may have been overwritten by a
+  // later iteration). The authoritative value was saved when the roll happened. (task 100)
+  restoreVar(name, v) { this.data.vars[name] = v; }
 
   // ---- blessings / curses ---------------------------------------------
   // Compared/stored canonically so "storm"/"storms" (and any casing) are one
