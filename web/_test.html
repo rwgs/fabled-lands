@@ -441,6 +441,37 @@ async function run() {
       overlay.remove();
     }
 
+    // task 102: §1.338's healer — the <lose price="p" shards="25"> cost arms the
+    // <lose poison="?" flag="p"> cure; too poor ⇒ disabled; paying ⇒ 25 Shards spent
+    // and the poison cured exactly once (never for free on entry).
+    {
+      const s338 = await data.getSection(1, '338');
+      // (a) too poor: the Pay button is disabled and nothing happens on entry.
+      const gPoor = GameState.create({ name:'P338', gender:'m', profession:'Warrior', book:1, adv });
+      gPoor.data.shards = 10;
+      eng.applyEffect(parse('<poison name="Snake Venom"><effect ability="thievery" bonus="-1"/></poison>'), gPoor, {});
+      const cPoor = document.createElement('div');
+      new Story(cPoor, gPoor, { navigate(){}, onDeath(){}, notify(){} }).begin(s338, 1, '338');
+      const payPoor = Array.from(cPoor.querySelectorAll('.pay-action')).find((b) => /Shards/i.test(b.textContent));
+      ok('§1.338 arms a Pay button for the poison cure', !!payPoor);
+      ok('§1.338 with < 25 Shards the Pay button is disabled', !!payPoor && payPoor.disabled && /not enough/i.test(payPoor.title || ''), payPoor ? `dis=${payPoor.disabled} title=${payPoor.title}` : 'no button');
+      ok('§1.338 does not cure the poison for free on entry', gPoor.hasPoison('Snake Venom') && gPoor.data.shards === 10);
+
+      // (b) can afford: paying deducts 25 and cures the poison, restoring the ability.
+      const gRich = GameState.create({ name:'R338', gender:'m', profession:'Warrior', book:1, adv });
+      gRich.data.shards = 100;
+      gRich.data.abilities.thievery = 5; const thRich = gRich.ability('thievery');
+      eng.applyEffect(parse('<poison name="Snake Venom"><effect ability="thievery" bonus="-1"/></poison>'), gRich, {});
+      ok('§1.338 the poison penalises the ability first', gRich.ability('thievery') === thRich - 1);
+      const cRich = document.createElement('div');
+      new Story(cRich, gRich, { navigate(){}, onDeath(){}, notify(){} }).begin(s338, 1, '338');
+      ok('§1.338 the poison is intact and no Shards spent until the player pays', gRich.hasPoison('Snake Venom') && gRich.data.shards === 100);
+      Array.from(cRich.querySelectorAll('.pay-action')).find((b) => /Shards/i.test(b.textContent)).click();
+      ok('§1.338 paying deducts 25 Shards and cures the poison (ability restored)', gRich.data.shards === 75 && !gRich.hasPoison('Snake Venom') && gRich.ability('thievery') === thRich, `shards=${gRich.data.shards} poison=${gRich.hasPoison('Snake Venom')} thiev=${gRich.ability('thievery')}`);
+      const payAgain = Array.from(cRich.querySelectorAll('.pay-action')).find((b) => /Shards/i.test(b.textContent));
+      ok('§1.338 the cure cannot be bought twice (button locks after paying)', gRich.data.shards === 75 && (!payAgain || payAgain.disabled));
+    }
+
     // ranges
     ok('range 0-4 ~3', eng.matchRange('0-4', 3));
     ok('range 1,2 ~2', eng.matchRange('1,2', 2));

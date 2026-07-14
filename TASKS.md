@@ -69,7 +69,7 @@ the tasks were filed, not work order).
 - [x] 88. book5/386: the hidden `removetag="Tz"` cleanup fires on entry, so Targdaz's weapon-enchant roll/outcomes never land (weapon never changes)
 - [x] 97. Molhern's `itemcache` ignores its `<include>` / `<exclude>` filters
 - [x] 101. §5.114's `<sectionview>` oracle cannot display its referenced section
-- [ ] 102. §1.338's standalone `<price>` does not charge for or complete the poison cure
+- [x] 102. §1.338's standalone `<price>` does not charge for or complete the poison cure
 - [ ] 103. §4.658: `initialCrew="oldcrew"` ignores the `oldcrew` variable — the salvaged barque's crew resets to average
 - [x] 87. Fight widget "Your Combat" omits the per-fight attack bonus (`special="attack"`), unlike the Defence line
 - [x] 86. Add a full-section render integration test for book5/386 (currently covered only by synthetic ticks) *(added; surfaced the §386 enchant-cycle bug → task 88)*
@@ -3746,6 +3746,22 @@ project's supported payment/flag nodes (prefer an XML correction over a one-off
 view rule if `<price>` is invalid legacy markup). Add an end-to-end test for
 insufficient funds, one successful 25-Shard payment and poison removal exactly
 once. Rebuild, stamp, and run all sections.
+
+**Done 2026-07-14.** `<price>` is legacy JaFL markup — `PriceNode.java`'s own
+comment says `LoseNode` (a `<lose>` with a `price=` attribute) "handles pretty much
+everything… so this class can be removed". So this was an XML correction, not a new
+view rule: §1.338's `<price shards="25" flag="p">25 Shards</price>` became `<lose
+price="p" shards="25">25 Shards</lose>` — the project's standard paid-purchase cost
+form (65 such nodes in the corpus), armed by the existing `renderOptionalPay`. The
+linked `<lose poison="?" flag="p">` cure was previously applying **free on entry**
+(its `flag=` reward branch only defers when a `[price="k"]` **attribute** node
+exists, and the old `<price>` was a tag, not an attribute); now the cost node
+carries `price="p"`, so the cure is correctly deferred and applied only on payment.
+End-to-end test: with < 25 Shards the Pay button is disabled ("Not enough Shards")
+and nothing happens on entry; paying deducts exactly 25, cures the poison and
+restores the ability; the button then locks so the cure can't be bought twice. Data
+rebuilt with pwsh 7 (only book1.json's §338 line changed). Suite green: `RESULT ALL
+PASS pass=986 fail=0`.
 
 ---
 
