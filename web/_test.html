@@ -1507,6 +1507,38 @@ async function run() {
     eng.applyEffect(parse('<lose crew="-1"/>'), gcma, {});
     ok('crew upgrade average → good', gcma.ships[0].crew === 'good', gcma.ships[0].crew);
 
+    // --- task 103: §4.658 salvaged barque carries the wrecked ship's crew grade ----
+    {
+      // market: initialCrew resolves as a variable/number first — oldcrew is a 1-based
+      // CREW_LEVELS index set by <set var="oldcrew" value="crew"/>, so it maps to its grade.
+      const gcv = GameState.create({ name:'CV658', gender:'m', profession:'Warrior', book:4, adv });
+      gcv.setVar('oldcrew', 3); // 1=poor, 2=average, 3=good, 4=excellent
+      applyInlineBuy(gcv, { ship:'barque', shipName:'Scavenger', initialCrew:'oldcrew' });
+      ok('initialCrew="oldcrew"=3 gives a GOOD crew (not reset to average)', gcv.ships[gcv.ships.length-1].crew === 'good', gcv.ships[gcv.ships.length-1].crew);
+      const gcv2 = GameState.create({ name:'CV658b', gender:'m', profession:'Warrior', book:4, adv });
+      applyInlineBuy(gcv2, { ship:'barque', initialCrew:'none' });
+      applyInlineBuy(gcv2, { ship:'barque', initialCrew:null });
+      applyInlineBuy(gcv2, { ship:'barque', initialCrew:'excellent' });
+      ok('initialCrew fallbacks preserved: none→poor, blank→average, literal grade kept',
+        gcv2.ships[0].crew === 'poor' && gcv2.ships[1].crew === 'average' && gcv2.ships[2].crew === 'excellent', gcv2.ships.map((s)=>s.crew).join(','));
+
+      // end-to-end §4.658: wreck a GOOD-crew brig at sea, salvage the barque, upgrade one grade.
+      const g658 = GameState.create({ name:'W658', gender:'m', profession:'Warrior', book:4, adv });
+      g658.addShip({ type:'brigantine', name:'Old Ship', crew:'good', cargo:[], docked:null }); // sailing at sea
+      const c658 = document.createElement('div');
+      new Story(c658, g658, { navigate(){}, onDeath(){}, notify(){} }).begin(await data.getSection(4,'658'), 4, '658');
+      ok('§4.658 crosses off the wrecked ship on entry', g658.ships.length === 0, 'ships=' + g658.ships.length);
+      const takeBarque = Array.from(c658.querySelectorAll('.btn-mini')).find((b) => /Note it/i.test(b.textContent) && !b.disabled);
+      ok('§4.658 offers the salvaged barque as a buy', !!takeBarque);
+      takeBarque.click();
+      ok('§4.658 the salvaged barque keeps the GOOD crew (oldcrew), not average', g658.ships.length === 1 && g658.ships[0].crew === 'good', g658.ships[0] ? g658.ships[0].crew : 'no ship');
+      const upExcellent = () => Array.from(c658.querySelectorAll('.btn-mini')).find((b) => /becomes excellent/i.test(b.textContent) && !b.disabled);
+      const upAverage = () => Array.from(c658.querySelectorAll('.btn-mini')).find((b) => /becomes average/i.test(b.textContent) && !b.disabled);
+      ok('§4.658 the upgrade offered is good→excellent (not from average)', !!upExcellent() && !upAverage());
+      upExcellent().click();
+      ok('§4.658 taking the one-grade upgrade makes the crew excellent', g658.ships[0].crew === 'excellent', g658.ships[0].crew);
+    }
+
     // --- task 10: seedable RNG / reproducible dice ------------------------
     // Same seed ⇒ identical roll sequence; different seeds ⇒ (almost surely)
     // different ones; string seeds hash deterministically; null reverts to

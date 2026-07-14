@@ -70,7 +70,7 @@ the tasks were filed, not work order).
 - [x] 97. Molhern's `itemcache` ignores its `<include>` / `<exclude>` filters
 - [x] 101. §5.114's `<sectionview>` oracle cannot display its referenced section
 - [x] 102. §1.338's standalone `<price>` does not charge for or complete the poison cure
-- [ ] 103. §4.658: `initialCrew="oldcrew"` ignores the `oldcrew` variable — the salvaged barque's crew resets to average
+- [x] 103. §4.658: `initialCrew="oldcrew"` ignores the `oldcrew` variable — the salvaged barque's crew resets to average
 - [x] 87. Fight widget "Your Combat" omits the per-fight attack bonus (`special="attack"`), unlike the Defence line
 - [x] 86. Add a full-section render integration test for book5/386 (currently covered only by synthetic ticks) *(added; surfaced the §386 enchant-cycle bug → task 88)*
 - [x] 85. book6/135 source: `tag="keep"` is a stray/misnamed attribute (likely meant `tags=`); harmless but should be cleaned
@@ -3782,6 +3782,19 @@ and only then fall back to the keyword mapping (`none`→poor, blank→average).
 Add a headless §4.658 end-to-end test: wreck a GOOD-crew brigantine at sea, buy
 the barque, assert it starts with a good crew and that the upgrade offer shown
 is good→excellent. Web-only; stamp and run all sections.
+
+**Done 2026-07-14.** `market.canonCrew` now takes an optional `state` and, when the
+value is not a literal grade or `none`, resolves it as a variable/number first
+(`resolveValue` → `CREW_LEVELS[n-1]`) before the `average` fallback — so
+`initialCrew="oldcrew"` (a 1-based crew index that `<set var="oldcrew" value="crew"/>`
+captured from the wrecked ship) maps back to its grade. `state` is threaded through
+the two `initialCrew` call sites (`buyTrade`, `applyInlineBuy`); the crew-*upgrade*
+sites keep their literal grades. `none`→poor / blank→average / literal-grade
+fallbacks are unchanged. Tests: `applyInlineBuy` with `oldcrew`=3 yields a good crew
+and the fallbacks still hold; the §4.658 end-to-end wrecks a good-crew brigantine at
+sea, salvages the barque (keeps GOOD, not average), shows the good→excellent upgrade
+(not from average), and applying it makes the crew excellent. Web-only. Suite green:
+`RESULT ALL PASS pass=993 fail=0`.
 
 ---
 

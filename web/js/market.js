@@ -6,6 +6,7 @@
 
 import { makeItem, parseTags, splitItemName, isShardsCurrency } from './state.js';
 import { SHIP_TYPES, CREW_LEVELS, canonShipType } from './rules.js';
+import { resolveValue } from './engine.js';
 
 const shipCap = (type) => SHIP_TYPES[canonShipType(type)]?.capacity || 1;
 
@@ -15,12 +16,22 @@ const shipCap = (type) => SHIP_TYPES[canonShipType(type)]?.capacity || 1;
 const walletBalance = (state, currency) => (isShardsCurrency(currency) ? state.data.shards : state.currencyBalance(currency));
 const walletSpend = (state, currency, amount) => { if (isShardsCurrency(currency)) state.adjustMoney(-amount); else state.adjustCurrency(currency, -amount); };
 const walletEarn = (state, currency, amount) => { if (isShardsCurrency(currency)) state.adjustMoney(amount); else state.adjustCurrency(currency, amount); };
-// Normalise an initialCrew= value from the books to a real crew grade.
-const canonCrew = (c) => {
-  const k = String(c || '').trim().toLowerCase();
+// Normalise an initialCrew= value from the books to a real crew grade. A literal
+// grade or "none" maps directly; otherwise (given `state`) resolve it as a variable
+// or number first — §4.658 stores the wrecked ship's crew with <set var="oldcrew"
+// value="crew"/> (a 1-based CREW_LEVELS index) and buys the barque with
+// initialCrew="oldcrew", so the salvaged crew must be carried over, not reset to
+// average. A blank or unresolved value falls back to average. (task 103)
+const canonCrew = (c, state = null) => {
+  const raw = String(c || '').trim();
+  const k = raw.toLowerCase();
   if (CREW_LEVELS.includes(k)) return k;
   if (k === 'none') return 'poor';
-  return 'average'; // "oldcrew" and blanks: a serviceable default
+  if (state && raw) {
+    const n = resolveValue(state, raw);
+    if (Number.isInteger(n) && n >= 1 && n <= CREW_LEVELS.length) return CREW_LEVELS[n - 1];
+  }
+  return 'average'; // blanks / unresolved: a serviceable default
 };
 
 /** Classify a shop-row element into a goods kind. */
@@ -79,7 +90,7 @@ export function buyTrade(state, goods, price, currency = null) {
   if (kind === 'ship') {
     walletSpend(state, currency, price);
     // Berth the new ship at the port it is bought in, so <if docked="…"> sees it (task 73).
-    state.addShip({ type: canonShipType(shipType), name: 'Ship', crew: canonCrew(initialCrew), cargo: [], docked: state.data.location ?? null });
+    state.addShip({ type: canonShipType(shipType), name: 'Ship', crew: canonCrew(initialCrew, state), cargo: [], docked: state.data.location ?? null });
   } else if (kind === 'cargo') {
     // Load onto a ship HERE (berthed at this port / sailing with you) that has cargo
     // space — never onto a vessel left at another dock (task 89).
@@ -151,7 +162,7 @@ export function applyInlineBuy(state, opts = {}) {
   }
   if (shipType) {
     if (price) state.adjustMoney(-price);
-    state.addShip({ type: canonShipType(shipType), name: shipName || 'Ship', crew: canonCrew(initialCrew), cargo: [], docked: state.data.location ?? null });
+    state.addShip({ type: canonShipType(shipType), name: shipName || 'Ship', crew: canonCrew(initialCrew, state), cargo: [], docked: state.data.location ?? null });
     return { ok: true };
   }
   if (cargo != null) {
