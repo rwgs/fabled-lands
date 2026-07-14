@@ -6,6 +6,7 @@ stable IDs pointing at the detail sections below (sections are in the order
 the tasks were filed, not work order).
 
 **HIGH**
+- [ ] 104. Travel rolls don't gate the section's onward choices; a "get lost" outcome doesn't suppress them (§1.278/§1.82 + every travel section)
 - [x] 99. `<fightround>` effects are detached manual widgets instead of combat-round rules
 - [x] 89. Ship actions still use remote vessels, and `<choice sail>` does not sail one
 - [x] 77. Selector-aware `<set item|cache …>` expressions read the sheet instead of the selected item/cache (21 nodes)
@@ -25,6 +26,8 @@ the tasks were filed, not work order).
 - [x] 71. `<lose staminato="N">` never applies — the handler is gated on a `stamina=` attr it lacks (16 sections)
 
 **MEDIUM**
+- [ ] 105. `<if ticks="N">` reads the live count — this visit's own `<tick/>` flips the guard on a mid-visit rerender, re-showing the "already ticked → goto" redirect (§1.496)
+- [ ] 106. Light mode barely changes the mobile app — header, sheet drawer, toasts & title are leather-dark in both themes (full-screen sheet drawer dominates a phone)
 - [x] 93. Item group provenance and rolled `itemAt=` losses are not represented
 - [x] 94. `quantity=` is ignored on rewards, cargo ticks and market stock
 - [x] 95. Item `replace=` rewards add a duplicate instead of transforming the possession
@@ -3798,11 +3801,128 @@ sea, salvages the barque (keeps GOOD, not average), shows the good→excellent u
 
 ---
 
+## 104. Travel rolls don't gate the section's onward choices; a "get lost" outcome doesn't suppress them  — HIGH (render)
+
+*(Filed 2026-07-14 from playtesting §1.278 and §1.82.)* The overland/river/sea
+travel idiom is `<random type="travel">` → `<outcomes>` → a **sibling**
+`<choices>` block of onward destinations. `render.js` draws the `<choices>`
+independently of the roll, so two rules are broken:
+
+1. **The roll is not enforced.** The four travel choices are live *before* the
+   player rolls the encounter die — you can leave without ever rolling. There is
+   no roll-gate analogous to `computeFightGate`/`applyFightGate`; nothing marks
+   the section's mandatory `<random>` as blocking downstream navigation.
+2. **A forced redirect doesn't override the choices.** In §278 an outcome of
+   1–2 is `<outcome range="1,2">You get lost. <goto section="82"/>.</outcome>` —
+   getting lost turns you to 82 *instead of* reaching your chosen destination.
+   `renderBranch`→`revealBranch` shows the `→82` continue link, but the sibling
+   `<choices>` stay enabled, so the player can ignore getting lost and pick a
+   destination anyway. §82 has the mirror bug (1–2 poison / choices live before
+   the roll). This pattern recurs in **every travel section across all six
+   books**, so the blast radius is large.
+
+Fix (proposed): a general "roll gate" — detect a section whose `<random>`/roll
+feeds an `<outcomes>` table and disable the onward `<choices>` (and any
+"when you are ready" nav) until the roll resolves; once resolved, if the matched
+outcome carries its own `<goto>` (a "get lost"/forced redirect), suppress the
+general choices so only that redirect is offered, otherwise enable them. Keep
+the eligibility test out of the view where practical (mirror `fightGate`). Risk:
+must NOT gate sections where choices are legitimately available alongside an
+optional roll — scope the gate to a *mandatory* travel/encounter roll that feeds
+outcomes. Add headless assertions (choices disabled pre-roll; §278 roll of 1
+leaves only `→82`; roll of 4 enables the four destinations) and run the full
+every-section scan.
+
+---
+
+## 105. `<if ticks="N">` reads the live count — this visit's own `<tick/>` flips the guard on a mid-visit rerender  — MEDIUM (engine/render)
+
+*(Filed 2026-07-14 from playtesting §1.496; §1.310 is the same idiom.)* The
+standard box idiom is `<if ticks="1">…goto X immediately…</if> If not, <tick/>,
+and read on.` `evaluateCondition`'s `ticks=` handler (`engine.js` ~L211) tests
+the **live** `state.tickCount()`. On entry the `<if>` (first child) is walked
+before the bare `<tick/>`, so it correctly sees `tickCount = 0`, hides the
+redirect, and the `<tick/>` then sets `tickCount = 1` (task 27 caps it; task 70
+draws the box ☑ this visit — intended).
+
+The defect appears on any **mid-visit rerender**: §496 lets you take a
+`<weapon name="magic spear">`, whose Take button calls `rerender()` → `render()`
+(not `begin()`, so `tickCount` stays 1). On that re-walk `<if ticks="1">` now
+matches, so *"If there is a tick in the box, [→317] immediately."* wrongly
+appears on the **same visit**, alongside the loot and the real `→85`. §310 shows
+*only* the box-ticked-on-entry display (task 70's intended behaviour) because it
+has no rerender trigger — no functional defect there; that display is by design.
+
+Root cause: JaFL processes the section sequentially (the `ticks` guard is read
+once, before the `<tick>`, and the section is never re-run within a visit); the
+port's rerender-in-place re-evaluates the guard against the now-incremented
+count. Fix (proposed): snapshot the current section's tick count at entry (in
+`Story.begin`, alongside `setSectionBoxes`) and evaluate `<if ticks="N">`
+against that **entry snapshot** rather than the live count, so this visit's own
+`<tick/>` cannot retroactively satisfy the guard and rerenders are stable. A
+genuine later visit re-enters via `begin()`, re-snapshots (already 1) and fires
+the redirect correctly. Add a headless assertion (enter §496, force a rerender
+by taking the spear, assert the `→317` redirect is NOT shown; a second visit
+shows it) and run the full every-section scan.
+
+---
+
+## 106. Light mode barely changes the mobile app — header, sheet drawer, toasts and title are leather-dark in both themes  — MEDIUM (render/css)
+
+*(Filed 2026-07-14 from a mobile bug report: "light mode still not working on
+mobile app.")* The theme *mechanism* works: `index.html` sets `data-theme`
+before first paint (saved `fl-theme`, else OS preference), the header toggle
+persists it, and the **reading surfaces** (story pane, story card, modals,
+inputs, panels, buttons, map tabs) re-skin via the `--reading-bg`/`--card`/
+`--field`/`--panel`/`--ink` tokens overridden under `:root[data-theme="dark"]`.
+There is **no** `@media (prefers-color-scheme)` override, so light mode is not
+being clobbered by the OS.
+
+What "isn't working" is that, by explicit design, several prominent surfaces are
+hard-coded leather-dark in **both** themes and never re-skin: `.game-header`,
+the adventure sheet `.sheet-pane` (`background: linear-gradient(var(--leather-2),
+var(--leather)); color: var(--parchment)` plus many hard-coded `#d8c49a`/
+`rgba(255,255,255,0.05)` internals), `.toast`, and the title/create/saves
+screens. On desktop this reads fine — the sheet is a slim side column beside a
+wide light reading pane. On **mobile** (`@media (max-width:899px)`) the sheet is
+a full-height drawer at `min(340px,88vw)`; opening it to check stats — a very
+common action — fills ~88% of the screen with dark, and the always-dark header
+is most of the rest, so light mode looks like it isn't applied. Also
+`<meta name="theme-color" content="#2b1a0f">` is fixed dark (never updated on
+toggle) and iOS `apple-mobile-web-app-status-bar-style=black-translucent`, so the
+browser/status-bar chrome stays dark too.
+
+This is a **design decision, not a mechanism bug** — surface options before
+implementing (don't pick silently): (a) leave the leather chrome as the intended
+look in both themes, documenting it; (b) tokenize the sheet + header colours
+(e.g. a `--chrome-bg`/`--chrome-fg` pair overridden per `data-theme`) so light
+mode also lightens the sheet drawer — larger CSS change touching many hard-coded
+values; (c) re-skin only the mobile full-screen sheet drawer in light mode, keep
+the slim desktop chrome leather; (d) update `theme-color`/status-bar to follow
+the theme. First rule out a stale PWA cache on the device (see §416 / task 68,
+already fixed in source) — a cache refresh should precede any change.
+
+---
+
 ## Review log
 
 *Running audit log of the backlog — each pass re-verifies the open items against
 the current code and records what was filed, split, or re-confirmed. Task
 numbers refer to the contents checklist at the top of the file.*
+
+Filed 2026-07-14 from a playtest bug run (six reports): tasks **104–106**.
+**104** (travel rolls don't gate the onward `<choices>`, and a "get lost"
+`<outcome><goto></outcome>` doesn't suppress them — §1.278/§1.82, whole travel
+corpus) and **105** (`<if ticks="N">` reads the live count, so a mid-visit
+rerender flips the guard and re-shows the redirect — §1.496; §1.310 is only the
+by-design box-on-entry display from task 70) are confirmed against current
+source. **106** (light mode leaves the header/sheet drawer/toasts/title
+leather-dark in both themes; the mobile full-screen sheet drawer makes it read as
+"not working") is a design decision surfaced with options. Two further reports
+were **not** filed: §1.416 ("can't cross to other books at Rank ≥ 4") was already
+fixed by task 68 and works in current source, and the light-mode report both
+point to a **stale PWA cache** on the device — a cache refresh should be ruled
+out first.
 
 Reviewed 2026-07-06: every previously open item (3–13) was re-verified against
 the current code and is still accurate; items 15–36 were added from a full
