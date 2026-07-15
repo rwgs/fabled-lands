@@ -12,7 +12,7 @@ the tasks were filed, not work order).
 
 **LOW**
 
-- [ ] 112. The Adventure Sheet stores but cannot activate a curse's `lift=` prompt (§5.505)
+- [x] 112. The Adventure Sheet stores but cannot activate a curse's `lift=` prompt (§5.505)
 - [ ] 113. `<lose item="?" bonus="N">` ignores `bonus=` — §4.456 accepts any item as a +2/+3 offering
 - [ ] 114. Reroll-form storm sections (§232/502/716) never consume the blessing — the rerunnable `keepblessing=1` set resets the guard each render
 
@@ -4143,7 +4143,7 @@ Web-only; stamp and run all sections.
 
 ---
 
-## 112. The Adventure Sheet stores but cannot activate a curse's `lift=` prompt — LOW (ui/state)
+## 112. The Adventure Sheet stores but cannot activate a curse's `lift=` prompt — **done**
 
 *(Filed 2026-07-14 from a second full repository review.)* Task 19 persists the
 `lift` question on affliction records, but `ui.js` renders curses as inert text

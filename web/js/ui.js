@@ -192,7 +192,7 @@ export function renderSheet(state, container, opts = {}) {
   // Afflictions chip by their own name (fall back to the type), and diseases/poisons
   // get their own sections — a hidden penalty must be visible on the sheet (task 57).
   const afflictionNames = (list) => list.map((a) => (a && (a.name || a.type)) || '').filter(Boolean);
-  if (d.curses.length) { container.appendChild(sectionTitle('Curses')); container.appendChild(chipList(afflictionNames(d.curses))); }
+  if (d.curses.length) { container.appendChild(sectionTitle('Curses')); container.appendChild(curseChips(d.curses, state)); }
   if (d.diseases.length) { container.appendChild(sectionTitle('Diseases')); container.appendChild(chipList(afflictionNames(d.diseases))); }
   if (d.poisons.length) { container.appendChild(sectionTitle('Poisons')); container.appendChild(chipList(afflictionNames(d.poisons))); }
   if (d.gods.length) { container.appendChild(sectionTitle('Gods')); container.appendChild(chipList(d.gods)); }
@@ -232,5 +232,35 @@ function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.
 function kv(k, v) { const c = el('div', 'kv'); c.appendChild(el('span', 'kv-k', k)); c.appendChild(el('span', 'kv-v', String(v))); return c; }
 function sectionTitle(t) { return el('div', 'sheet-section-title', t); }
 function chipList(arr) { const w = el('div', 'chips'); arr.forEach((x) => w.appendChild(el('span', 'chip', x))); return w; }
+// Curses chip like other afflictions, but a curse carrying a lift= question (its
+// self-cure condition — §5.505 Skunk-juice's "Are you at a river, village, town or
+// city?") also gets a keyboard/touch-accessible "Lift…" action: it shows the exact
+// stored question, and an honest "Yes" removes that one curse (its ability effect
+// falls away, restoring the score). A curse without lift= stays inert text. (task 112)
+function curseChips(curses, state) {
+  const w = el('div', 'chips');
+  curses.forEach((c) => {
+    const name = (c && (c.name || c.type)) || '';
+    if (!name) return;
+    const chip = el('span', 'chip', name);
+    if (c.lift) {
+      chip.classList.add('chip-liftable');
+      const btn = el('button', 'chip-action', 'Lift…');
+      btn.type = 'button';
+      btn.title = c.lift;
+      btn.setAttribute('aria-label', `Lift the curse ${name}`);
+      btn.addEventListener('click', () => {
+        modal({
+          title: `Lift ${name}?`,
+          body: `<p>${escapeHtml(c.lift)}</p>`,
+          buttons: [{ label: 'Yes', value: true, primary: true }, { label: 'No', value: null }],
+        }).then((yes) => { if (yes) state.removeCurse(c.name || c.type); });
+      });
+      chip.appendChild(btn);
+    }
+    w.appendChild(chip);
+  });
+  return w;
+}
 function titleCase(s) { return (s || '').replace(/\b\w/g, (c) => c.toUpperCase()); }
 export function escapeHtml(s) { return (s || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }

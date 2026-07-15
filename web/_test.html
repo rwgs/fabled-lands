@@ -4619,6 +4619,65 @@ async function run() {
          'cache=' + g111c.cacheItems('vault').map((i)=>i.name).join(',') + ' carried=' + g111c.itemCount());
     }
 
+    // --- task 112: a curse's lift= question drives a Lift… action on its chip ---
+    // §5.505 Skunk-juice cuts CHARISMA by 1 until you reach a river/village/town/city;
+    // its stored lift= question must be actionable on the Adventure Sheet — an honest
+    // "Yes" removes that one curse and restores CHARISMA, "No" leaves it untouched.
+    {
+      const settle112 = () => new Promise((r) => setTimeout(r, 0));
+      const LIFTQ = 'Are you at a river, village, town or city?';
+      const curseXml = `<curse name="Skunk-juice" lift="${LIFTQ}"><effect ability="charisma" bonus="-1"/></curse>`;
+      const mk505 = () => {
+        const g = GameState.create({ name:'T505', gender:'m', profession:'Warrior', book:5, adv });
+        g.data.curses = []; g.data.abilities.charisma = 6;
+        eng.applyEffect(parse(curseXml), g, {});
+        return g;
+      };
+
+      // curse applied: stored with its lift question + CHARISMA cut by 1
+      const g505 = mk505();
+      ok('task112: §5.505 stores the curse with its lift question and cuts CHARISMA',
+         g505.hasCurse('Skunk-juice') && g505.data.curses[0].lift === LIFTQ && g505.ability('charisma') === 5,
+         'lift=' + g505.data.curses[0].lift + ' cha=' + g505.ability('charisma'));
+
+      // save round-trip keeps the lift question
+      const g505rt = new GameState(sanitizeData(JSON.parse(JSON.stringify(g505.data))));
+      ok('task112: the lift question survives a save round-trip', !!g505rt.data.curses[0] && g505rt.data.curses[0].lift === LIFTQ, 'lift=' + (g505rt.data.curses[0] && g505rt.data.curses[0].lift));
+
+      // the sheet renders a keyboard/touch Lift… action carrying the exact question
+      const cSheet = document.createElement('div');
+      renderSheet(g505, cSheet, {});
+      const liftBtn = cSheet.querySelector('.chip-action');
+      ok('task112: the Adventure Sheet exposes a Lift… action for the curse', !!liftBtn && liftBtn.tagName === 'BUTTON' && liftBtn.title === LIFTQ, liftBtn ? 'title=' + liftBtn.title : 'no button');
+
+      // answering No leaves the curse and its CHARISMA effect unchanged
+      const gNo = mk505();
+      const cNo = document.createElement('div');
+      renderSheet(gNo, cNo, {});
+      cNo.querySelector('.chip-action').click();
+      ok('task112: the Lift… modal shows the exact stored question', !!document.querySelector('.modal-overlay') && document.querySelector('.modal-body').textContent.includes('river, village, town or city'));
+      Array.from(document.querySelectorAll('.modal-overlay .modal-buttons .btn')).find((b) => b.textContent === 'No').click();
+      await settle112();
+      ok('task112: answering No keeps the curse and its CHARISMA penalty', gNo.hasCurse('Skunk-juice') && gNo.ability('charisma') === 5, 'cha=' + gNo.ability('charisma'));
+
+      // answering Yes removes that one curse and restores CHARISMA
+      const gYes = mk505();
+      const cYes = document.createElement('div');
+      renderSheet(gYes, cYes, {});
+      cYes.querySelector('.chip-action').click();
+      Array.from(document.querySelectorAll('.modal-overlay .modal-buttons .btn')).find((b) => b.textContent === 'Yes').click();
+      await settle112();
+      ok('task112: answering Yes lifts the curse and restores CHARISMA', !gYes.hasCurse('Skunk-juice') && gYes.ability('charisma') === 6, 'cha=' + gYes.ability('charisma') + ' hasCurse=' + gYes.hasCurse('Skunk-juice'));
+
+      // a curse WITHOUT lift= stays inert (no Lift… action)
+      const gInert = GameState.create({ name:'TInert', gender:'m', profession:'Warrior', book:5, adv });
+      gInert.data.curses = [];
+      eng.applyEffect(parse('<curse name="Champion Curse"><effect ability="combat" bonus="-1"/></curse>'), gInert, {});
+      const cInert = document.createElement('div');
+      renderSheet(gInert, cInert, {});
+      ok('task112: a curse without lift= stays inert (no Lift… action)', !cInert.querySelector('.chip-action') && gInert.hasCurse('Champion Curse'));
+    }
+
   } catch (e) {
     out.push('FATAL ' + (e.stack || e.message));
     fail++;
