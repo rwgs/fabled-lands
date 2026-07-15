@@ -7,20 +7,23 @@ the tasks were filed, not work order).
 
 **HIGH**
 
-*(none open — completed tasks are listed under **Done**.)*
+- [ ] 107. Visible `<transfer>` actions auto-execute and ignore chooser/filter/price semantics
 
 **MEDIUM**
 
-*(none open — completed tasks are listed under **Done**.)*
+- [ ] 108. `<outcome blessing="…">` ignores Safety from Storms and exposes the capsize/storm redirect
+- [ ] 109. Multi-ability success routing ignores `<success ability="…">` (§2.37 always takes SANCTITY)
+- [ ] 110. `<return>` starts a fresh visit instead of restoring the section at the point it was left
+- [ ] 111. Rolled `itemAt=` losses can remove `keep`-tagged possessions
 
 **LOW**
 
-*(none open — completed tasks are listed under **Done**.)*
+- [ ] 112. The Adventure Sheet stores but cannot activate a curse's `lift=` prompt (§5.505)
 
 **Done**
 
-*All backlog items are complete. Listed by task number (the stable ID pointing at
-the detail section below); detail sections remain in filed order, not this order.*
+*Completed items are listed by task number (the stable ID pointing at the detail
+section below); detail sections remain in filed order, not this order.*
 
 - [x] 1. Gate combat progression / model fight outcomes
 - [x] 2. Finish the logic/view split (combat/market/rest)
@@ -3943,11 +3946,183 @@ follow-up: tokenize those surfaces (a `--chrome-bg`/`--chrome-fg` pair per
 
 ---
 
+## 107. Visible `<transfer>` actions auto-execute and ignore chooser/filter/price semantics — HIGH (engine/render)
+
+*(Filed 2026-07-14 from a second full repository review.)* `renderTransfer`
+equates “forced” with “automatic”: unless a node explicitly has `force="f"`, it
+calls `applyEffect` while the section is rendering. The XML contract is different:
+only `hidden="t"` is automatic; a visible transfer is an action, and `force`
+(true by default) says whether progression must wait for the player to activate
+it. The corpus has 23 transfers — nine hidden and 14 visible — so the distinction
+is live, not theoretical.
+
+The most damaging case is §4.456. Its visible
+`<transfer item="?" bonus="1" limit="1" price="1" to="4.641">` is meant to let
+the player choose a +1 offering and then arm outcome 641. On entry the current
+code instead moves the first possession to the cache without consent, ignores
+`bonus="1"`, never sets price flag `1`, and therefore never enables the outcome.
+The same incomplete selector path makes §2.105 (pick what the thief stole),
+§6.310 (choose an item to present), and §6.635 (choose a weapon) always take the
+first matching inventory entry. `applyTransfer` also ignores `bonus`/`tags`/
+`group` selectors and most `x…` exclusions: §2.639's `xarmour="?" xgroup="2.639"`
+does not express the intended “lose any *other* armour” rule.
+
+Fix the action lifecycle and selector semantics together:
+
+- auto-run only hidden transfers; render every visible transfer as an action;
+  default/`force="t"` must gate later progression until it succeeds, while
+  `force="f"` remains optional;
+- gather candidates with the shared item matcher (kind/name, `bonus`, `tags`,
+  `group`) and apply the corresponding `x…` matcher before `limit`;
+- when more candidates match than the limit, show a real item chooser and pass
+  its selection into the DOM-free transfer operation instead of taking array
+  position zero;
+- honour `price=` as a clear-flag gate and set the flag only after a successful
+  transfer; do nothing/continue when no eligible item exists, per the action
+  contract.
+
+Add headless tests for §4.456 (no entry-time loss; an ineligible/unselected item
+is untouched; choosing a +1 item sets flag 1 and reveals →641), §2.105 or §6.310
+(the selected, not first, item moves), §6.635 (`force="f"` remains optional), and
+§2.639's exclusion filters. Web-only; stamp and run all sections.
+
+---
+
+## 108. `<outcome blessing="…">` ignores Safety from Storms and exposes the capsize/storm redirect — MEDIUM (render)
+
+*(Filed 2026-07-14 from a second full repository review.)* `renderBranch` matches
+outcomes by flag/range/codeword/var, but never reads `blessing=`. All six live
+uses are book-5 travel hazards: §200/250/60 send an 11–12 roll to storm §527,
+and §232/502/716 send the protected ship to capsize §510. Each section then has
+a sibling blessing path that consumes an ordinary Safety from Storms (or keeps
+the permanent version from task 90) and goes safely onward or rerolls.
+
+The source structure and reference engine agree on the unusual contract: after
+the range matches, holding the named blessing short-circuits that outcome's
+actions/redirect; it does **not** consume the blessing there, because the sibling
+`<lose blessing="storm">` owns that step. The port currently reveals the dangerous
+`Continue` link even for a protected traveller. In sections covered by task 104's
+roll gate, recording that redirect as the matched outcome can additionally keep
+the sibling safe navigation suppressed.
+
+Implement the blessing veto for both lone `<outcome>` and `<outcomes>` tables,
+without changing normal range selection or consuming anything. A vetoed redirect
+must not count as the roll gate's forced redirect, so the section's explicit
+blessing branch can resolve. Test ordinary and permanent blessings against the
+11–12/6 hazards (including one reroll form), plus the unblessed case where the
+dangerous redirect remains the only result. Web-only; stamp and run all sections.
+
+---
+
+## 109. Multi-ability success routing ignores `<success ability="…">` — §2.37 always takes SANCTITY — MEDIUM (render)
+
+*(Filed 2026-07-14 from a second full repository review.)* §2.37 is the corpus's
+one multi-route ability check: the player chooses SANCTITY or MAGIC for
+`<difficulty ability="sanctity|magic">`, then the outcomes contain a SANCTITY
+success →60 and a MAGIC success →129. `renderDifficulty` correctly stores the
+chosen ability on the roll result, but `branchSuccess` checks only the success
+boolean. The outcomes loop therefore accepts the first successful branch every
+time, sending a successful MAGIC roll to the SANCTITY destination.
+
+When a success/failure node has `ability=`, require it to match the feeding
+roll's chosen ability in addition to the success state (the reference result
+node performs the same ability-type check). Preserve the existing behaviour for
+single-ability rolls, var-keyed branches, and nodes without `ability=`. Add a
+deterministic §2.37 integration test for successful SANCTITY →60, successful
+MAGIC →129, and failure →83. Web-only; stamp and run all sections.
+
+---
+
+## 110. `<return>` starts a fresh visit instead of restoring the section at the point it was left — MEDIUM (state/render/app)
+
+*(Filed 2026-07-14 from a second full repository review.)* The spec defines
+`<return>` as reversing the last goto and restoring the prior section at the
+point it was left, with its variables intact. `Story.goBack()` currently reads
+the last `{book, section}` history record and calls ordinary `navigate()`.
+`state.goTo()` then pushes the temporary section back onto history and increments
+turns, while `Story.begin()` clears section variables and per-visit state and
+re-applies entry effects/ticks. The visible target number is right, but the
+navigation lifecycle is not a return.
+
+There are 16 live returns, including item-use/detour flows in §5.306/356/410/550
+and §4.231 → §4.12, plus four `revisit="t"` choices and one `visit="t"` goto.
+Re-entering as a fresh visit can repeat one-shot rewards/costs or ticks, lose a
+roll/variable that the player was meant to resume with, reset market stock, and
+leave a history bounce (`A → B → A` rather than popping `B`). Treating every
+source choice as newly enabled also erases the distinction that `revisit="t"`
+is meant to express.
+
+Add a transient return frame for the immediately previous visit (the format only
+promises one level): preserve its section identity, variables and visit/render
+memo state when leaving; on `<return>`, run the temporary section's normal leave
+hooks, pop history, restore that frame, and render it without `goTo()`/`begin()`.
+State changes legitimately made during the detour must remain. Honour `revisit`
+when restoring which source navigation actions remain usable; `visit=` may mark
+the expected temporary jump but must not be required for item-effect detours.
+Test that `A → B → return` preserves A's variable/roll and used-action state,
+does not repeat A's entry effect/tick or increment/push a second forward visit,
+and keeps only a `revisit="t"` source action immediately reusable. Web-only;
+stamp and run all sections.
+
+---
+
+## 111. Rolled `itemAt=` losses can remove `keep`-tagged possessions — MEDIUM (engine/state)
+
+*(Filed 2026-07-14 from a second full repository review; follow-up to task 93.)*
+The spec says an `itemAt=` loss addresses a one-based Adventure Sheet/cache
+position, skips currency, and leaves an item carrying the `keep` tag in place.
+`applyLose` currently indexes `state.data.items[idx - 1]` directly and calls
+`removeItemById` with no protection check. A roll can therefore destroy the
+royal ring (§1.385) or white sword (§4.103), despite both being explicitly marked
+as possessions that cannot be lost. The path also ignores `cache=` even though
+that is part of the defined `itemAt` operation. The two live rolls are §6.63 and
+§6.168; ordinary inventory ordering makes the protected-item case reachable.
+
+Make the DOM-free loss respect `keep`, the selected possession/cache pool, and
+the spec's one-based/currency rules; retain task 93's out-of-range no-op and
+pending-roll deferral. Add tests with an ordinary item, a protected item at the
+rolled position, an out-of-range index, and a synthetic cache-targeted loss.
+Web-only; stamp and run all sections.
+
+---
+
+## 112. The Adventure Sheet stores but cannot activate a curse's `lift=` prompt — LOW (ui/state)
+
+*(Filed 2026-07-14 from a second full repository review.)* Task 19 persists the
+`lift` question on affliction records, but `ui.js` renders curses as inert text
+chips. The only live use, §5.505 Skunk-juice, explicitly allows the player to
+lift it at a river/village/town/city by opening the curse and honestly answering
+“Are you at a river, village, town or city?” Until another scripted cure happens,
+the current UI leaves its −1 CHARISMA effect permanently stuck.
+
+For a curse record with non-empty `lift`, expose a keyboard/touch-accessible
+“Lift…” action on its Adventure Sheet chip. Show the exact stored question in a
+confirmation modal; affirmative removes that one matching curse and refreshes/
+saves the sheet, while cancel leaves it and its effects unchanged. Curses without
+`lift` remain inert. Test §5.505 through a save round-trip, both modal answers,
+and restoration of CHARISMA after confirmation. Web-only; stamp and run all
+sections.
+
+---
+
 ## Review log
 
 *Running audit log of the backlog — each pass re-verifies the open items against
 the current code and records what was filed, split, or re-confirmed. Task
 numbers refer to the contents checklist at the top of the file.*
+
+Reviewed 2026-07-14 (second full pass): started from a clean worktree with no
+open backlog items, parsed and inventoried all **4,369** numeric section XML files
+(zero parse errors), and re-audited the live tag/attribute surface against the
+engine/render/state/app dispatch paths and the local JaFL tag reference. Filed
+tasks **107–112**: visible transfers auto-run and omit their selector/chooser/
+price contract (107); blessing-guarded storm outcomes expose the dangerous
+redirect (108); §2.37 ignores which of its two abilities was rolled (109);
+`<return>` re-enters as a fresh visit (110); `itemAt=` can remove `keep` items
+(111); and the stored Skunk-juice `lift=` question has no Adventure Sheet action
+(112). Harmless duplicated-description/stray-`dice` source attributes were
+checked but not filed because they do not alter current gameplay. Baseline smoke
+suite green at the reviewed tree: `RESULT ALL PASS pass=1009 fail=0`.
 
 Filed 2026-07-14 from a playtest bug run (six reports): tasks **104–106**.
 **104** (travel rolls don't gate the onward `<choices>`, and a "get lost"
