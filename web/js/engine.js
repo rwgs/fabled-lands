@@ -843,54 +843,165 @@ function applyAdjustMoney(el, state) {
 }
 
 // <transfer …/> — move money/equipment between the Adventure Sheet and a named
-// cache. to="X" deposits INTO cache X; from="X" withdraws OUT of it. The kind
-// attribute (weapon|armour|tool|item|shards) with "*" (all) / "?" (one) / a name
-// selects what moves. Used for confiscate-and-return scenes (§2.462 vampire) and
-// villa/bank stashing. Optional force="f" transfers are opt-in (handled by the
-// view as a click); a forced transfer applies here.
+// cache. to="X" deposits INTO cache X; from="X" withdraws OUT of it (absent → the
+// player's possessions/purse). The item attributes (weapon|armour|tool|item with a
+// name/"*"/"?", plus bonus/tags/group) pick what moves; their x-prefixed twins
+// (xitem/xbonus/…) spare matches; shards moves money. Used for confiscate-and-
+// return scenes (§2.462 vampire), offerings (§4.456) and villa/bank stashing.
+//
+// The XML contract (JaFL TransferNode): a *visible* transfer is a player ACTION,
+// not an on-entry effect — only hidden="t" auto-runs. The view (renderTransfer)
+// arms visible transfers as buttons and runs this on the click; when more items
+// qualify than the limit it passes the player's pick via opts.chooser. (task 107)
+
+// Build a transfer include/exclude selector for the given attribute prefix
+// ('' = items to move, 'x' = items to spare). null when no selector for that
+// prefix. `all` marks the plain item="*" form (every possession), the only form
+// that skips keep-tagged items when moving from the player.
+function transferSelector(el, prefix) {
+  const g = (a) => el.getAttribute(prefix + a);
+  let kind = null, pattern = null, present = false;
+  for (const k of ['weapon', 'armour', 'tool']) {
+    if (g(k) != null) { kind = k; pattern = g(k); present = true; break; }
+  }
+  if (!present && g('item') != null) { pattern = g('item'); present = true; }
+  const bonus = g('bonus'), tags = g('tags'), group = g('group');
+  if (!present) {
+    // Filters with no item attribute (xbonus/xtags/xgroup) still select "any item"
+    // narrowed by those filters (JaFL builds the exclude Item from the x-attributes).
+    if (bonus == null && tags == null && group == null) return null;
+    pattern = '?'; present = true;
+  }
+  return { kind, pattern, bonus, tags, group, all: !kind && pattern === '*' };
+}
+
+// Items in `pool` matched by a transfer selector: kind, name (bare "*"/"?"/blank =
+// any; else pipe-separated globs, also matched against item tags), bonus ("N"/"N+"),
+// tags (all listed) and group provenance.
+function transferMatch(pool, sel) {
+  let items = sel.kind ? pool.filter((it) => it.kind === sel.kind) : pool.slice();
+  const pat = String(sel.pattern == null ? '' : sel.pattern).trim();
+  if (pat !== '' && pat !== '?' && pat !== '*') {
+    const alts = pat.split('|').map((s) => s.trim()).filter(Boolean);
+    items = items.filter((it) => alts.some((a) => globMatch(a, it.name) || (it.tags || []).map(normalize).includes(normalize(a))));
+  }
+  if (sel.tags) {
+    const want = sel.tags.split(/[,|]/).map((t) => normalize(t)).filter(Boolean);
+    items = items.filter((it) => want.every((t) => (it.tags || []).map(normalize).includes(t)));
+  }
+  if (sel.group != null && sel.group !== '') items = items.filter((it) => it.group === sel.group);
+  if (sel.bonus != null) {
+    const m = String(sel.bonus).match(/^(-?\d+)(\+)?$/);
+    if (m) { const b = parseInt(m[1], 10); items = m[2] ? items.filter((it) => (it.bonus || 0) >= b) : items.filter((it) => (it.bonus || 0) === b); }
+  }
+  return items;
+}
+
+// The candidate items a transfer would move FROM its source, after the include
+// selector, keep protection (plain item="*" from the player only) and the exclude
+// selector — the pool the chooser draws from (JaFL TransferNode.getItemIndices).
+function transferMovers(el, state) {
+  const from = el.getAttribute('from');
+  const pool = from != null ? state.cacheItems(from) : state.data.items;
+  const include = transferSelector(el, '');
+  const exclude = transferSelector(el, 'x');
+  let movers;
+  if (include && include.all) {
+    movers = pool.filter((it) => from != null || !(it.tags || []).map(normalize).includes('keep'));
+  } else if (include) {
+    movers = transferMatch(pool, include);
+  } else if (exclude) {
+    movers = pool.slice(); // filters-only exclude: everything not spared
+  } else {
+    return []; // no item selector (a pure shards transfer)
+  }
+  if (exclude) {
+    const spared = new Set(transferMatch(pool, exclude).map((it) => it.id));
+    movers = movers.filter((it) => !spared.has(it.id));
+  }
+  return movers;
+}
+
+// A transfer's effective item limit: an explicit limit=, else 1 for the bare "?"
+// "choose one" wildcard, else Infinity (move every match).
+function transferItemLimit(el) {
+  const lim = el.getAttribute('limit');
+  if (lim != null) return parseInt(lim, 10) || 0;
+  const include = transferSelector(el, '');
+  if (include && String(include.pattern).trim() === '?') return 1;
+  return Infinity;
+}
+
+// The shards a transfer would move: spec (raw attr), avail (in the source) and amt.
+function transferShards(el, state) {
+  const spec = el.getAttribute('shards');
+  if (spec == null) return { spec: null, avail: 0, amt: 0 };
+  const from = el.getAttribute('from');
+  const avail = from != null ? state.cacheMoney(from) : state.data.shards;
+  let amt;
+  if (spec === '*') amt = avail;
+  else if (spec === 'tenth') amt = Math.floor(avail / 10);
+  else amt = Math.min(avail, resolveValue(state, spec));
+  return { spec, avail, amt };
+}
+
+function itemsAllSame(items) {
+  if (items.length <= 1) return true;
+  const sig = (it) => `${it.kind}|${normalize(it.name)}|${it.bonus || 0}`;
+  const first = sig(items[0]);
+  return items.every((it) => sig(it) === first);
+}
+
+/** Everything the view needs to arm a visible transfer as an action (task 107):
+ *  the candidate movers, the effective limit, whether a chooser is required (more
+ *  qualify than the limit and they are not interchangeable), whether it does
+ *  anything at all, and — for a price= action — whether it can pay in full. */
+export function transferPlan(el, state) {
+  const movers = transferMovers(el, state);
+  const limit = transferItemLimit(el);
+  const { amt: shardsAmt, avail: shardsAvail } = transferShards(el, state);
+  const doesAnything = movers.length > 0 || shardsAmt > 0;
+  const needChoice = limit !== Infinity && movers.length > limit && !itemsAllSame(movers);
+  const hasItemSel = transferSelector(el, '') != null || transferSelector(el, 'x') != null;
+  const explicitLimit = el.getAttribute('limit');
+  const shardsSpec = el.getAttribute('shards');
+  const enoughItems = !hasItemSel || explicitLimit == null || movers.length >= (parseInt(explicitLimit, 10) || 0);
+  const enoughShards = shardsSpec == null || shardsSpec === '*' || shardsSpec === 'tenth' || shardsAvail >= resolveValue(state, shardsSpec);
+  const canPay = doesAnything && enoughItems && enoughShards;
+  return { movers, limit, needChoice, doesAnything, canPay };
+}
+
 function applyTransfer(el, state, opts = {}) {
-  const get = (a) => el.getAttribute(a);
-  const to = get('to'), from = get('from');
-  const cacheN = to || from;
-  if (!cacheN) return '';
-  const toCache = to != null;
-  const limit = get('limit') != null ? (parseInt(get('limit'), 10) || 0) : 0;
+  const from = el.getAttribute('from'), to = el.getAttribute('to');
+  if (from == null && to == null) return '';
 
-  // shards
-  if (get('shards') != null) {
-    const spec = get('shards');
-    if (toCache) {
-      let amt;
-      if (spec === '*') amt = state.data.shards;
-      else if (spec === 'tenth') amt = Math.floor(state.data.shards / 10);
-      else amt = Math.min(state.data.shards, resolveValue(state, spec));
-      if (amt > 0) { state.data.shards -= amt; state._cache(cacheN).money += amt; state.changed(); }
-    } else {
-      const c = state._cache(cacheN);
-      let amt = spec === '*' ? c.money : Math.min(c.money, resolveValue(state, spec));
-      if (amt > 0) { c.money -= amt; state.data.shards += amt; state.changed(); }
-    }
+  // Items: candidate movers narrowed to the effective limit. When more qualify than
+  // the limit and they are not interchangeable, the view's chooser (opts.chooser)
+  // supplies the pick; otherwise take the first `limit` (or all when unlimited).
+  const movers = transferMovers(el, state);
+  const limit = transferItemLimit(el);
+  let toMove = movers;
+  if (limit !== Infinity && movers.length > limit) {
+    toMove = itemsAllSame(movers)
+      ? movers.slice(0, limit)
+      : (opts.chooser ? (opts.chooser(movers.slice(), limit, 'transfer') || []) : movers.slice(0, limit));
+    toMove = toMove.slice(0, limit);
+  }
+  toMove.forEach((it) => {
+    const removed = from != null ? state.cacheRemoveItem(from, it.id) : state.removeItemById(it.id);
+    if (removed) { if (to != null) state.cacheAddItem(to, removed); else state.addItem(removed); }
+  });
+
+  // Shards: move `amt` from source to destination.
+  const { amt } = transferShards(el, state);
+  if (amt > 0) {
+    if (from != null) state.adjustCacheMoney(from, -amt); else state.adjustMoney(-amt);
+    if (to != null) state.adjustCacheMoney(to, amt); else state.adjustMoney(amt);
   }
 
-  // equipment / items
-  for (const kind of ['weapon', 'armour', 'tool', 'item']) {
-    if (get(kind) == null) continue;
-    const spec = get(kind);
-    // item="*" means "every possession of any kind"; weapon/armour/tool filter.
-    const src = () => {
-      const base = toCache ? state.data.items : state.cacheItems(cacheN);
-      return kind === 'item' ? base.slice() : base.filter((it) => it.kind === kind);
-    };
-    let movers = spec === '*' ? src() : (spec === '?' ? src().slice(0, 1) : matchItems(src(), spec));
-    // x<kind>= excludes matching items from the move (e.g. keep the keys behind).
-    const xspec = get('x' + kind);
-    if (xspec) movers = movers.filter((it) => !xspec.split('|').some((a) => globMatch(a, it.name)));
-    if (limit > 0 && movers.length > limit) movers = movers.slice(0, limit);
-    movers.forEach((it) => {
-      if (toCache) { const removed = state.removeItemById(it.id); if (removed) state.cacheAddItem(cacheN, removed); }
-      else { const removed = state.cacheRemoveItem(cacheN, it.id); if (removed) state.addItem(removed); }
-    });
-  }
+  // price= is a clear-flag gate: set the flag once the transfer has run.
+  const price = el.getAttribute('price');
+  if (price != null) state.setFlag(price, true);
   return '';
 }
 

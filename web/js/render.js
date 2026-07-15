@@ -10,7 +10,7 @@ import {
   evaluateCondition, applyEffect, applyEffectBody, boolAttr, resolveValue, isDiceExpr,
   rollDifficulty, rollRankCheck, rollTraining, rollDice, matchRange, childAdjustment,
   applyRest, buyResurrectionDeal, reviveWithResurrection, abilityChoiceOptions, readItemEffects,
-  whileLoopDone, filterMatches,
+  whileLoopDone, filterMatches, transferPlan,
 } from './engine.js';
 import { makeFight, fightRound, groupFightRound, isDefeated, useWrathBlessing, useDefenceBlessing, rerollAttack } from './combat.js';
 import { shopKind, goodsFrom, ownsGoods, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo, canUpgradeCrew, payChoiceCost } from './market.js';
@@ -27,6 +27,10 @@ const ROLL_TAGS = new Set(['difficulty', 'random', 'rankcheck', 'training']);
 // of these is a roll resolution, not onward navigation, so it is never gated.
 const ROLLGATE_OPTIONAL_WRAP = new Set(['if', 'elseif', 'else', 'success', 'failure', 'outcome', 'group']);
 const ROLLGATE_OUTCOME_WRAP = new Set(['outcomes', 'outcome']);
+// A forced <transfer> inside a <group> is applied by the group's own action button
+// (renderGroup), not as a standalone forced action — so it does not drive the
+// forced-transfer nav gate (task 107).
+const TRANSFER_GROUP_WRAP = new Set(['group']);
 // Note: <adjust> is deliberately NOT here. In this corpus it is always a die-roll
 // MODIFIER (a child of <difficulty>/<random>/<rankcheck>, consumed by
 // childAdjustment) — never a passive effect. Auto-applying it on view would
@@ -279,12 +283,20 @@ export class Story {
     // outcome that carries its own <goto> suppresses those choices (task 104). See
     // computeRollGate / applyRollGate.
     this.rollGate = this.computeRollGate(el);
+    // Forced-transfer gating (task 107): a visible, forced (default force="t"),
+    // unpriced <transfer> is a mandatory action — the onward navigation after it
+    // stays locked until it runs. renderTransfer flags pendingTransfer while such a
+    // transfer is still live this pass; applyTransferGate then disables the tagged
+    // navs. Reset per render.
+    this.transferGate = this.computeTransferGate(el);
+    this.pendingTransfer = false;
     this.sectionFight = null; // aggregate proxy for the section's fight(s) (set in renderFight)
     this.sectionFights = []; // every sequential (non-group) fight drawn this pass, in order (task 45)
     this.renderedGroups = new Set(); // group= ids already drawn this pass (task 26)
     this.appendChildren(flow, el, 'r');
     this.applyFightGate(flow);
     this.applyRollGate(flow); // gate onward nav on the mandatory travel/encounter roll (task 104)
+    this.applyTransferGate(flow); // gate onward nav on an unresolved forced transfer (task 107)
     this.surfaceExtraChoices(flow); // persistent <extrachoice> options active here (task 32)
     // Draw the box row now (after the walk) so a <tick/> applied this visit reads
     // as ☑ immediately; it sits above the prose, beside the section number (task 70).
@@ -820,8 +832,10 @@ export class Story {
 
     const label = (node.textContent || '').replace(/\s+/g, ' ').trim();
     // <adjust> is excluded: inside a group it is a modifier for a nested roll
-    // (e.g. "Difficulty 15 if you have climbing gear"), not a group effect.
-    const effects = Array.from(node.querySelectorAll('lose, tick, gain, set, curse'));
+    // (e.g. "Difficulty 15 if you have climbing gear"), not a group effect. A
+    // bundled <transfer> is the group's own action (§6.490 "fight without a weapon"
+    // stashes the weapon), so it applies headlessly on the group click. (task 107)
+    const effects = Array.from(node.querySelectorAll('lose, tick, gain, set, curse, transfer'));
     // A bundled item/weapon/armour/tool reward (the hidden quest prize in §1.228/509
     // gold chain mail, §4.189 Sun Goddess mirror): the group collapses to one button,
     // so the award can't render its own Take button — grant it headlessly on the
@@ -1795,6 +1809,7 @@ export class Story {
     });
     this.tagFightNav(node, link);
     this.tagRollNav(node, link);
+    this.tagTransferNav(node, link);
     container.appendChild(link);
     return link;
   }
@@ -1841,6 +1856,7 @@ export class Story {
     else { link.disabled = true; link.title = 'Nowhere to return to'; }
     this.tagFightNav(node, link);
     this.tagRollNav(node, link);
+    this.tagTransferNav(node, link);
     container.appendChild(link);
     return link;
   }
@@ -2118,6 +2134,7 @@ export class Story {
     }
     this.tagFightNav(node, btn);
     this.tagRollNav(node, btn);
+    this.tagTransferNav(node, btn);
     return btn;
   }
 
@@ -2724,6 +2741,51 @@ export class Story {
       btn.disabled = true;
       btn.classList.add('gated');
       btn.title = title;
+    });
+  }
+
+  // ---- forced-transfer gating (task 107) -----------------------------------
+  // A visible, forced (default force="t"), unpriced <transfer> is a mandatory
+  // action: the onward navigation that follows it must not be clickable until it
+  // runs (else the player skips the offering/confiscation). Collect that onward
+  // navigation (choice/goto/return after the first such transfer, outside it and
+  // outside any <group> that owns the transfer as its own action). Returns
+  // { navNodes:Set } or null when the section has no forced transfer to gate.
+  computeTransferGate(sectionEl) {
+    if (!sectionEl) return null;
+    const forced = Array.from(sectionEl.querySelectorAll('transfer')).filter((t) =>
+      !boolAttr(t.getAttribute('hidden'))
+      && t.getAttribute('price') == null
+      && (t.getAttribute('force') == null || boolAttr(t.getAttribute('force'), true))
+      && !this.hasAncestorTag(t, TRANSFER_GROUP_WRAP));
+    if (!forced.length) return null;
+    const first = forced[0];
+    const navNodes = new Set();
+    sectionEl.querySelectorAll('choice, goto, return').forEach((n) => {
+      if (!(first.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING)) return;
+      if (forced.some((t) => t.contains(n))) return; // navigation inside the transfer's own words
+      if (boolAttr(n.getAttribute('flee'))) return;
+      navNodes.add(n);
+    });
+    if (!navNodes.size) return null;
+    return { navNodes };
+  }
+
+  // Tag a rendered nav button as forced-transfer-gated, for applyTransferGate.
+  tagTransferNav(node, btn) {
+    if (this.transferGate && this.transferGate.navNodes.has(node)) btn.dataset.xfernav = '1';
+  }
+
+  // Disable the tagged onward navigation while a forced transfer is still pending
+  // this pass (renderTransfer set pendingTransfer). Only ADDS a disable, so it
+  // composes with the fight/roll gates.
+  applyTransferGate(flow) {
+    if (!this.transferGate || !this.pendingTransfer) return;
+    flow.querySelectorAll('[data-xfernav]').forEach((btn) => {
+      if (btn.disabled) return; // already gated for another reason — keep it
+      btn.disabled = true;
+      btn.classList.add('gated');
+      btn.title = 'Resolve the transfer above first.';
     });
   }
 
@@ -3624,33 +3686,87 @@ export class Story {
   // cache. A forced transfer (default) applies once on view (confiscate-and-return
   // scenes, hidden="t"); an optional one (force="f") becomes a click-to-apply
   // button so the player opts in to stashing.
+  // A <transfer> is a player ACTION, not an on-entry effect (JaFL TransferNode):
+  // only hidden="t" auto-runs; a visible transfer arms as a button. force (default
+  // true) gates the onward navigation until it runs; force="f" is optional; price=
+  // is a clear-flag offering that reveals its linked outcome (§4.456). When more
+  // items qualify than the limit, the player picks which via a chooser. (task 107)
   renderTransfer(container, node, path) {
     const hidden = boolAttr(node.getAttribute('hidden'));
-    const optional = node.getAttribute('force') != null && !boolAttr(node.getAttribute('force'), true);
     const memo = 'xfer@' + path;
+    const appendWords = () => {
+      if (hidden) return;
+      const s = document.createElement('span'); s.className = 'fx';
+      this.appendChildren(s, node, path);
+      if (s.textContent.trim()) container.appendChild(s);
+    };
 
-    // Inside an untaken conditional branch: show the words, apply nothing.
-    if (this.inactive) {
-      if (!hidden) { const s = document.createElement('span'); s.className = 'fx'; this.appendChildren(s, node, path); if (s.textContent.trim()) container.appendChild(s); }
+    // Inside an untaken conditional branch: show the words, apply/gate nothing.
+    if (this.inactive) { appendWords(); return null; }
+
+    // hidden="t" activates automatically on entry, exactly once (the confiscate/
+    // recover round trips in §2.462/§3.441/§6.273/§6.490): no widget, no words.
+    if (hidden) {
+      if (!this.ctx.applied.has(memo)) { this.ctx.applied.add(memo); applyEffect(node, this.state, {}); }
       return null;
     }
 
-    if (optional) {
-      const done = this.ctx.applied.has(memo);
-      const inner = document.createElement('span');
-      this.appendChildren(inner, node, path);
-      const btn = document.createElement('button');
-      btn.className = 'btn-mini' + (done ? ' done' : '');
-      btn.textContent = (done ? '☑ ' : '') + (inner.textContent.trim() || 'Stash it');
-      btn.disabled = done;
-      if (!done) btn.addEventListener('click', () => { applyEffect(node, this.state, {}); this.ctx.applied.add(memo); this.rerender(); });
-      container.appendChild(btn);
-      return btn;
+    const price = node.getAttribute('price');
+    const forced = node.getAttribute('force') == null || boolAttr(node.getAttribute('force'), true);
+    const gate = forced && price == null; // a priced action never gates progression
+    const plan = transferPlan(node, this.state);
+    const done = price != null ? this.state.getFlag(price) : this.ctx.applied.has(memo);
+
+    // A plain (unpriced) action with nothing eligible and not yet done is a no-op:
+    // show its words, don't arm a control and don't gate. (A priced action still
+    // shows a disabled offer so the player sees why it's unavailable.)
+    if (price == null && !plan.doesAnything && !done) { appendWords(); return null; }
+
+    // The author's words become the control's label.
+    const label = document.createElement('span');
+    this.appendChildren(label, node, path);
+    const text = label.textContent.trim() || 'Transfer';
+
+    const commit = (chosen) => {
+      applyEffect(node, this.state, chosen ? { chooser: () => [chosen] } : {});
+      if (price == null) this.ctx.applied.add(memo);
+      this.rerender();
+    };
+    const markPending = () => { if (gate && !done) this.pendingTransfer = true; };
+
+    // A real choice (more qualify than the limit and they are not interchangeable):
+    // one pick button per candidate; clicking transfers that one.
+    if (!done && plan.needChoice && (price == null || plan.canPay)) {
+      const box = document.createElement('span');
+      box.className = 'ability-choice';
+      const lead = document.createElement('span'); lead.className = 'fx';
+      if (text && text !== 'Transfer') { lead.textContent = text + ': '; box.appendChild(lead); }
+      plan.movers.forEach((it) => {
+        const btn = document.createElement('button');
+        btn.className = 'btn-mini ability-pick';
+        btn.textContent = it.name + (it.bonus ? ` (${it.bonus >= 0 ? '+' : ''}${it.bonus})` : '');
+        btn.addEventListener('click', () => commit(it));
+        box.appendChild(btn);
+      });
+      container.appendChild(box);
+      markPending();
+      return box;
     }
 
-    if (!this.ctx.applied.has(memo)) { this.ctx.applied.add(memo); applyEffect(node, this.state, {}); }
-    if (!hidden) { const s = document.createElement('span'); s.className = 'fx'; this.appendChildren(s, node, path); if (s.textContent.trim()) container.appendChild(s); }
-    return null;
+    // A single action button.
+    const btn = document.createElement('button');
+    btn.className = 'btn-mini pay-action' + (done ? ' done' : '');
+    btn.textContent = (done ? '☑ ' : '') + text;
+    if (done) {
+      btn.disabled = true;
+    } else if (price != null && !plan.canPay) {
+      btn.disabled = true; btn.title = 'Nothing eligible';
+    } else {
+      btn.addEventListener('click', () => commit(null));
+    }
+    container.appendChild(btn);
+    markPending();
+    return btn;
   }
 
   // ---- resurrection --------------------------------------------------------

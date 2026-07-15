@@ -5,10 +5,6 @@ priority — work the first open (`- [ ]`) item top-down. Task numbers are
 stable IDs pointing at the detail sections below (sections are in the order
 the tasks were filed, not work order).
 
-**HIGH**
-
-- [ ] 107. Visible `<transfer>` actions auto-execute and ignore chooser/filter/price semantics
-
 **MEDIUM**
 
 - [ ] 108. `<outcome blessing="…">` ignores Safety from Storms and exposes the capsize/storm redirect
@@ -19,6 +15,7 @@ the tasks were filed, not work order).
 **LOW**
 
 - [ ] 112. The Adventure Sheet stores but cannot activate a curse's `lift=` prompt (§5.505)
+- [ ] 113. `<lose item="?" bonus="N">` ignores `bonus=` — §4.456 accepts any item as a +2/+3 offering
 
 **Done**
 
@@ -131,6 +128,7 @@ section below); detail sections remain in filed order, not this order.*
 - [x] 104. Travel rolls don't gate the section's onward choices; a "get lost" outcome doesn't suppress them (§1.278/§1.82 + every travel section)
 - [x] 105. `<if ticks="N">` reads the live count — this visit's own `<tick/>` flips the guard on a mid-visit rerender, re-showing the "already ticked → goto" redirect (§1.496)
 - [x] 106. Light mode is force-darkened on Chrome/Edge — Chromium "Auto Dark Theme"; `color-scheme: light` doesn't opt out, needs `only light` *(fixed; leather-chrome-in-both-themes remains an intentional design note)*
+- [x] 107. Visible `<transfer>` actions auto-execute and ignore chooser/filter/price semantics *(fixed; surfaced the §4.456 `<lose bonus>` gap → task 113)*
 
 ---
 
@@ -3946,7 +3944,7 @@ follow-up: tokenize those surfaces (a `--chrome-bg`/`--chrome-fg` pair per
 
 ---
 
-## 107. Visible `<transfer>` actions auto-execute and ignore chooser/filter/price semantics — HIGH (engine/render)
+## 107. Visible `<transfer>` actions auto-execute and ignore chooser/filter/price semantics — **done**
 
 *(Filed 2026-07-14 from a second full repository review.)* `renderTransfer`
 equates “forced” with “automatic”: unless a node explicitly has `force="f"`, it
@@ -3985,6 +3983,29 @@ Add headless tests for §4.456 (no entry-time loss; an ineligible/unselected ite
 is untouched; choosing a +1 item sets flag 1 and reveals →641), §2.105 or §6.310
 (the selected, not first, item moves), §6.635 (`force="f"` remains optional), and
 §2.639's exclusion filters. Web-only; stamp and run all sections.
+
+**Done (2026-07-14).** Rebuilt `applyTransfer` around a shared item matcher
+(`transferSelector`/`transferMatch`/`transferMovers` in `engine.js`): include and
+`x…` exclude selectors now honour kind, name/glob, `bonus` (`N`/`N+`), `tags` and
+`group`; a plain `item="*"` from the player spares `keep`-tagged possessions
+(cache→player recovery does not, matching JaFL `getItemIndices`). The effective
+limit is an explicit `limit=`, else 1 for the bare `"?"` "choose one" wildcard,
+else unlimited. `renderTransfer` now treats a visible transfer as an *action*:
+only `hidden="t"` auto-runs on entry; a real choice (more qualify than the limit
+and not interchangeable) renders inline pick buttons that pass the selection
+through `opts.chooser`; `price=` is a clear-flag offering (enabled only while the
+flag is clear and it can pay in full, sets the flag on success — revealing the
+linked `<outcome flag=>`); a default/`force="t"` transfer gates the onward
+navigation (new `computeTransferGate`/`tagTransferNav`/`applyTransferGate`, mirroring
+the roll gate — no prose truncation) until it runs, while `force="f"` and a no-op
+(nothing eligible) neither gate nor auto-apply. A `<transfer>` bundled in a
+`<group>` applies on the group's own action button (§6.490). New headless tests
+cover §4.456 (no entry loss, +1 offering sets flag 1 → reveals →641, +0 item
+untouched, disabled with nothing eligible), §6.310 (the *chosen* possession moves,
+not the first), §6.635 (`force="f"` keeps →677 live), §2.639 (the group-2.639 suit
+is spared and →342 gates until the transfer runs) and keep-tag protection. Filed
+the pre-existing `<lose … bonus=>` gap the same section relies on as task 113.
+`RESULT ALL PASS pass=1027 fail=0`.
 
 ---
 
@@ -4102,6 +4123,30 @@ saves the sheet, while cancel leaves it and its effects unchanged. Curses withou
 `lift` remain inert. Test §5.505 through a save round-trip, both modal answers,
 and restoration of CHARISMA after confirmation. Web-only; stamp and run all
 sections.
+
+---
+
+## 113. `<lose item="?" bonus="N">` ignores `bonus=` — §4.456 accepts any item as a +2/+3 offering — LOW (engine)
+
+*(Filed 2026-07-14 while completing task 107.)* §4.456's Tambu offering routes its
++2 and +3 gifts through `<lose item="?" bonus="2" price="2">` / `<lose item="?"
+bonus="3+" price="3">`, whereas the +1 path (a `<transfer>`) was fixed under task
+107. `applyLose`'s item block (`engine.js`) matches on name/tags/`group`/`multiple`
+but never reads `bonus=`, so `item="?" bonus="2"` matches *any* possession and the
+chooser/first-match then removes an arbitrary item while setting the offering's
+price flag. A player can therefore present a worthless +0 item as a "+2" or "+3"
+offering and still be sent to §404/§568 (Tambu's favour/Rank reward) — the bonus
+requirement the section's prose spells out ("an ability bonus … of at least +1")
+goes unenforced on the loss path. The reference `Item.matchBonus` applies the same
+exact/`N+` bonus test the task-107 `transferMatch` now uses.
+
+Give `applyLose`'s item selection the same bonus filter (exact `N`, `N+` for
+"N or greater"), reusing the shared matcher so lose and transfer agree. Only the
+matching-eligible items should be offered to the chooser / taken; when nothing
+qualifies the loss (and its price flag) must not fire, so an ineligible offering
+cannot open §404/§568. Add a headless test that a +2 `<lose item="?" bonus="2">`
+skips a +0/+1 item and takes only a +2, and that §4.456's +2/+3 offer buttons are
+inert with no qualifying item. Web-only; stamp and run all sections.
 
 ---
 

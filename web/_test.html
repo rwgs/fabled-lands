@@ -4305,6 +4305,106 @@ async function run() {
       window.__FL_INSTANT_DICE__ = false;
     }
 
+    // --- task 107: <transfer> is a player action (chooser/filter/price/force) ---
+    { // block-scoped
+      // §4.456: the +1 offering is a price-gated transfer — it must NOT auto-run on
+      // entry; offering a +1 item moves THAT item to the cache, sets flag 1 and
+      // reveals →641; an ineligible (+0) item is never touched.
+      const g456 = GameState.create({ name:'V456', gender:'m', profession:'Warrior', book:4, adv });
+      g456.data.items = [];
+      g456.addItem(makeItem('item', 'apple'));                     // +0 → ineligible
+      g456.addItem(makeItem('tool', 'lucky ring', 1, 'charisma')); // +1 → the eligible offering
+      const before456 = g456.itemCount();
+      const c456 = document.createElement('div');
+      const st456 = new Story(c456, g456, { navigate(){}, onDeath(){}, notify(){} });
+      st456.begin(await data.getSection(4, '456'), 4, '456');
+      ok('task107: §456 offers nothing on entry (no auto-transfer, flag clear)',
+         g456.itemCount() === before456 && g456.cacheItems('4.641').length === 0 && !g456.getFlag('1'),
+         `n=${g456.itemCount()} cache=${g456.cacheItems('4.641').length} flag=${g456.getFlag('1')}`);
+      ok('task107: §456 →641 hidden before the offering',
+         !Array.from(c456.querySelectorAll('.goto')).some((b)=>/641/.test(b.textContent)));
+      const offer = Array.from(c456.querySelectorAll('button')).find((b)=>/offer a \+1 item/i.test(b.textContent));
+      ok('task107: §456 the +1 offering is armed (enabled)', !!offer && !offer.disabled);
+      offer.click();
+      ok('task107: §456 offering a +1 item moves it to the cache and sets flag 1',
+         g456.getFlag('1') === true && g456.cacheItems('4.641').some((i)=>i.name==='lucky ring') && g456.findItems('lucky ring').length === 0,
+         `flag=${g456.getFlag('1')} cache=${JSON.stringify(g456.cacheItems('4.641').map((i)=>i.name))}`);
+      ok('task107: §456 the ineligible +0 item is untouched', g456.findItems('apple').length === 1);
+      ok('task107: §456 →641 revealed after the offering',
+         Array.from(c456.querySelectorAll('.goto')).some((b)=>/641/.test(b.textContent)));
+
+      // §4.456 with no eligible item: the offer stays disabled and nothing moves.
+      const g456b = GameState.create({ name:'V456b', gender:'m', profession:'Warrior', book:4, adv });
+      g456b.data.items = [makeItem('item', 'apple')]; // no bonus items at all
+      const c456b = document.createElement('div');
+      new Story(c456b, g456b, { navigate(){}, onDeath(){}, notify(){} }).begin(await data.getSection(4, '456'), 4, '456');
+      const offerB = Array.from(c456b.querySelectorAll('button')).find((b)=>/offer a \+1 item/i.test(b.textContent));
+      ok('task107: §456 offer is disabled with no eligible +1 item',
+         !!offerB && offerB.disabled && !g456b.getFlag('1') && g456b.findItems('apple').length === 1);
+
+      // §6.310: "decide what item to present" — item="?" is a choose-one action; the
+      // SELECTED possession moves, not array position zero.
+      const g310 = GameState.create({ name:'V310', gender:'m', profession:'Warrior', book:6, adv });
+      g310.data.items = [makeItem('item','first thing'), makeItem('item','second thing'), makeItem('item','third thing')];
+      const c310 = document.createElement('div');
+      new Story(c310, g310, { navigate(){}, onDeath(){}, notify(){} }).begin(await data.getSection(6, '310'), 6, '310');
+      ok('task107: §310 presents nothing on entry', g310.itemCount() === 3 && g310.cacheItems('6.310').length === 0);
+      const picks310 = Array.from(c310.querySelectorAll('.ability-pick'));
+      const pick2 = picks310.find((btn)=>/second thing/i.test(btn.textContent));
+      ok('task107: §310 shows an item chooser (a pick per possession)', picks310.length === 3 && !!pick2);
+      pick2.click();
+      ok('task107: §310 the CHOSEN item moves (not the first)',
+         g310.cacheItems('6.310').length === 1 && g310.cacheItems('6.310')[0].name === 'second thing'
+         && g310.findItems('first thing').length === 1 && g310.findItems('second thing').length === 0,
+         `cache=${JSON.stringify(g310.cacheItems('6.310').map((i)=>i.name))}`);
+
+      // §6.635: giving a weapon is force="f" (optional) — →677 stays live without it.
+      const g635 = GameState.create({ name:'V635', gender:'m', profession:'Warrior', book:6, adv });
+      g635.data.items = [makeItem('weapon','broadsword',2)];
+      const c635 = document.createElement('div');
+      const st635 = new Story(c635, g635, { navigate(){}, onDeath(){}, notify(){} });
+      st635.begin(await data.getSection(6, '635'), 6, '635');
+      ok('task107: §635 builds no forced-transfer gate (both force="f")', st635.transferGate === null);
+      const cont677 = Array.from(c635.querySelectorAll('.goto')).find((b)=>/677/.test(b.textContent));
+      ok('task107: §635 →677 stays live beside the optional gift', !!cont677 && !cont677.disabled);
+      ok('task107: §635 no weapon given on entry',
+         g635.findItems('broadsword').length === 1 && g635.cacheItems('6.635').length === 0);
+
+      // §2.639: "lose any OTHER armour" — armour="*" xarmour="?" xgroup="2.639" spares
+      // the just-granted group-2.639 suit; forced, so it gates →342.
+      const g639 = GameState.create({ name:'V639', gender:'m', profession:'Warrior', book:2, adv });
+      g639.data.items = [
+        makeItem('armour','splint armour',4,null,[],[],'2.639'), // the gift (spared)
+        makeItem('armour','chainmail',2),                        // other armour (lost)
+      ];
+      const movers639 = eng.transferPlan(parse('<transfer to="null" armour="*" xarmour="?" xgroup="2.639"/>'), g639).movers;
+      ok('task107: §639 selector spares the group-2.639 suit, takes the rest',
+         movers639.length === 1 && movers639[0].name === 'chainmail', JSON.stringify(movers639.map((m)=>m.name)));
+      const c639 = document.createElement('div');
+      const st639 = new Story(c639, g639, { navigate(){}, onDeath(){}, notify(){} });
+      st639.begin(await data.getSection(2, '639'), 2, '639');
+      const goto342 = Array.from(c639.querySelectorAll('.goto')).find((b)=>/342/.test(b.textContent));
+      ok('task107: §639 nothing moved on entry; forced transfer gates →342',
+         g639.findItems('chainmail').length === 1 && !!goto342 && goto342.disabled);
+      const doIt639 = Array.from(c639.querySelectorAll('button')).find((b)=>/lose any other/i.test(b.textContent));
+      ok('task107: §639 the forced transfer is armed', !!doIt639 && !doIt639.disabled);
+      doIt639.click();
+      const goto342b = Array.from(c639.querySelectorAll('.goto')).find((b)=>/342/.test(b.textContent));
+      ok('task107: §639 running it loses other armour, keeps the gift, unlocks →342',
+         g639.findItems('chainmail').length === 0 && g639.findItems('splint armour').length === 1
+         && g639.cacheItems('null').some((i)=>i.name==='chainmail') && !!goto342b && !goto342b.disabled,
+         `items=${JSON.stringify(g639.data.items.map((i)=>i.name))} gated=${goto342b&&goto342b.disabled}`);
+
+      // Engine: keep-tagged possessions survive a plain item="*" transfer from the player.
+      const gkeep = GameState.create({ name:'Vkeep', gender:'m', profession:'Warrior', book:1, adv });
+      gkeep.data.items = [makeItem('item','white sword',0,null,['keep']), makeItem('item','junk')];
+      eng.applyEffect(parse('<transfer item="*" to="void"/>'), gkeep, {});
+      ok('task107: item="*" transfer from the player spares keep-tagged items',
+         gkeep.findItems('white sword').length === 1 && gkeep.findItems('junk').length === 0
+         && gkeep.cacheItems('void').some((i)=>i.name==='junk'),
+         `items=${JSON.stringify(gkeep.data.items.map((i)=>i.name))}`);
+    }
+
   } catch (e) {
     out.push('FATAL ' + (e.stack || e.message));
     fail++;
