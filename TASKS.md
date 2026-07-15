@@ -8,7 +8,7 @@ the tasks were filed, not work order).
 **MEDIUM**
 
 - [x] 110. `<return>` starts a fresh visit instead of restoring the section at the point it was left
-- [ ] 111. Rolled `itemAt=` losses can remove `keep`-tagged possessions
+- [x] 111. Rolled `itemAt=` losses can remove `keep`-tagged possessions
 
 **LOW**
 
@@ -4123,7 +4123,7 @@ stamp and run all sections.
 
 ---
 
-## 111. Rolled `itemAt=` losses can remove `keep`-tagged possessions — MEDIUM (engine/state)
+## 111. Rolled `itemAt=` losses can remove `keep`-tagged possessions — **done**
 
 *(Filed 2026-07-14 from a second full repository review; follow-up to task 93.)*
 The spec says an `itemAt=` loss addresses a one-based Adventure Sheet/cache

@@ -613,14 +613,22 @@ function applyLose(el, state, opts) {
       if (toLose.length) notes.push('lost item');
     }
   }
-  // <lose itemAt="x"> takes the item at a rolled 1-based Adventure Sheet position
-  // (§6.63 the loser's forfeit, §6.168 the dream-compass swap). A roll that points
-  // past the end of the list takes nothing ("you get the compass without losing
-  // anything"); the render layer defers this until x is rolled (task 93).
+  // <lose itemAt="x"> takes the item at a rolled 1-based position (§6.63 the loser's
+  // forfeit, §6.168 the dream-compass swap). The position indexes the selected pool —
+  // a named cache/stash when cache= is present, else the player's carried possessions
+  // — and skips currency (money is not an item slot). A roll past the end of the list
+  // takes nothing ("you get the compass without losing anything"), and the render layer
+  // defers this until x is rolled (task 93). A possession carrying the "keep" tag is
+  // left in place, so the royal ring (§1.385) or white sword (§4.103) can never be
+  // rolled away — those are explicitly items that cannot be lost. (task 111)
   if (get('itemAt') != null) {
     const idx = resolveValue(state, get('itemAt'));
-    const it = Number.isFinite(idx) && idx >= 1 ? state.data.items[idx - 1] : null;
-    if (it) { state.removeItemById(it.id); notes.push('lost item'); }
+    const list = cacheN != null ? state.cacheItems(cacheN) : state.data.items;
+    const it = Number.isFinite(idx) && idx >= 1 ? list[idx - 1] : null;
+    if (it && !(it.tags || []).map(normalize).includes('keep')) {
+      if (cacheN != null) state.cacheRemoveItem(cacheN, it.id); else state.removeItemById(it.id);
+      notes.push('lost item');
+    }
   }
   // Confiscation of equipment: <lose weapon|armour|tool="?"/"*"> — optionally
   // using="t" ("the one you're wielding/wearing").

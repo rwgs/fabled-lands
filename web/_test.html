@@ -4574,6 +4574,51 @@ async function run() {
       ok('task110: a taken revisit="t" source stays reusable on return', !!revBtn2 && revBtn2.disabled === false, 'dis=' + (revBtn2 && revBtn2.disabled));
     }
 
+    // --- task 111: rolled itemAt= losses skip keep items and honour cache= ---
+    // §6.63/§6.168 take the possession at a rolled 1-based position; the loss must
+    // index the selected pool (player, or a cache= stash), skip currency, no-op past
+    // the end (task 93), and never remove a "keep"-tagged possession — the royal ring
+    // (§1.385) / white sword (§4.103) are explicitly items that cannot be lost.
+    {
+      // an ordinary item at the rolled position → removed
+      const g111 = GameState.create({ name:'T111', gender:'m', profession:'Warrior', book:6, adv });
+      g111.data.items = [];
+      ['ring','sword','flask'].forEach((nm) => g111.addItem(makeItem('item', nm)));
+      g111.setVar('x', 2);
+      eng.applyEffect(parse('<lose itemAt="x"/>'), g111, {});
+      ok('task111: itemAt removes the ordinary item at the rolled position', g111.data.items.map((i)=>i.name).join(',') === 'ring,flask', g111.data.items.map((i)=>i.name).join(','));
+
+      // a keep-tagged possession at the rolled position → left in place (no-op)
+      const g111k = GameState.create({ name:'T111k', gender:'m', profession:'Warrior', book:6, adv });
+      g111k.data.items = [];
+      g111k.addItem(makeItem('item', 'junk'));
+      g111k.addItem(makeItem('item', 'royal ring', 0, null, ['keep'])); // position 2, protected
+      g111k.addItem(makeItem('item', 'flask'));
+      g111k.setVar('x', 2);
+      eng.applyEffect(parse('<lose itemAt="x"/>'), g111k, {});
+      ok('task111: itemAt leaves a keep-tagged possession in place', g111k.data.items.some((i)=>i.name==='royal ring') && g111k.itemCount() === 3, g111k.data.items.map((i)=>i.name).join(','));
+
+      // an out-of-range roll → still takes nothing (task 93 retained)
+      const g111o = GameState.create({ name:'T111o', gender:'m', profession:'Warrior', book:6, adv });
+      g111o.data.items = [];
+      ['a','b'].forEach((nm) => g111o.addItem(makeItem('item', nm)));
+      g111o.setVar('x', 5);
+      const before111 = g111o.itemCount();
+      eng.applyEffect(parse('<lose itemAt="x"/>'), g111o, {});
+      ok('task111: an out-of-range itemAt roll still takes nothing', g111o.itemCount() === before111);
+
+      // a cache-targeted itemAt → removes from the named stash, sparing carried items
+      const g111c = GameState.create({ name:'T111c', gender:'m', profession:'Warrior', book:6, adv });
+      g111c.data.items = []; g111c.addItem(makeItem('item', 'carried keepsake'));
+      g111c.cacheAddItem('vault', makeItem('item', 'stashed gem'));
+      g111c.cacheAddItem('vault', makeItem('item', 'stashed idol'));
+      g111c.setVar('x', 1);
+      eng.applyEffect(parse('<lose itemAt="x" cache="vault"/>'), g111c, {});
+      ok('task111: a cache-targeted itemAt removes from the stash, not carried items',
+         g111c.cacheItems('vault').map((i)=>i.name).join(',') === 'stashed idol' && g111c.data.items.length === 1,
+         'cache=' + g111c.cacheItems('vault').map((i)=>i.name).join(',') + ' carried=' + g111c.itemCount());
+    }
+
   } catch (e) {
     out.push('FATAL ' + (e.stack || e.message));
     fail++;
