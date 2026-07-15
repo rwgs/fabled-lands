@@ -14,7 +14,7 @@ the tasks were filed, not work order).
 
 - [x] 112. The Adventure Sheet stores but cannot activate a curse's `lift=` prompt (§5.505)
 - [x] 113. `<lose item="?" bonus="N">` ignores `bonus=` — §4.456 accepts any item as a +2/+3 offering
-- [ ] 114. Reroll-form storm sections (§232/502/716) never consume the blessing — the rerunnable `keepblessing=1` set resets the guard each render
+- [x] 114. Reroll-form storm sections (§232/502/716) never consume the blessing — the rerunnable `keepblessing=1` set resets the guard each render
 
 **Done**
 
@@ -4186,7 +4186,7 @@ inert with no qualifying item. Web-only; stamp and run all sections.
 
 ---
 
-## 114. Reroll-form storm sections never consume the blessing — the rerunnable `keepblessing=1` set resets the guard each render — LOW (render/engine)
+## 114. Reroll-form storm sections never consume the blessing — the rerunnable `keepblessing=1` set resets the guard each render — **done**
 
 *(Filed 2026-07-15 while completing task 108, and confirmed by probe.)* §232/502/716
 avoid a storm/capsize on an 11–12/6 roll by spending Safety from Storms, but unlike

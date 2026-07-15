@@ -614,9 +614,31 @@ export class Story {
     this.appendChildren(inner, node, path);
     btn.textContent = inner.textContent.trim() || 'Roll again';
     const roll = this.activeRoll;
-    btn.addEventListener('click', () => { if (roll) this.ctx.rolls.delete('roll@' + roll.path); this.rerender(); });
+    btn.addEventListener('click', () => {
+      // §232/502/716 storm form: the reroll IS the "lose the blessing and roll again"
+      // spend. The intended hidden <lose blessing> never fires (its keepblessing guard
+      // is reset by a rerunnable entry set every render), so consume the guarded storm
+      // blessing here — exactly one reroll's worth of protection. (task 114)
+      const spend = this.blessingSpendForReroll();
+      if (spend) this.state.useBlessing(spend);
+      if (roll) this.ctx.rolls.delete('roll@' + roll.path);
+      this.rerender();
+    });
     container.appendChild(btn);
     return btn;
+  }
+
+  // The storm blessing a <reroll> should spend on click in the keepblessing form
+  // (§232/502/716 — task 114): a hidden <lose blessing="X"> whose X also guards one of
+  // this section's <outcome blessing="X"> hazards, when the player still holds X. Only
+  // these three reroll sections carry that idiom; a plain reroll finds nothing to spend.
+  blessingSpendForReroll() {
+    if (!this.outcomeBlessings || !this.outcomeBlessings.size || !this.sectionEl) return null;
+    for (const l of this.sectionEl.querySelectorAll('lose[blessing][hidden]')) {
+      const b = l.getAttribute('blessing');
+      if (b && this.outcomeBlessings.has(normalize(b)) && this.state.hasBlessing(b)) return b;
+    }
+    return null;
   }
 
   // After a resolved roll, offer any blessing the player may spend to reroll it (task 76).

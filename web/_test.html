@@ -4735,6 +4735,50 @@ async function run() {
          `has=${g456d.findItems('fine blade').length} flag=${g456d.getFlag('2')}`);
     }
 
+    // --- task 114: the reroll-form storm spend consumes the blessing exactly once ---
+    // §232/502/716 avoid an 11-12 capsize by spending Safety from Storms via a reroll,
+    // but a rerunnable keepblessing entry set defeated the hidden loss — granting
+    // unlimited protection once task 108's veto took effect. The reroll must now consume
+    // an ordinary blessing (a second 11-12 then capsizes →510) while a permanent survives.
+    {
+      window.__FL_INSTANT_DICE__ = true;
+      const settle114 = () => new Promise((r) => setTimeout(r, 30));
+      const rnd114 = Math.random;
+      const rerollBtn = (c) => Array.from(c.querySelectorAll('.btn-secondary')).find((b) => /roll again|reroll/i.test(b.textContent));
+      const goto510 = (c) => Array.from(c.querySelectorAll('.goto')).find((b) => /→\s*510/.test(b.textContent));
+
+      // ordinary storm blessing: roll 11-12 → reroll (spends it) → a second 11-12 capsizes
+      const g114 = GameState.create({ name:'T114', gender:'m', profession:'Warrior', book:5, adv });
+      g114.data.shards = 100; g114.addBlessing('storm');
+      const c114 = document.createElement('div');
+      const st114 = new Story(c114, g114, { navigate(){}, onDeath(){}, notify(){} });
+      st114.begin(await data.getSection(5, '232'), 5, '232');
+      Math.random = () => 0.9; // 6+6 = 12 → range 11-12
+      c114.querySelector('.btn-roll').click(); await settle114();
+      ok('task114: §232 first 11-12 vetoes the capsize and offers a reroll (blessing still held)',
+         !goto510(c114) && !!rerollBtn(c114) && g114.hasBlessing('storm'));
+      rerollBtn(c114).click(); await settle114();
+      ok('task114: taking the reroll spends the ordinary storm blessing', !g114.hasBlessing('storm'));
+      c114.querySelector('.btn-roll').click(); await settle114();
+      ok('task114: a second 11-12 with the blessing spent now capsizes (→510 revealed)', !!goto510(c114));
+
+      // permanent storm blessing: the reroll never uses it up, so it keeps protecting
+      const g114p = GameState.create({ name:'T114p', gender:'m', profession:'Warrior', book:5, adv });
+      g114p.data.shards = 100; g114p.addBlessing('storm', true);
+      const c114p = document.createElement('div');
+      const st114p = new Story(c114p, g114p, { navigate(){}, onDeath(){}, notify(){} });
+      st114p.begin(await data.getSection(5, '232'), 5, '232');
+      Math.random = () => 0.9;
+      c114p.querySelector('.btn-roll').click(); await settle114();
+      rerollBtn(c114p).click(); await settle114();
+      ok('task114: a permanent storm blessing survives the reroll', g114p.hasBlessing('storm') && g114p.isBlessingPermanent('storm'));
+      c114p.querySelector('.btn-roll').click(); await settle114();
+      ok('task114: the permanent blessing still vetoes a second 11-12 capsize', !goto510(c114p) && !!rerollBtn(c114p));
+
+      Math.random = rnd114;
+      window.__FL_INSTANT_DICE__ = false;
+    }
+
   } catch (e) {
     out.push('FATAL ' + (e.stack || e.message));
     fail++;
