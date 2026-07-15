@@ -2455,6 +2455,20 @@ export class Story {
     return !!roll;
   }
 
+  // Does a success/failure branch's ability= match the feeding roll's chosen
+  // ability? (task 109) §2.37 offers "SANCTITY or MAGIC (your choice)" then routes a
+  // SANCTITY success →60 and a MAGIC success →129, so the success boolean alone is
+  // ambiguous. A node with no ability= is unconstrained (single-ability rolls and
+  // var-keyed branches are unaffected); when the feeding roll carries no chosen
+  // ability, don't over-filter.
+  branchAbilityMatches(node, roll) {
+    const ab = node.getAttribute('ability');
+    if (ab == null || ab === '') return true;
+    if (!roll || !roll.ability) return true;
+    const want = String(roll.ability).toLowerCase();
+    return ab.split('|').map((a) => a.trim().toLowerCase()).includes(want);
+  }
+
   // Does a held blessing veto this <outcome>/<success>/<failure>? (task 108) — the
   // node names a single blessing the player currently holds (ordinary or the
   // permanent Safety from Storms). Not consumed here; the sibling branch owns that.
@@ -2503,7 +2517,7 @@ export class Story {
     if (tag === 'success' || tag === 'failure') {
       if (!this.branchResolved(node, roll)) return; // wait until the feeding roll / var write
       const want = tag === 'success';
-      if (this.branchSuccess(node, roll) === want) this.revealBranch(container, node, path);
+      if (this.branchSuccess(node, roll) === want && this.branchAbilityMatches(node, roll)) this.revealBranch(container, node, path);
       return;
     }
 
@@ -2542,8 +2556,8 @@ export class Story {
         if (!this.branchResolved(c, roll)) continue;
         const ctag = c.tagName.toLowerCase();
         let match = false;
-        if (ctag === 'success') match = this.branchSuccess(c, roll) === true;
-        else if (ctag === 'failure') match = this.branchSuccess(c, roll) === false;
+        if (ctag === 'success') match = this.branchSuccess(c, roll) === true && this.branchAbilityMatches(c, roll);
+        else if (ctag === 'failure') match = this.branchSuccess(c, roll) === false && this.branchAbilityMatches(c, roll);
         else {
           const range = c.getAttribute('range');
           const cw = c.getAttribute('codeword');

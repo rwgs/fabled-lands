@@ -4490,6 +4490,39 @@ async function run() {
       window.__FL_INSTANT_DICE__ = false;
     }
 
+    // --- task 109: multi-ability <success ability="…"> routes by the CHOSEN ability ---
+    // §2.37 offers "SANCTITY or MAGIC (your choice)" then a SANCTITY success →60 and a
+    // MAGIC success →129; the branch must match the ability the player actually rolled.
+    {
+      window.__FL_INSTANT_DICE__ = true;
+      const settle109 = () => new Promise((r) => setTimeout(r, 30));
+      const rnd109 = Math.random;
+      const cont37 = (c, n) => Array.from(c.querySelectorAll('.goto')).some((b) => new RegExp('→\\s*' + n + '$').test(b.textContent.trim()));
+      const run37 = async (pick, rng) => {
+        const g = GameState.create({ name:'T37', gender:'m', profession:'Warrior', book:2, adv });
+        g.data.abilities.sanctity = 6; g.data.abilities.magic = 6; // 2d6(max 12)+6 vs 15
+        const c = document.createElement('div');
+        const st = new Story(c, g, { navigate(){}, onDeath(){}, notify(){} });
+        st.begin(await data.getSection(2, '37'), 2, '37');
+        const pickBtn = Array.from(c.querySelectorAll('.ability-pick')).find((b) => new RegExp(pick, 'i').test(b.textContent));
+        pickBtn.click(); await settle109();
+        Math.random = rng;
+        c.querySelector('.btn-roll').click(); await settle109();
+        return c;
+      };
+      const cS = await run37('sanctity', () => 0.9); // 12 + 6 = 18 > 15 → success
+      ok('task109: §37 a successful SANCTITY roll routes to →60',
+         cont37(cS, 60) && !cont37(cS, 129) && !cont37(cS, 83));
+      const cM = await run37('magic', () => 0.9);
+      ok('task109: §37 a successful MAGIC roll routes to →129, not the SANCTITY branch',
+         cont37(cM, 129) && !cont37(cM, 60) && !cont37(cM, 83));
+      const cF = await run37('sanctity', () => 0); // 2 + 6 = 8 ≤ 15 → failure
+      ok('task109: §37 a failed roll routes to →83 regardless of ability',
+         cont37(cF, 83) && !cont37(cF, 60) && !cont37(cF, 129));
+      Math.random = rnd109;
+      window.__FL_INSTANT_DICE__ = false;
+    }
+
   } catch (e) {
     out.push('FATAL ' + (e.stack || e.message));
     fail++;

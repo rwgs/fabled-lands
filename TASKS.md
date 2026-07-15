@@ -7,7 +7,6 @@ the tasks were filed, not work order).
 
 **MEDIUM**
 
-- [ ] 109. Multi-ability success routing ignores `<success ability="…">` (§2.37 always takes SANCTITY)
 - [ ] 110. `<return>` starts a fresh visit instead of restoring the section at the point it was left
 - [ ] 111. Rolled `itemAt=` losses can remove `keep`-tagged possessions
 
@@ -130,6 +129,7 @@ section below); detail sections remain in filed order, not this order.*
 - [x] 106. Light mode is force-darkened on Chrome/Edge — Chromium "Auto Dark Theme"; `color-scheme: light` doesn't opt out, needs `only light` *(fixed; leather-chrome-in-both-themes remains an intentional design note)*
 - [x] 107. Visible `<transfer>` actions auto-execute and ignore chooser/filter/price semantics *(fixed; surfaced the §4.456 `<lose bonus>` gap → task 113)*
 - [x] 108. `<outcome blessing="…">` ignores Safety from Storms and exposes the capsize/storm redirect *(fixed; surfaced the reroll-form non-consume → task 114)*
+- [x] 109. Multi-ability success routing ignores `<success ability="…">` (§2.37 always takes SANCTITY)
 
 ---
 
@@ -4059,7 +4059,7 @@ loss reads it) — filed as task 114, since consuming is out of scope here.
 
 ---
 
-## 109. Multi-ability success routing ignores `<success ability="…">` — §2.37 always takes SANCTITY — MEDIUM (render)
+## 109. Multi-ability success routing ignores `<success ability="…">` — §2.37 always takes SANCTITY — **done**
 
 *(Filed 2026-07-14 from a second full repository review.)* §2.37 is the corpus's
 one multi-route ability check: the player chooses SANCTITY or MAGIC for
@@ -4075,6 +4075,18 @@ node performs the same ability-type check). Preserve the existing behaviour for
 single-ability rolls, var-keyed branches, and nodes without `ability=`. Add a
 deterministic §2.37 integration test for successful SANCTITY →60, successful
 MAGIC →129, and failure →83. Web-only; stamp and run all sections.
+
+**Done (2026-07-15).** Added `branchAbilityMatches(node, roll)` to `render.js` and
+required it alongside the success/failure state in both `renderBranch` sites (the
+top-level `<success>/<failure>` handler and the `<outcomes>` loop). A branch with
+`ability=` now matches only when the feeding roll's chosen ability (`roll.ability`,
+already stored by `rollDifficulty`) is in the node's pipe-list; a branch without
+`ability=` is unconstrained, and when the roll carries no chosen ability the check
+does not over-filter — so single-ability rolls and var-keyed branches are
+unchanged. §2.37 is the corpus's only `ability=`-tagged branch set, so the change
+is tightly scoped. New deterministic §2.37 test: a successful SANCTITY roll →60
+(not 129/83), a successful MAGIC roll →129 (not 60/83), and a failed roll →83.
+`RESULT ALL PASS pass=1043 fail=0`.
 
 ---
 
