@@ -844,6 +844,21 @@ export class GameState {
     this.changed();
   }
 
+  // Reverse the last goto for a <return> (task 110): pop the history bounce and restore
+  // the previous visit's position, section-local variables and player location from the
+  // return frame WITHOUT counting a turn, pushing history or clearing/replaying effects.
+  // The renderer re-renders that visit from its preserved memo (ctx); state changed
+  // legitimately during the detour (money, items, ticks elsewhere) is left untouched.
+  restoreReturn(frame) {
+    if (this.data.history.length) this.data.history.pop(); // drop the temporary detour entry
+    this.data.book = Number(frame.book);
+    this.data.section = String(frame.section);
+    this.data.vars = { ...frame.vars };
+    this.data.location = frame.location ?? null;
+    this.setEntryTicks(frame.entryTicks); // restore the <if ticks=> entry snapshot (task 105)
+    this.changed();
+  }
+
   // ---- persistence -----------------------------------------------------
   /** Persist to localStorage. Returns true on success, false on failure (and
    *  sets lastSaveError to a player-facing message so the UI can warn). An

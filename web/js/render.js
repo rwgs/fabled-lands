@@ -139,18 +139,13 @@ export class Story {
     // (gone ashore) exempts nothing, so every at-large ship docks and the voyage ends. (task 81)
     const rawNavigate = opts.navigate;
     this.navigate = (book, section) => {
-      // End-of-section cleanups deferred during the visit (a hidden <tick removetag>):
-      // apply them now, on the way out, so a selection tag survives the whole visit for
-      // its own roll/outcome ticks and is still stripped exactly once. (task 88)
-      if (this.deferredCleanups && this.deferredCleanups.size) {
-        for (const n of this.deferredCleanups.values()) applyEffect(n, this.state, {});
-        this.deferredCleanups.clear();
-      }
-      if (this.sectionTodock) {
-        this.state.applyTodock(this.sectionTodock, this._sailExempt != null ? this._sailExempt : null);
-        if (this._sailExempt == null) this.state.data.sailingShipId = null;
-      }
-      this._sailExempt = null;
+      // Snapshot the section being LEFT as the one-level return frame BEFORE the leave
+      // hooks / rawNavigate mutate anything — so a <return> in the destination restores
+      // this exact visit (position, section-local vars, render memo) rather than
+      // re-entering it fresh. (task 110)
+      const frame = this._captureReturnFrame();
+      this._applyLeaveHooks();
+      this._returnFrame = frame;
       rawNavigate(book, section);
     };
     this.onDeath = opts.onDeath || (() => {});
@@ -169,6 +164,54 @@ export class Story {
     this.whileIterPending = false;
     this.whileIterPendingVars = null;
     this.deferredCleanups = new Map(); // hidden removetag cleanups to apply on leaving (task 88)
+    // One-level "return frame" (task 110): the immediately previous visit, snapshotted
+    // as we leave it so a <return> can restore that section at the point it was left —
+    // its position, section-local variables and render memo (ctx) — instead of
+    // re-entering it fresh (which would clear vars/roll state and re-run entry effects).
+    // Consumed (and cleared) by goBack; the format only ever promises one level.
+    this._returnFrame = null;
+    // The choice/goto node the player clicked to leave the current section — recorded
+    // into the return frame so, on <return>, that one source action is marked spent
+    // (crossed off) unless it carries revisit="t". (task 110)
+    this._pendingSourceNode = null;
+  }
+
+  // Snapshot the current visit so a later <return> can restore it (task 110). Null
+  // before the first section is entered (nothing to return to). Keeps references to
+  // the live ctx/sectionEl (neither is mutated once we leave — begin() builds fresh
+  // ones for the destination) and a copy of the section-local variables (begin()
+  // reassigns state.data.vars). usedSource is the choice/goto just clicked, if any.
+  _captureReturnFrame() {
+    if (this.section == null) { this._pendingSourceNode = null; return null; }
+    const frame = {
+      book: this.book,
+      section: this.section,
+      sectionEl: this.sectionEl,
+      ctx: this.ctx,
+      sectionTodock: this.sectionTodock,
+      vars: { ...this.state.data.vars },
+      location: this.state.data.location ?? null,
+      entryTicks: this.state.entryTickCount(),
+      usedSource: this._pendingSourceNode || null,
+    };
+    this._pendingSourceNode = null;
+    return frame;
+  }
+
+  // The single "leaving a section" hook, shared by navigate() and goBack() (task 110).
+  _applyLeaveHooks() {
+    // End-of-section cleanups deferred during the visit (a hidden <tick removetag>):
+    // apply them now, on the way out, so a selection tag survives the whole visit for
+    // its own roll/outcome ticks and is still stripped exactly once. (task 88)
+    if (this.deferredCleanups && this.deferredCleanups.size) {
+      for (const n of this.deferredCleanups.values()) applyEffect(n, this.state, {});
+      this.deferredCleanups.clear();
+    }
+    if (this.sectionTodock) {
+      this.state.applyTodock(this.sectionTodock, this._sailExempt != null ? this._sailExempt : null);
+      if (this._sailExempt == null) this.state.data.sailingShipId = null;
+    }
+    this._sailExempt = null;
   }
 
   /** Begin a fresh visit of a section element. */
@@ -193,7 +236,7 @@ export class Story {
     this.state.arriveAtDock(sectionEl.getAttribute('dock'));
     // Remember this section's todock= so the wrapped navigate applies it on leaving. (task 81)
     this.sectionTodock = sectionEl.getAttribute('todock') || null;
-    this.ctx = { applied: new Set(), rolls: new Map(), fights: new Map(), buys: new Map(), groupLimits: new Map(), groupPicks: new Map(), wroteVars: new Set(), rolledVars: new Set(), pathNodes: new Map(), rollLockCaches: new Set(), forcedChosen: new Map(), awardCounts: new Map(), stock: new Map() };
+    this.ctx = { applied: new Set(), rolls: new Map(), fights: new Map(), buys: new Map(), groupLimits: new Map(), groupPicks: new Map(), wroteVars: new Set(), rolledVars: new Set(), pathNodes: new Map(), rollLockCaches: new Set(), forcedChosen: new Map(), awardCounts: new Map(), stock: new Map(), usedSource: null };
     // Gambling-bet lock (task 38): a <tick special="lock" cache="X"> bundled inside
     // a roll <group> means "freeze the bet once you roll" (book1/91, book2/134) — as
     // opposed to a top-level lock, which is stash bookkeeping and must NOT disable
@@ -1819,12 +1862,16 @@ export class Story {
     this.deadGate(node, link); // dead="t" only for a dead player, dead="f" only while alive
     const fg = this.flagGate(node); // price/flag "pay to spin" exit gate (task 30)
     if (fg) { link.disabled = true; link.classList.add('gated'); link.title = fg; }
+    // A source goto the player took before a <return> is spent — crossed off on the
+    // restored section — unless it carries revisit="t" (task 110).
+    if (this.isSpentSource(node)) { link.disabled = true; link.classList.add('disabled'); link.title = 'You have already taken this path.'; }
 
     // The storm-safe goto (§200/250/60) spends the guarded Safety from Storms on the
     // way out — the roll gate only leaves it clickable in the protected state. (task 108)
     const spendBlessing = this.blessingSpendForGoto(node);
     link.addEventListener('click', () => {
       if (!bookAvailable) { this.notify(`“${bookTitle(targetBook)}” (Book ${targetBook}) isn’t included in this edition.`, 'warn'); return; }
+      this._pendingSourceNode = node; // record the source action for a possible <return> (task 110)
       if (spendBlessing && this.state.hasBlessing(spendBlessing)) this.state.useBlessing(spendBlessing);
       // A sail goto puts a ship "at large" before leaving; prompt when more than one
       // ship is at this dock, else sail the single one. (task 73)
@@ -1861,11 +1908,41 @@ export class Story {
     container.appendChild(box);
   }
 
-  // Navigate back to the section the player came from (the last history entry).
+  // <return>: reverse the last goto and restore the section it came from at the point
+  // it was left (task 110). When a return frame is held, run the temporary section's
+  // leave hooks, pop the history bounce, and re-render the previous visit WITHOUT
+  // goTo()/begin() — so its variables, resolved roll and used-action state are intact,
+  // its one-shot entry effects/ticks are not repeated, and no second forward visit is
+  // pushed or turn counted. State changed legitimately during the detour is kept.
+  // With no frame (a loaded save, or a second-level return the format doesn't promise)
+  // fall back to the old history-driven navigate.
   goBack() {
-    const hist = this.state.data.history || [];
-    const prev = hist.length ? hist[hist.length - 1] : null;
-    if (prev) this.navigate(Number(prev.book), prev.section);
+    const frame = this._returnFrame;
+    if (!frame) {
+      const hist = this.state.data.history || [];
+      const prev = hist.length ? hist[hist.length - 1] : null;
+      if (prev) this.navigate(Number(prev.book), prev.section);
+      return;
+    }
+    this._applyLeaveHooks();          // leave the temporary detour section
+    this._returnFrame = null;         // one level only — consume it
+    this.state.restoreReturn(frame);  // pop history + restore position/vars/location (no goTo)
+    this.book = frame.book;
+    this.section = frame.section;
+    this.sectionEl = frame.sectionEl;
+    this.ctx = frame.ctx;
+    this.ctx.usedSource = frame.usedSource; // the source action taken (spent unless revisit="t")
+    this.sectionTodock = frame.sectionTodock;
+    this.deferredCleanups = new Map(); // rebuilt as the restored section re-renders (task 88)
+    this.render();
+  }
+
+  // True for the one choice/goto node the player took before the current <return>
+  // restored this section: it is spent (crossed off) unless it carries revisit="t",
+  // which marks a hub action the player may take again. Only ever set right after a
+  // return, so a normal render leaves every source action enabled. (task 110)
+  isSpentSource(node) {
+    return this.ctx && this.ctx.usedSource === node && !boolAttr(node.getAttribute('revisit'));
   }
 
   // <return> — a "go back to where you came from" link.
@@ -2121,6 +2198,8 @@ export class Story {
     if (deadAttr != null && boolAttr(deadAttr) !== this.state.isDead()) reasons.push(boolAttr(deadAttr) ? 'only if you are dead' : 'only while you live');
     const fg = this.flagGate(node); // price/flag "pay to spin" gate (task 30)
     if (fg) reasons.push(fg);
+    // A source choice the player took before a <return> is spent unless revisit="t" (task 110).
+    if (this.isSpentSource(node)) reasons.push('already taken');
 
     if (cost) {
       const tag = document.createElement('span');
@@ -2150,7 +2229,8 @@ export class Story {
           if (this.state.isDead()) { this.rerender(); return; }
         }
         payChoiceCost(this.state, { pay, cost, currency, foreignCoin, item: itemReq }); // transaction lives in market.js (task 34)
-        if (section == null) return;
+        if (section == null) return; // a cost-only choice: pays and stays, not a source action
+        this._pendingSourceNode = node; // record the source action for a possible <return> (task 110)
         // Sail exit: same chooser/action as a sail goto (task 89).
         if (isSail) { this.sailThenGo(btn.parentElement || this.root, btn, targetBook, section); return; }
         this.navigate(targetBook, section);

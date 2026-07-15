@@ -7,7 +7,7 @@ the tasks were filed, not work order).
 
 **MEDIUM**
 
-- [ ] 110. `<return>` starts a fresh visit instead of restoring the section at the point it was left
+- [x] 110. `<return>` starts a fresh visit instead of restoring the section at the point it was left
 - [ ] 111. Rolled `itemAt=` losses can remove `keep`-tagged possessions
 
 **LOW**
@@ -4090,7 +4090,7 @@ is tightly scoped. New deterministic §2.37 test: a successful SANCTITY roll →
 
 ---
 
-## 110. `<return>` starts a fresh visit instead of restoring the section at the point it was left — MEDIUM (state/render/app)
+## 110. `<return>` starts a fresh visit instead of restoring the section at the point it was left — **done**
 
 *(Filed 2026-07-14 from a second full repository review.)* The spec defines
 `<return>` as reversing the last goto and restoring the prior section at the

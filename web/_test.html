@@ -4523,6 +4523,57 @@ async function run() {
       window.__FL_INSTANT_DICE__ = false;
     }
 
+    // --- task 110: <return> restores the previous visit, not a fresh re-entry ---
+    // A → B → <return> must land back on A at the point it was left: its section-local
+    // variable/roll and render memo intact, its one-shot entry effect NOT repeated, no
+    // second forward visit pushed/counted, state changed during the detour kept, and
+    // only a revisit="t" source action left immediately reusable.
+    {
+      const buildReturn = () => {
+        const g = GameState.create({ name:'T110', gender:'m', profession:'Warrior', book:1, adv });
+        g.data.shards = 0;
+        const secA = parse('<section name="A" boxes="1"><gain shards="10"/><tick/><p>Hub.</p><choices><choice section="B">PlainGo</choice><choice section="B" revisit="t">RevisitGo</choice></choices></section>');
+        const secB = parse('<section name="B"><gain shards="5"/><p>Detour.</p><return>Turn back</return></section>');
+        const secs = { A: secA, B: secB };
+        const cont = document.createElement('div');
+        let story;
+        // Mirror the app: every entry is goTo()+begin() so state.data.section is set
+        // and history records the forward visit (a <return> needs that trail).
+        const enter = (b, s) => { g.goTo(b, s); story.begin(secs[String(s)], b, s); };
+        story = new Story(cont, g, { navigate: enter, onDeath(){}, notify(){} });
+        enter(1, 'A'); // first entry: no frame captured (nothing to return to)
+        return { g, cont, story };
+      };
+      const findChoice = (c, label) => Array.from(c.querySelectorAll('.choice')).find((b) => b.textContent.includes(label));
+
+      // Scenario 1 — leave via the plain (non-revisit) choice.
+      const s1 = buildReturn();
+      ok('task110: A\'s entry gain applies once on entry (10 shards)', s1.g.data.shards === 10, 'shards=' + s1.g.data.shards);
+      s1.g.setVar('rolled', 4); // stand in for an in-section roll result the player must resume with
+      const ctxA = s1.story.ctx;
+      findChoice(s1.cont, 'PlainGo').click(); // A → B
+      ok('task110: taking a choice enters the detour (B) and its state change applies', s1.story.section === 'B' && s1.g.data.shards === 15, 'sec=' + s1.story.section + ' shards=' + s1.g.data.shards);
+      s1.cont.querySelector('.goto').click(); // <return> → A
+      ok('task110: return restores the previous section (A)', s1.story.section === 'A' && s1.story.book === 1, 'sec=' + s1.story.section + ' book=' + s1.story.book);
+      ok('task110: return preserves A\'s section variable', s1.g.getVar('rolled') === 4, 'rolled=' + s1.g.getVar('rolled'));
+      ok('task110: return preserves A\'s render memo (same ctx object → roll/used-action state)', s1.story.ctx === ctxA);
+      ok('task110: return does NOT repeat A\'s entry gain, and keeps the detour\'s +5 (15 shards)', s1.g.data.shards === 15, 'shards=' + s1.g.data.shards);
+      // Entering A counted turn 1, entering B counted turn 2; the return must add no
+      // third turn and must pop the A→B→A bounce back to an empty trail.
+      ok('task110: return counts no second forward visit and pops the history bounce', s1.g.data.turns === 2 && (s1.g.data.history || []).length === 0, 'turns=' + s1.g.data.turns + ' hist=' + (s1.g.data.history || []).length);
+      const plainBtn = findChoice(s1.cont, 'PlainGo');
+      const revBtn = findChoice(s1.cont, 'RevisitGo');
+      ok('task110: the taken non-revisit source is spent (crossed off) on return', !!plainBtn && plainBtn.disabled === true, 'dis=' + (plainBtn && plainBtn.disabled));
+      ok('task110: an untaken source stays usable on return', !!revBtn && revBtn.disabled === false, 'dis=' + (revBtn && revBtn.disabled));
+
+      // Scenario 2 — leave via the revisit="t" choice: it stays reusable after returning.
+      const s2 = buildReturn();
+      findChoice(s2.cont, 'RevisitGo').click(); // A → B via the revisit action
+      s2.cont.querySelector('.goto').click();    // <return> → A
+      const revBtn2 = findChoice(s2.cont, 'RevisitGo');
+      ok('task110: a taken revisit="t" source stays reusable on return', !!revBtn2 && revBtn2.disabled === false, 'dis=' + (revBtn2 && revBtn2.disabled));
+    }
+
   } catch (e) {
     out.push('FATAL ' + (e.stack || e.message));
     fail++;
