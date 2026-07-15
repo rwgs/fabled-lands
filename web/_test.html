@@ -4678,6 +4678,63 @@ async function run() {
       ok('task112: a curse without lift= stays inert (no Lift… action)', !cInert.querySelector('.chip-action') && gInert.hasCurse('Champion Curse'));
     }
 
+    // --- task 113: <lose item="?" bonus="N"> enforces the bonus= filter ---
+    // §4.456's Tambu offering routes its +2/+3 gifts through <lose item="?" bonus=…
+    // price=…>; the bonus filter must be honoured so only a genuinely +2/+3 item can be
+    // offered, and an ineligible offer must not set the price flag that opens §404/§568.
+    {
+      // a +2 lose takes only the +2 item and arms its price flag
+      const g113 = GameState.create({ name:'T113', gender:'m', profession:'Warrior', book:4, adv });
+      g113.data.items = [];
+      g113.addItem(makeItem('item', 'apple'));                      // +0
+      g113.addItem(makeItem('tool', 'lucky ring', 1, 'charisma'));  // +1
+      g113.addItem(makeItem('weapon', 'fine blade', 2));            // +2 — the only eligible
+      eng.applyEffect(parse('<lose item="?" bonus="2" price="2">a +2 item</lose>'), g113, {});
+      ok('task113: a +2 lose takes only the +2 item, sparing +0/+1',
+         !g113.findItems('fine blade').length && g113.findItems('apple').length === 1 && g113.findItems('lucky ring').length === 1,
+         g113.data.items.map((i)=>i.name).join(','));
+      ok('task113: offering a qualifying +2 item arms the price flag', g113.getFlag('2') === true);
+
+      // no qualifying item → nothing lost, price flag stays clear
+      const g113n = GameState.create({ name:'T113n', gender:'m', profession:'Warrior', book:4, adv });
+      g113n.data.items = [makeItem('item', 'apple'), makeItem('tool', 'lucky ring', 1, 'charisma')]; // +0/+1 only
+      eng.applyEffect(parse('<lose item="?" bonus="2" price="2">a +2 item</lose>'), g113n, {});
+      ok('task113: a +2 lose with no +2 item takes nothing and leaves the flag clear',
+         g113n.itemCount() === 2 && g113n.getFlag('2') !== true, 'n=' + g113n.itemCount() + ' flag=' + g113n.getFlag('2'));
+
+      // "N+" means N or greater
+      const g113h = GameState.create({ name:'T113h', gender:'m', profession:'Warrior', book:4, adv });
+      g113h.data.items = [makeItem('weapon', 'ok blade', 2), makeItem('weapon', 'great blade', 4)];
+      eng.applyEffect(parse('<lose item="?" bonus="3+" price="3">a +3 or greater item</lose>'), g113h, {});
+      ok('task113: a "3+" lose takes a +4 item but spares a +2, and arms flag 3',
+         !g113h.findItems('great blade').length && g113h.findItems('ok blade').length === 1 && g113h.getFlag('3') === true);
+
+      // §4.456 in the app: the +2/+3 offer buttons are inert with no qualifying item
+      const g456c = GameState.create({ name:'T456c', gender:'m', profession:'Warrior', book:4, adv });
+      g456c.data.items = [makeItem('item', 'apple'), makeItem('tool', 'lucky ring', 1, 'charisma')]; // +0/+1 only
+      const c456c = document.createElement('div');
+      new Story(c456c, g456c, { navigate(){}, onDeath(){}, notify(){} }).begin(await data.getSection(4, '456'), 4, '456');
+      const offer2 = Array.from(c456c.querySelectorAll('button')).find((b)=>/a \+2 item/i.test(b.textContent));
+      const offer3 = Array.from(c456c.querySelectorAll('button')).find((b)=>/\+3 or greater/i.test(b.textContent));
+      ok('task113: §456 the +2/+3 offers are inert without a qualifying item',
+         !!offer2 && offer2.disabled && !!offer3 && offer3.disabled,
+         `o2=${offer2 && offer2.disabled} o3=${offer3 && offer3.disabled}`);
+
+      // with a +2 item the +2 offer is live; taking it removes the item, arms flag 2 and reveals →404
+      const g456d = GameState.create({ name:'T456d', gender:'m', profession:'Warrior', book:4, adv });
+      g456d.data.items = [makeItem('weapon', 'fine blade', 2)];
+      const c456d = document.createElement('div');
+      const st456d = new Story(c456d, g456d, { navigate(){}, onDeath(){}, notify(){} });
+      st456d.begin(await data.getSection(4, '456'), 4, '456');
+      const offer2d = Array.from(c456d.querySelectorAll('button')).find((b)=>/a \+2 item/i.test(b.textContent));
+      ok('task113: §456 the +2 offer is enabled with a +2 item', !!offer2d && !offer2d.disabled);
+      offer2d.click();
+      ok('task113: §456 offering the +2 item takes it, arms flag 2 and reveals →404',
+         !g456d.findItems('fine blade').length && g456d.getFlag('2') === true &&
+         Array.from(c456d.querySelectorAll('.goto')).some((b)=>/404/.test(b.textContent)),
+         `has=${g456d.findItems('fine blade').length} flag=${g456d.getFlag('2')}`);
+    }
+
   } catch (e) {
     out.push('FATAL ' + (e.stack || e.message));
     fail++;

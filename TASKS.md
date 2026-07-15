@@ -13,7 +13,7 @@ the tasks were filed, not work order).
 **LOW**
 
 - [x] 112. The Adventure Sheet stores but cannot activate a curse's `lift=` prompt (§5.505)
-- [ ] 113. `<lose item="?" bonus="N">` ignores `bonus=` — §4.456 accepts any item as a +2/+3 offering
+- [x] 113. `<lose item="?" bonus="N">` ignores `bonus=` — §4.456 accepts any item as a +2/+3 offering
 - [ ] 114. Reroll-form storm sections (§232/502/716) never consume the blessing — the rerunnable `keepblessing=1` set resets the guard each render
 
 **Done**
@@ -4162,7 +4162,7 @@ sections.
 
 ---
 
-## 113. `<lose item="?" bonus="N">` ignores `bonus=` — §4.456 accepts any item as a +2/+3 offering — LOW (engine)
+## 113. `<lose item="?" bonus="N">` ignores `bonus=` — §4.456 accepts any item as a +2/+3 offering — **done**
 
 *(Filed 2026-07-14 while completing task 107.)* §4.456's Tambu offering routes its
 +2 and +3 gifts through `<lose item="?" bonus="2" price="2">` / `<lose item="?"

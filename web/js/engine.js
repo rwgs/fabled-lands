@@ -569,49 +569,48 @@ function applyLose(el, state, opts) {
   // book6/230); the death handler consumes a single one separately.
   if (get('resurrection') != null) { if (state.data.resurrections.length) { state.data.resurrections = []; state.changed(); notes.push('lost resurrection'); } }
   if (get('flag') != null) { state.setFlag(get('flag'), false); }
-  if (get('price') != null) { state.setFlag(get('price'), true); }
+  // Whether an item selector on this lose actually gave something up — gates the price
+  // flag below so an ineligible offering can't open its reward. (task 113)
+  let itemTaken = false;
   if (get('item') != null) {
     const pattern = get('item');
-    // Pool + remover: the player's inventory, or a named cache (a villa strongroom)
-    // when cache= is present — a cache theft must never touch carried possessions.
-    const pool = () => (cacheN != null ? state.cacheItems(cacheN) : state.data.items);
+    // Remover: the player's inventory, or a named cache (a villa strongroom) when
+    // cache= is present — a cache theft must never touch carried possessions.
     const removeById = (id) => (cacheN != null ? state.cacheRemoveItem(cacheN, id) : state.removeItemById(id));
     if (pattern === '*') {
       // "Lose all your possessions." chance="x/y" (rare) makes each item's loss
       // probabilistic; a "keep"-tagged item is never taken.
+      const pool = cacheN != null ? state.cacheItems(cacheN) : state.data.items;
       const chance = get('chance');
       const [num, den] = chance && chance.includes('/') ? chance.split('/').map((x) => parseInt(x, 10)) : [1, 1];
       let removed = 0;
-      for (const it of pool().slice()) {
+      for (const it of pool.slice()) {
         if ((it.tags || []).map(normalize).includes('keep')) continue;
         const lose = !chance || (den > 0 && rng() < num / den);
         if (lose) { removeById(it.id); removed++; }
       }
-      if (removed) notes.push(cacheN != null ? 'stash emptied' : 'lost all possessions');
+      if (removed) { itemTaken = true; notes.push(cacheN != null ? 'stash emptied' : 'lost all possessions'); }
     } else {
-      // "?" is the books' wildcard for "any possession" (the §521/§248/§373 thefts);
-      // a real name matches by name/tag. A tags= filter narrows the wildcard to
-      // items carrying every listed tag — awarded/bought items now preserve their
-      // tags (task 18), so e.g. a tag-filtered "?" can target a light source.
-      let matches = pattern === '?' ? pool().slice() : matchItems(pool(), pattern);
-      const tags = get('tags');
-      if (pattern === '?' && tags) {
-        const want = tags.split(/[,|]/).map((t) => normalize(t));
-        matches = matches.filter((it) => want.every((t) => (it.tags || []).map(normalize).includes(t)));
-      }
-      // group= scopes the loss to that award's items: §3.132 crosses off the §3.94
-      // treasure map (not a same-named map from elsewhere), and §5.578's "donate one
-      // of the items you found" is drawn from that mission's three rewards. (task 93)
-      const group = get('group');
-      if (group != null && group !== '') matches = matches.filter((it) => it.group === group);
+      // The eligible pool: name/tag pattern ("?" = any possession, else name/tag), an
+      // optional tags= narrowing, group= provenance and — new for task 113 — a bonus=
+      // filter, so a "+2"/"+3" offering (§4.456 Tambu) only takes a genuinely +2/+3
+      // item and a worthless piece can't be passed off as one.
+      const matches = loseItemMatches(el, state);
       const count = get('multiple') ? resolveValue(state, get('multiple')) : 1;
       let toLose = matches;
       if (matches.length > count) {
         toLose = opts.chooser ? opts.chooser(matches, count, 'lose') : matches.slice(0, count);
       }
       toLose.slice(0, count).forEach((it) => removeById(it.id));
-      if (toLose.length) notes.push('lost item');
+      if (toLose.length) { itemTaken = true; notes.push('lost item'); }
     }
+  }
+  if (get('price') != null) {
+    // The price flag opens this offering's linked reward/outcome. When the lose gives up
+    // an item, arm it only if a qualifying possession was actually taken — so an offering
+    // with nothing eligible (a +0/+1 item presented as a "+2"/"+3") can't open §404/§568.
+    // A price with no item selector arms unconditionally, as before. (task 113)
+    if (get('item') == null || itemTaken) state.setFlag(get('price'), true);
   }
   // <lose itemAt="x"> takes the item at a rolled 1-based position (§6.63 the loser's
   // forfeit, §6.168 the dream-compass swap). The position indexes the selected pool —
@@ -883,6 +882,32 @@ function transferSelector(el, prefix) {
   return { kind, pattern, bonus, tags, group, all: !kind && pattern === '*' };
 }
 
+// Filter a pool by a bonus= spec: "N" keeps items whose bonus is exactly N, "N+"
+// keeps bonus ≥ N (JaFL Item.matchBonus). A null/blank/unparsable spec is a no-op.
+// Shared by every item selector — <transfer>, <set> and <lose> — so an offering's
+// ability-bonus requirement (§4.456 Tambu's +2/+3, §5.152) is enforced identically. (task 113)
+function filterByBonus(pool, bonus) {
+  if (bonus == null) return pool;
+  const m = String(bonus).match(/^(-?\d+)(\+)?$/);
+  if (!m) return pool;
+  const b = parseInt(m[1], 10);
+  return m[2] ? pool.filter((it) => (it.bonus || 0) >= b) : pool.filter((it) => (it.bonus || 0) === b);
+}
+
+// The possessions (or cache items) a `<lose item=…>` would take: name/tag pattern
+// (`?`/blank = any, else pipe-separated names/tags), an optional tags= narrowing,
+// group= provenance and a bonus= filter ("N"/"N+"). The `*` "all possessions" form is
+// handled separately by applyLose (keep/chance rules). Exported so the render layer's
+// offering gate and applyLose share one eligibility test. (task 113)
+export function loseItemMatches(el, state) {
+  const pattern = el.getAttribute('item');
+  if (pattern == null || pattern === '*') return [];
+  const cacheN = el.getAttribute('cache');
+  const pool = cacheN != null ? state.cacheItems(cacheN) : state.data.items;
+  const matches = matchItemQuery(pool, pattern, el.getAttribute('tags'), el.getAttribute('group'));
+  return filterByBonus(matches, el.getAttribute('bonus'));
+}
+
 // Items in `pool` matched by a transfer selector: kind, name (bare "*"/"?"/blank =
 // any; else pipe-separated globs, also matched against item tags), bonus ("N"/"N+"),
 // tags (all listed) and group provenance.
@@ -898,11 +923,7 @@ function transferMatch(pool, sel) {
     items = items.filter((it) => want.every((t) => (it.tags || []).map(normalize).includes(t)));
   }
   if (sel.group != null && sel.group !== '') items = items.filter((it) => it.group === sel.group);
-  if (sel.bonus != null) {
-    const m = String(sel.bonus).match(/^(-?\d+)(\+)?$/);
-    if (m) { const b = parseInt(m[1], 10); items = m[2] ? items.filter((it) => (it.bonus || 0) >= b) : items.filter((it) => (it.bonus || 0) === b); }
-  }
-  return items;
+  return filterByBonus(items, sel.bonus);
 }
 
 // The candidate items a transfer would move FROM its source, after the include
@@ -1066,11 +1087,7 @@ function setSelector(el) {
 function matchesSelectorPool(pool, sel) {
   let items = sel.kind ? pool.filter((it) => it.kind === sel.kind) : pool;
   items = matchItemQuery(items, sel.pattern, sel.tags);
-  if (sel.bonus != null) {
-    const m = String(sel.bonus).match(/^(-?\d+)(\+)?$/);
-    if (m) { const b = parseInt(m[1], 10); items = m[2] ? items.filter((it) => (it.bonus || 0) >= b) : items.filter((it) => (it.bonus || 0) === b); }
-  }
-  return items;
+  return filterByBonus(items, sel.bonus);
 }
 
 // Items matching a set-node selector, drawn from the selected pool (a named cache or the

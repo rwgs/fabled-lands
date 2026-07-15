@@ -10,7 +10,7 @@ import {
   evaluateCondition, applyEffect, applyEffectBody, boolAttr, resolveValue, isDiceExpr,
   rollDifficulty, rollRankCheck, rollTraining, rollDice, matchRange, childAdjustment,
   applyRest, buyResurrectionDeal, reviveWithResurrection, abilityChoiceOptions, readItemEffects,
-  whileLoopDone, filterMatches, transferPlan,
+  whileLoopDone, filterMatches, transferPlan, loseItemMatches,
 } from './engine.js';
 import { makeFight, fightRound, groupFightRound, isDefeated, useWrathBlessing, useDefenceBlessing, rerollAttack } from './combat.js';
 import { shopKind, goodsFrom, ownsGoods, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo, canUpgradeCrew, payChoiceCost } from './market.js';
@@ -1478,8 +1478,16 @@ export class Story {
     const btn = document.createElement('button');
     btn.className = 'btn-mini pay-action' + (done ? ' done' : '');
     btn.textContent = (done ? '☑ ' : '') + (label.textContent.trim() || (cost ? `Pay ${cost} Shards` : 'Confirm'));
+    // A paid offering that gives up an item (§4.456 Tambu's +2/+3 gifts) must be inert
+    // when the player owns nothing that qualifies for its bonus= requirement — else an
+    // ineligible offer would set the price flag and open the reward for free. (task 113)
+    const noEligibleItem = node.tagName.toLowerCase() === 'lose'
+      && node.getAttribute('item') != null && node.getAttribute('item') !== '*'
+      && loseItemMatches(node, this.state).length === 0;
     if (done) {
       btn.disabled = true;
+    } else if (noEligibleItem) {
+      btn.disabled = true; btn.title = 'You have nothing that qualifies for this offering.';
     } else if (this.ownsSoleLinkedBlessing(node, key)) {
       // "You can have only one X blessing at a time" — refuse the re-buy so the
       // Shards aren't spent for a blessing that addBlessing would just dedupe away.
