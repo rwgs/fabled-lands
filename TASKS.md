@@ -7,7 +7,6 @@ the tasks were filed, not work order).
 
 **MEDIUM**
 
-- [ ] 108. `<outcome blessing="…">` ignores Safety from Storms and exposes the capsize/storm redirect
 - [ ] 109. Multi-ability success routing ignores `<success ability="…">` (§2.37 always takes SANCTITY)
 - [ ] 110. `<return>` starts a fresh visit instead of restoring the section at the point it was left
 - [ ] 111. Rolled `itemAt=` losses can remove `keep`-tagged possessions
@@ -16,6 +15,7 @@ the tasks were filed, not work order).
 
 - [ ] 112. The Adventure Sheet stores but cannot activate a curse's `lift=` prompt (§5.505)
 - [ ] 113. `<lose item="?" bonus="N">` ignores `bonus=` — §4.456 accepts any item as a +2/+3 offering
+- [ ] 114. Reroll-form storm sections (§232/502/716) never consume the blessing — the rerunnable `keepblessing=1` set resets the guard each render
 
 **Done**
 
@@ -129,6 +129,7 @@ section below); detail sections remain in filed order, not this order.*
 - [x] 105. `<if ticks="N">` reads the live count — this visit's own `<tick/>` flips the guard on a mid-visit rerender, re-showing the "already ticked → goto" redirect (§1.496)
 - [x] 106. Light mode is force-darkened on Chrome/Edge — Chromium "Auto Dark Theme"; `color-scheme: light` doesn't opt out, needs `only light` *(fixed; leather-chrome-in-both-themes remains an intentional design note)*
 - [x] 107. Visible `<transfer>` actions auto-execute and ignore chooser/filter/price semantics *(fixed; surfaced the §4.456 `<lose bonus>` gap → task 113)*
+- [x] 108. `<outcome blessing="…">` ignores Safety from Storms and exposes the capsize/storm redirect *(fixed; surfaced the reroll-form non-consume → task 114)*
 
 ---
 
@@ -4009,7 +4010,7 @@ the pre-existing `<lose … bonus=>` gap the same section relies on as task 113.
 
 ---
 
-## 108. `<outcome blessing="…">` ignores Safety from Storms and exposes the capsize/storm redirect — MEDIUM (render)
+## 108. `<outcome blessing="…">` ignores Safety from Storms and exposes the capsize/storm redirect — **done**
 
 *(Filed 2026-07-14 from a second full repository review.)* `renderBranch` matches
 outcomes by flag/range/codeword/var, but never reads `blessing=`. All six live
@@ -4032,6 +4033,29 @@ must not count as the roll gate's forced redirect, so the section's explicit
 blessing branch can resolve. Test ordinary and permanent blessings against the
 11–12/6 hazards (including one reroll form), plus the unblessed case where the
 dangerous redirect remains the only result. Web-only; stamp and run all sections.
+
+**Done (2026-07-15).** `renderBranch` now reads `blessing=` on `<outcome>` and on
+`<outcomes>` branches (`blessingVeto`): when the range/var matches but the player
+holds the named blessing (ordinary or the permanent Safety from Storms), the
+branch is skipped — the dangerous redirect is neither revealed nor recorded as the
+roll gate's `matchedOutcome`, so the sibling safe path resolves. The veto consumes
+nothing. A probe first confirmed the port was *also* consuming the blessing on
+entry in §200/250/60 (their `<lose blessing="storm">` is bare, non-hidden prose),
+which would have defeated the veto; so a non-hidden `<lose blessing="X">` that
+guards one of the section's `<outcome blessing="X">` hazards now renders as inert
+words (`isGuardedBlessingLoss`) instead of auto-applying, and the safe `<goto>`
+spends the blessing on click (`blessingSpendForGoto` — the roll gate only leaves
+that goto clickable in the protected state, so the spend matches "lose the blessing
+and turn to N"). The reroll-form sections (§232/502/716) keep their existing
+`keepblessing`-var + hidden-loss mechanism and needed only the veto. New headless
+tests cover §200 (ordinary blessing vetoes →527 and the blessing survives until the
+safe →619 is taken, which then spends it; a permanent blessing vetoes but is never
+used up; unblessed rolls into the storm with →619 suppressed; a 4–10 roll keeps the
+blessing) and §232 (ordinary blessing vetoes the →510 capsize and offers the
+reroll). Probing the reroll form showed it never consumes the blessing (the
+rerunnable `<set keepblessing="1">` resets the guard each render before the hidden
+loss reads it) — filed as task 114, since consuming is out of scope here.
+`RESULT ALL PASS pass=1040 fail=0`.
 
 ---
 
@@ -4147,6 +4171,37 @@ qualifies the loss (and its price flag) must not fire, so an ineligible offering
 cannot open §404/§568. Add a headless test that a +2 `<lose item="?" bonus="2">`
 skips a +0/+1 item and takes only a +2, and that §4.456's +2/+3 offer buttons are
 inert with no qualifying item. Web-only; stamp and run all sections.
+
+---
+
+## 114. Reroll-form storm sections never consume the blessing — the rerunnable `keepblessing=1` set resets the guard each render — LOW (render/engine)
+
+*(Filed 2026-07-15 while completing task 108, and confirmed by probe.)* §232/502/716
+avoid a storm/capsize on an 11–12/6 roll by spending Safety from Storms, but unlike
+§200/250/60 they express the spend with a `keepblessing` variable and a hidden
+`<lose blessing="storm" hidden="t">` gated on `<if not="t" var="keepblessing"
+equals="1">`. On entry `<set var="keepblessing" value="1" hidden="t"/>` marks the
+blessing "kept"; the safe branch sets it to `0` and offers a `<reroll>`. The intent
+is that, once `keepblessing=0`, the hidden loss fires and the blessing is spent, so
+only one reroll's worth of protection is granted.
+
+The absolute `<set keepblessing value="1">` is *rerunnable* (task 46/61 semantics:
+a modifier-less `<set value=>` re-applies on every render). It sits above the
+hidden loss in document order, so each render resets `keepblessing` to `1` before
+the `<if not keepblessing==1>` guard reads it — the hidden loss therefore never
+fires. A probe confirmed that after rolling 11–12, rerolling, and rolling 11–12
+again, `hasBlessing('storm')` is still `true` (with `keepblessing=0`). Task 108's
+new veto exposes this: the player now gets *unlimited* storm protection in these
+three sections (before the veto they simply capsized, so the reroll branch's spend
+was never the operative path).
+
+Make the reroll-form spend actually consume the blessing exactly once per storm
+avoided — e.g. freeze/one-shot the entry `<set keepblessing="1">` so the mid-section
+`<set keepblessing="0">` survives to the render that fires the hidden loss (mirror
+task 61's rolled-var freeze), or drive the loss from the reroll action directly.
+Add a headless test: §232 with an ordinary storm blessing, roll 11–12 → reroll →
+the blessing is gone and a second 11–12 capsizes (→510), while a permanent blessing
+survives. Web-only; stamp and run all sections.
 
 ---
 

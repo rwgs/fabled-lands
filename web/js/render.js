@@ -158,6 +158,7 @@ export class Story {
     this.onRender = opts.onRender || (() => {}); // called after each (re)render
     this.ctx = null;
     this.sectionEl = null;
+    this.outcomeBlessings = new Set(); // blessing-guarded outcomes this section (task 108)
     this.sectionTodock = null;  // current section's todock= (task 81)
     this._sailExempt = null;    // ship id exempted from todock on a sail exit (task 81)
     // <while> loop iteration state (task 100), live only while renderWhile is walking
@@ -290,6 +291,14 @@ export class Story {
     // navs. Reset per render.
     this.transferGate = this.computeTransferGate(el);
     this.pendingTransfer = false;
+    // Blessing-guarded storm/capsize outcomes (task 108): the blessings named on this
+    // section's <outcome blessing="X"> hazards. A held blessing vetoes that outcome
+    // (renderBranch), and a non-hidden sibling <lose blessing="X"> is the deferred
+    // "spend to avoid it" step (renderPassive/renderGoto), not an on-entry loss.
+    this.outcomeBlessings = new Set(
+      Array.from(el.querySelectorAll('outcome[blessing]'))
+        .map((o) => normalize(o.getAttribute('blessing'))).filter((b) => b && b !== '*' && b !== '?'),
+    );
     this.sectionFight = null; // aggregate proxy for the section's fight(s) (set in renderFight)
     this.sectionFights = []; // every sequential (non-group) fight drawn this pass, in order (task 45)
     this.renderedGroups = new Set(); // group= ids already drawn this pass (task 26)
@@ -1001,6 +1010,17 @@ export class Story {
         this.appendChildren(span, node, path);
         if (span.textContent.trim()) container.appendChild(span);
       }
+      return null;
+    }
+
+    // A guarded storm-blessing loss (§200/250/60) is the deferred "spend to avoid
+    // the storm" step, not an on-entry loss: render its words, but let the safe goto
+    // spend the blessing on click (renderGoto/blessingSpendForGoto). (task 108)
+    if (tag === 'lose' && this.isGuardedBlessingLoss(node)) {
+      const span = document.createElement('span');
+      span.className = 'fx';
+      this.appendChildren(span, node, path);
+      if (span.textContent.trim()) container.appendChild(span);
       return null;
     }
 
@@ -1800,8 +1820,12 @@ export class Story {
     const fg = this.flagGate(node); // price/flag "pay to spin" exit gate (task 30)
     if (fg) { link.disabled = true; link.classList.add('gated'); link.title = fg; }
 
+    // The storm-safe goto (§200/250/60) spends the guarded Safety from Storms on the
+    // way out — the roll gate only leaves it clickable in the protected state. (task 108)
+    const spendBlessing = this.blessingSpendForGoto(node);
     link.addEventListener('click', () => {
       if (!bookAvailable) { this.notify(`“${bookTitle(targetBook)}” (Book ${targetBook}) isn’t included in this edition.`, 'warn'); return; }
+      if (spendBlessing && this.state.hasBlessing(spendBlessing)) this.state.useBlessing(spendBlessing);
       // A sail goto puts a ship "at large" before leaving; prompt when more than one
       // ship is at this dock, else sail the single one. (task 73)
       if (isSail) { this.sailThenGo(container, link, targetBook, section); return; }
@@ -2431,6 +2455,47 @@ export class Story {
     return !!roll;
   }
 
+  // Does a held blessing veto this <outcome>/<success>/<failure>? (task 108) — the
+  // node names a single blessing the player currently holds (ordinary or the
+  // permanent Safety from Storms). Not consumed here; the sibling branch owns that.
+  blessingVeto(node) {
+    const b = node.getAttribute('blessing');
+    if (b == null || b === '' || b === '*' || b === '?') return false;
+    return this.state.hasBlessing(b);
+  }
+
+  // A non-hidden <lose blessing="X"> whose blessing guards one of this section's
+  // <outcome blessing="X"> hazards (task 108). §200/250/60 write it as bare prose
+  // ("…lose the blessing and turn to N"); it must NOT auto-consume on entry — the
+  // spend happens when the player takes the safe goto (see renderGoto). It renders
+  // as inert words. §232/502/716 instead hide the loss behind a keepblessing var,
+  // so those (hidden) forms keep their normal var-gated behaviour.
+  isGuardedBlessingLoss(node) {
+    if (node.tagName.toLowerCase() !== 'lose') return false;
+    if (boolAttr(node.getAttribute('hidden'))) return false;
+    const b = node.getAttribute('blessing');
+    if (b == null || b === '' || b === '*' || b === '?') return false;
+    return this.outcomeBlessings.has(normalize(b));
+  }
+
+  // The blessing a safe-path <goto> should spend on click (task 108): a non-hidden
+  // guarded <lose blessing="X"> that precedes this goto in the section, when the
+  // player still holds X. The roll gate only leaves this goto clickable in the
+  // protected-hazard (vetoed) state, so spending X there matches the source's
+  // "lose the blessing and turn to N".
+  blessingSpendForGoto(node) {
+    if (!this.outcomeBlessings || !this.outcomeBlessings.size || !this.sectionEl) return null;
+    const loses = Array.from(this.sectionEl.querySelectorAll('lose[blessing]'));
+    for (const l of loses) {
+      if (boolAttr(l.getAttribute('hidden'))) continue;
+      if (!this.outcomeBlessings.has(normalize(l.getAttribute('blessing')))) continue;
+      if (!(l.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING)) continue;
+      const b = l.getAttribute('blessing');
+      if (this.state.hasBlessing(b)) return b;
+    }
+    return null;
+  }
+
   renderBranch(container, node, path, activeRoll) {
     const tag = node.tagName.toLowerCase();
     const roll = activeRoll ? this.ctx.rolls.get('roll@' + activeRoll.path) : null;
@@ -2454,6 +2519,11 @@ export class Story {
       else if (node.getAttribute('codeword')) match = node.getAttribute('codeword').split(/[|,]/).some((w) => this.state.hasCodeword(w.trim()));
       else if (node.hasAttribute('var')) match = this.branchSuccess(node, roll);
       else match = true;
+      // A held blessing vetoes a blessing-guarded outcome (task 108): the range
+      // matched, but Safety from Storms carries the traveller past the storm, so the
+      // dangerous redirect is not offered. The blessing is spent on the section's
+      // sibling branch, not here, so nothing is consumed.
+      if (match && this.blessingVeto(node)) return;
       if (match) this.revealBranch(container, node, path);
       return;
     }
@@ -2482,6 +2552,11 @@ export class Story {
           else if (cw) match = cw.split(/[|,]/).some((w) => this.state.hasCodeword(w.trim()));
           else match = true; // default
         }
+        // A held blessing vetoes this branch (task 108): skip it so neither the
+        // dangerous redirect is revealed nor the roll gate's matchedOutcome is set —
+        // the section's sibling <lose blessing>/reroll path then resolves. Ranges are
+        // exclusive, so no other branch fills in (the traveller is protected).
+        if (match && this.blessingVeto(c)) continue;
         if (match) {
           // Record the matched outcome for the roll gate: if it carries its own
           // redirect (a "get lost" <goto>), applyRollGate keeps the onward choices

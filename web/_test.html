@@ -4405,6 +4405,91 @@ async function run() {
          `items=${JSON.stringify(gkeep.data.items.map((i)=>i.name))}`);
     }
 
+    // --- task 108: <outcome blessing="…"> veto — Safety from Storms carries the
+    // protected traveller past the storm/capsize redirect ---
+    {
+      window.__FL_INSTANT_DICE__ = true;
+      const settle108 = () => new Promise((r) => setTimeout(r, 30));
+      const rnd108 = Math.random;
+      const cont527 = (c) => Array.from(c.querySelectorAll('.goto')).find((b) => /→\s*527/.test(b.textContent));
+      const goto619 = (c) => Array.from(c.querySelectorAll('.goto')).find((b) => b.textContent.trim() === '619');
+
+      // §200, ordinary storm blessing, roll 11-12: the storm outcome (→527) is vetoed,
+      // the blessing is NOT consumed on entry or by the veto, and the safe →619 unlocks.
+      const g200 = GameState.create({ name:'T200', gender:'m', profession:'Warrior', book:5, adv });
+      g200.addBlessing('storm');
+      let nav200 = null;
+      const c200 = document.createElement('div');
+      const st200 = new Story(c200, g200, { navigate(b,s){ nav200 = { b, s }; }, onDeath(){}, notify(){} });
+      st200.begin(await data.getSection(5,'200'), 5, '200');
+      ok('task108: §200 keeps the storm blessing on entry (not auto-consumed)', g200.hasBlessing('storm'));
+      Math.random = () => 0.9; // 6+6 = 12 → range 11-12
+      c200.querySelector('.btn-roll').click(); await settle108();
+      ok('task108: §200 a held blessing vetoes the →527 storm redirect', !cont527(c200));
+      ok('task108: §200 the safe →619 unlocks (roll gate sees no forced redirect)',
+         !!goto619(c200) && !goto619(c200).disabled);
+      ok('task108: §200 the blessing survives until the safe path is taken', g200.hasBlessing('storm'));
+      goto619(c200).click();
+      ok('task108: §200 taking the safe goto spends the blessing and turns to 619',
+         nav200 && String(nav200.s) === '619' && !g200.hasBlessing('storm'),
+         `nav=${JSON.stringify(nav200)} storm=${g200.hasBlessing('storm')}`);
+
+      // §200, permanent storm blessing: vetoed the same way, but never used up (task 90).
+      const g200p = GameState.create({ name:'T200p', gender:'m', profession:'Warrior', book:5, adv });
+      g200p.addBlessing('storm', true);
+      let nav200p = null;
+      const c200p = document.createElement('div');
+      const st200p = new Story(c200p, g200p, { navigate(b,s){ nav200p = { b, s }; }, onDeath(){}, notify(){} });
+      st200p.begin(await data.getSection(5,'200'), 5, '200');
+      Math.random = () => 0.9;
+      c200p.querySelector('.btn-roll').click(); await settle108();
+      ok('task108: §200 a permanent blessing also vetoes the storm', !cont527(c200p) && !!goto619(c200p) && !goto619(c200p).disabled);
+      goto619(c200p).click();
+      ok('task108: §200 the permanent blessing is not used up by the safe passage',
+         nav200p && String(nav200p.s) === '619' && g200p.hasBlessing('storm') && g200p.isBlessingPermanent('storm'));
+
+      // §200 unblessed: the storm redirect is the only result, and →619 stays suppressed.
+      const g200u = GameState.create({ name:'T200u', gender:'m', profession:'Warrior', book:5, adv });
+      const c200u = document.createElement('div');
+      const st200u = new Story(c200u, g200u, { navigate(){}, onDeath(){}, notify(){} });
+      st200u.begin(await data.getSection(5,'200'), 5, '200');
+      Math.random = () => 0.9;
+      c200u.querySelector('.btn-roll').click(); await settle108();
+      ok('task108: §200 unblessed rolls 11-12 into the storm (→527 revealed)', !!cont527(c200u));
+      ok('task108: §200 unblessed keeps the safe sibling →619 suppressed',
+         !goto619(c200u) || goto619(c200u).disabled);
+
+      // §200 blessed but rolls 4-10: plain sailing, blessing untouched, no storm.
+      const g200s = GameState.create({ name:'T200s', gender:'m', profession:'Warrior', book:5, adv });
+      g200s.addBlessing('storm');
+      const c200s = document.createElement('div');
+      const st200s = new Story(c200s, g200s, { navigate(){}, onDeath(){}, notify(){} });
+      st200s.begin(await data.getSection(5,'200'), 5, '200');
+      Math.random = () => 0.5; // 4+4 = 8 → range 4-10 (plain sailing → 619)
+      c200s.querySelector('.btn-roll').click(); await settle108();
+      ok('task108: §200 a safe (4-10) roll keeps the blessing and shows no storm',
+         g200s.hasBlessing('storm') && !cont527(c200s)
+         && Array.from(c200s.querySelectorAll('.goto')).some((b) => /→\s*619/.test(b.textContent)));
+
+      // §232 reroll form, storm blessing, roll 11-12: the capsize (→510) is vetoed and a
+      // reroll is offered (its keepblessing var owns the eventual spend).
+      const g232 = GameState.create({ name:'T232', gender:'m', profession:'Warrior', book:5, adv });
+      g232.data.shards = 100; g232.addBlessing('storm');
+      const c232 = document.createElement('div');
+      const st232 = new Story(c232, g232, { navigate(){}, onDeath(){}, notify(){} });
+      st232.begin(await data.getSection(5,'232'), 5, '232');
+      ok('task232: §232 keeps the storm blessing on entry (keepblessing var)', g232.hasBlessing('storm'));
+      Math.random = () => 0.9; // 12 → range 11-12
+      c232.querySelector('.btn-roll').click(); await settle108();
+      ok('task108: §232 a held blessing vetoes the →510 capsize',
+         !Array.from(c232.querySelectorAll('.goto')).some((b) => /→\s*510/.test(b.textContent)));
+      ok('task108: §232 offers the reroll (safe path) instead',
+         Array.from(c232.querySelectorAll('.btn-secondary')).some((b) => /roll again|reroll/i.test(b.textContent)));
+
+      Math.random = rnd108;
+      window.__FL_INSTANT_DICE__ = false;
+    }
+
   } catch (e) {
     out.push('FATAL ' + (e.stack || e.message));
     fail++;
