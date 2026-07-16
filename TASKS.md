@@ -7,18 +7,38 @@ the tasks were filed, not work order).
 
 **HIGH**
 
+- [ ] 122. Roll-less `<outcome codeword=…>` decision tables never resolve — eight sections render as dead ends
+- [ ] 123. "Immunity to Disease and Poison" is stored under two un-aliased names — the blessing never protects
+- [ ] 124. Loading/importing a save clamps Stamina to the written max — aura Stamina (ring of ultimate power) is silently stripped
 - [ ] 115. Adventure-Sheet item detours bypass `Story.navigate`, so `<return>` still re-enters the source section
 - [ ] 116. Save/load restarts the current visit — effects can repeat and rolls/return state disappear
 - [ ] 117. Priced equipment/cargo losses can arm their reward without taking the required payment
+- [ ] 125. Flag-linked item rewards outside choose-one menus are free, and paying can never grant them
+- [ ] 126. A collapsed `<group>` action never executes its `<buy>` children — §5.192's ship and §4.622's cargo are unobtainable
+- [ ] 127. Abbreviated cargo names (`grai`, `meta`, …) are never canonicalised — the trans-book trading economy is broken
+- [ ] 128. A bare `ability=` disjunct on `<if>` is always true — §5.680 gives away the ring of ultimate power
 
 **MEDIUM**
 
 - [ ] 118. Choice/equipment losses can remove `keep`-tagged possessions
-- [ ] 119. Re-establish the rules/view boundary and split the 4,060-line renderer by responsibility
+- [ ] 129. Free fixed-amount `<rest stamina="N">` is infinitely repeatable — every hospitality rest heals to full
+- [ ] 130. Inline `<buy>` allows one purchase per visit; JaFL's default is unlimited ("buy as many as you can afford")
+- [ ] 131. Cache `max=` semantics: `max="0"` must bar deposits (§4.263 money-doubling), and item caches must store Shards (§6.512)
+- [ ] 132. `<if blessing="?">` never matches — §5.365's chapel stacks blessings
+- [ ] 133. Adventure-Sheet mutations (drop/lift) leave the story pane stale — item-gated choices stay live after the item is gone
 - [ ] 121. The documented `powershell` build command no longer parses `build-data.ps1` on Windows PowerShell 5.1
+- [ ] 119. Re-establish the rules/view boundary and split the 4,060-line renderer by responsibility
 
 **LOW**
 
+- [ ] 134. Market sells with several candidates silently take the first match — JaFL asks which ship/item to sell
+- [ ] 135. Renouncing a god keeps that god's resurrection deal
+- [ ] 136. Engine grab-bag #2: `transfer tenth=`, named-cargo loss quantity, `effect description=`, `<set>` identifier edges, `<buy force="t">`
+- [ ] 137. A save blob can persist without its `fl_meta` entry — the orphaned slot turns invisible and gets overwritten
+- [ ] 138. Offline navigations with a query string bypass the service-worker cache
+- [ ] 139. The Adventure Sheet never shows foreign-currency balances
+- [ ] 140. Docs/CI accuracy: AGENTS.md's smoke-test URL 404s and the CI grep misses `RESULT FATAL`
+- [ ] 141. Archive completed task details out of TASKS.md
 - [ ] 120. Split the 4,790-line single-scope browser test into focused ES-module suites
 
 **Done**
@@ -4254,6 +4274,19 @@ item detour: return restores the exact source visit, does not repeat its entry
 effect/tick or add a forward visit, and marks the source action consistently with
 task 110. Web-only; stamp and run all sections.
 
+*Correction (2026-07-16 fourth review):* the dominant failure mode is worse than
+the fresh-visit fallback described above. `begin()` (render.js:218-278) never
+clears `_returnFrame`, and only `goBack()` consumes it (render.js:1950-1958) — so
+after arriving at the source section via a normal choice, the detour destination
+holds a **stale** frame and its `<return>` restores the section *before* the
+source, with the wrong position/vars, while `restoreReturn` (state.js:852-860)
+pops the source off history leaving a duplicate top. The null-frame fallback only
+occurs when the item is used right after a load. The fix (single entry point)
+cures both modes, but the test must assert against the stale-frame mode too. The
+sweep must also cover `app.js:649` (death → resurrection navigation), another raw
+caller that skips leave hooks and leaves a stale frame; the fresh-start/load
+callers at app.js:58/613/619/622 are safe (frame is null there).
+
 ---
 
 ## 116. Save/load restarts the current visit — effects can repeat and rolls/return state disappear — HIGH (state/app/render)
@@ -4318,6 +4351,13 @@ headless. Test both live sections with no eligible payment, wrong cargo, multipl
 equipment choices, and a successful payment/reward. Web-only; stamp and run all
 sections.
 
+*Scope note (2026-07-16 fourth review):* the shared plan has one more consumer —
+`renderPayment` (render.js:1452-1482), the forced economic payment with a decline
+path. Its only ownership guard today is the Shards balance: a forced, unpriced
+`<lose item=/cargo=/ship=>` payment with the possession absent still renders an
+enabled Pay button, and clicking it memoizes `pay@` and unblocks the section
+having taken nothing. Route its eligibility and commit through the same matcher.
+
 ---
 
 ## 118. Choice/equipment losses can remove `keep`-tagged possessions — MEDIUM (engine/render)
@@ -4374,6 +4414,11 @@ the rule modules, the all-section suite stays green after each extraction, and n
 single replacement file simply inherits the same god-object role. Web-only;
 stamp and run all sections.
 
+*Trap (2026-07-16 fourth review):* `build/stamp-version.ps1:32` collects
+`web/js/*.js` **non-recursively**. If the split puts modules in a subdirectory,
+they silently drop out of the version hash (stale PWA caches on deploy) — extend
+the stamp collector alongside the sw.js precache list and README table.
+
 ---
 
 ## 120. Split the 4,790-line single-scope browser test into focused ES-module suites — LOW (tests)
@@ -4394,6 +4439,13 @@ framework. Preserve the fatal bootstrap handler, deterministic RNG controls,
 `RESULT ALL PASS`/`TESTS_OK` contract, fresh-profile compatibility, and the final
 render of all six books. Document the suite map next to the README test command.
 Web-only; stamp and run the aggregate and at least one focused suite.
+
+*Harness gaps to close in the same rework (2026-07-16 fourth review):* (a) there
+is no `unhandledrejection` handler — a rejected un-awaited promise in exercised
+app code fails nothing; (b) a mid-run async `window.error` fires the task-82
+bootstrap handler and writes `RESULT FATAL`, but `run()`'s unconditional final
+report (_test.html:4786-4788) then **overwrites** it — potentially as `ALL PASS`.
+Make the fatal state sticky and fail the aggregate on any captured async error.
 
 ---
 
@@ -4418,6 +4470,502 @@ encoding cannot silently regress. Do not merely change the docs to require an
 undeclared tool. Build-only; confirm XML validation, generated output and stamp,
 then run all sections.
 
+*Rescope (2026-07-16 fourth review, verified by live runs):* (a)
+`stamp-version.ps1` already parses **and runs** under 5.1 — only
+`build-data.ps1`'s two em dashes (lines 48/162) need the punctuation fix. (b)
+Parsing is not sufficient: the **outputs are engine-dependent**. `Sort-Object
+FullName` (stamp-version.ps1:48) is culture-aware — .NET Framework (NLS) and
+.NET Core (ICU) order the hyphenated asset names differently, so 5.1 produced
+stamp `e9c6e17` from the identical content that pwsh 7 stamps `ca63008`; and
+`ConvertTo-Json` escaping differences reformat all six book JSONs wholesale
+under 5.1. Either make the outputs engine-invariant (ordinal sorts, stable JSON
+escaping) or make an explicit decision to require pwsh 7 and update README,
+AGENTS.md and CI to match — full 5.1 output parity is substantially more work
+than the punctuation fix. Any added verification step must pin the engine it
+runs under, or it will "verify" engine-dependent output.
+
+---
+
+## 122. Roll-less `<outcome codeword=…>` decision tables never resolve — eight sections render as dead ends — HIGH (render)
+
+*(Filed 2026-07-16 from a fourth full repository review; verified live in the
+running app.)* `branchResolved` (render.js:2563-2566) returns `!!roll` for any
+branch without a `var=` attribute, and both branch renderers gate on it before
+ever reaching the codeword test: the `<outcomes>` loop at render.js:2666 and the
+lone-outcome path at render.js:2641 (whose codeword check at :2643 is therefore
+unreachable without a roll). But the books use `<outcome codeword=…>` as a
+roll-less dispatch idiom — "Which of these codewords do you have?" with a bare
+`<outcome section=…>None of them</outcome>` default. With no `<random>` in the
+section, `activeRoll` stays null (render.js:307, only set at :512-514), so **no
+row reveals — including the default**, and the app's no-navigation fallback
+renders the "Your tale ends here — accept your fate ▸" death button (confirmed
+headlessly at `?demo=4.2`: prose plus the fate button, zero links).
+
+Live sections: §2.12, §2.68, §2.301, §4.2, §4.132, §4.184, §5.303 (tables;
+§4.184 has *no* default row), and §4.457 (lone `<outcome codeword="4.457">`
+inside `<choices>` — not a softlock, but the Initiate route never shows). §4.2
+and §4.132 are book 4 hub dispatches; §5.303 is the Hall of Heroes parlour;
+§2.301/§4.457 key on a *box codeword* ticked `hidden="t"` earlier in the same
+visit (the entry tick renders before the table, so same-visit writes must be
+visible to the match).
+
+Fix in `branchResolved`/`renderBranch`: a `codeword=`-keyed branch (like a
+`flag=` one, task 113's §4.456 precedent) needs no roll — evaluate it against
+live codewords; a bare default `<outcome>` in a table whose every keyed sibling
+is roll-less must also resolve without a roll, while roll-fed tables keep
+waiting. Test §4.2 (no codewords → default reveals §97; with Defend → §57),
+§4.184 (either codeword reveals; nothing else), §2.301 (initiate tick this visit
+→ §269), and §4.457 (Initiate row only for Tambu initiates), plus a regression
+that rolled tables still wait. Web-only; stamp and run all sections.
+
+---
+
+## 123. "Immunity to Disease and Poison" is stored under two un-aliased names — the blessing never protects — HIGH (state/engine)
+
+*(Filed 2026-07-16 from a fourth full repository review.)* It is one blessing in
+the books ("Immunity to Disease and Poison") but the XML grants it under two
+spellings, and the engine treats them as unrelated: `BLESSING_ALIASES`
+(state.js:19) maps only `storms → storm`, and `hasBlessing` (state.js:630) does
+literal canon-name matching. JaFL's `Blessing.getBlessing()` maps any type
+containing "disease" **or** "poison" to the same `DISEASE_TYPE`.
+
+Corpus: granted as `blessing="poison"` at §2.133 (`<tick blessing="poison"
+flag="x">Immunity to Disease and Poison</tick>`) and as `blessing="disease"` in
+9 places (§1.481, §2.402, …); tested/spent under the *other* name throughout —
+`<if blessing="poison">` ×15 (§2.377, §2.430, §3.162, §6.191, …) with paired
+`<lose blessing="poison">` ×17, and `<if blessing="disease">` ×8 / `<lose>` ×9.
+A player holding the §2.133 blessing gets no protection at any disease check
+(and vice versa): the death/damage branch fires while the sheet still shows the
+blessing.
+
+Fix: alias `poison` and `disease` to one canonical name in `BLESSING_ALIASES`
+(mirroring the storm/storms precedent), and sanitize existing saves so a stored
+blessing under either name survives as the canonical one. Test: grant under
+"poison", check `<if blessing="disease">` passes and `<lose blessing="disease">`
+consumes it (and the reverse); confirm §5.365's storm/disease/injury menu still
+grants three distinct blessings. Web-only; stamp and run all sections.
+
+---
+
+## 124. Loading/importing a save clamps Stamina to the written max — aura Stamina is silently stripped — HIGH (state)
+
+*(Filed 2026-07-16 from a fourth full repository review; reproduced headlessly.)*
+`sanitizeData` clamps `out.stamina` with `max: out.staminaMax`
+(state.js:1017-1018) — the *written* maximum, not `effectiveStaminaMax()`
+(state.js:221), which adds aura Stamina. The ring of ultimate power (§5.564,
+`<effect type="aura" ability="Stamina" bonus="10">`) legitimately lets
+`healStamina` (state.js:518-521) fill to staminaMax+10, but `migrate()` runs
+`sanitizeData` on **every** `GameState.load` (state.js:889-899) and on import —
+so a ring-holder saved at 30/20 reloads at 20/20. Repro confirmed in Node: the
+ring's effects round-trip intact while `stamina` drops from 30 to 20. The
+service worker's `controllerchange → location.reload()` (app.js:116-123) even
+triggers it with no player action after a deploy.
+
+Fix: clamp against `staminaMax` plus the summed aura-Stamina of the sanitized
+items (or defer the clamp to a post-construction reconcile pass that can use
+`effectiveStaminaMax()`), keeping the conservative floor for hand-edited
+imports. Test a save/load round trip at 30/20 with the ring (survives), the same
+save without the ring (clamps to 20 — reconcileEquipment's drop rule, task 44),
+and an import of both. Web-only; stamp and run all sections.
+
+---
+
+## 125. Flag-linked item rewards outside choose-one menus are free, and paying can never grant them — HIGH (render/engine)
+
+*(Filed 2026-07-16 from a fourth full repository review; follow-up to tasks 43/63
+and sibling of open task 117's cost side.)* `renderItemAward` honours a `flag=`
+only when `isChooseOne(flag)` says the flag feeds a choose-one menu
+(render.js:2022-2023); a **single** flag-linked reward falls through to the
+ordinary always-enabled Take button, the flag dropped. The payment side cannot
+compensate: `renderOptionalPay`'s click applies linked rewards via
+`applyEffect` (render.js:1520-1524), but `EFFECT_APPLIERS` (engine.js:406-418)
+has **no entry for `item`/`weapon`/`armour`/`tool`** — an item reward is a
+silent no-op there.
+
+Live: §3.346 — pay `<lose item="pirate captain's head" price="x">` (or witch's
+hand) for `<item name="200 Shards" flag="x"/>`; the Take button is live with no
+payment, and since `begin()` resets flags and the `take@` memo is per-visit,
+looping the §44 hub makes it a **repeatable free 200 Shards**, while clicking a
+cost button destroys the trophy and grants nothing. §1.342/§4.111 — the potion
+of restoration (`<item … flag="x">` behind a `<group>` of `<lose shards="250"
+price=""/>` + `<lose item="ink sac" price="x"/>`) is free to take while merely
+*holding* the ingredients, and paying yields nothing. (§4.634's Take-button
+status quo is documented under task 63 — supersede it here.)
+
+Fix: gate every flag-linked award on its flag (armed → live, taken → consumed),
+not only choose-one menus, and give the item family a real applier (reuse the
+award transaction `grantItemNode` uses, capacity-checked) so payment-side
+rewards land. Test §3.346: no trophy → Take disabled; pay head → medallion
+granted once, not repeatable on re-entry; and §1.342: potion only after the
+group payment. Web-only; stamp and run all sections.
+
+---
+
+## 126. A collapsed `<group>` action never executes its `<buy>` children — §5.192's ship and §4.622's cargo are unobtainable — HIGH (render)
+
+*(Filed 2026-07-16 from a fourth full repository review; follow-up to tasks 96/
+107/61.)* `renderGroup` collects a collapsed group's click effects with
+`querySelectorAll('lose, tick, gain, set, curse, transfer')` plus item-family
+awards and `<rest>` (render.js:912-922) — `<buy>`/`<sell>` are in neither list,
+and a collapsed group renders only its label, so the trade never runs. JaFL's
+`BuyNode` is an `Executable` that runs with its group (`TradeNode.java:248`,
+with a `GroupNode` special case at :403).
+
+Live: §5.192 — `<group><text>50 Shards</text><buy ship="brig" name="Wrath of
+God" shards="50" initialCrew="none" quantity="1"/><lose item="deed to the Wrath
+of God"/></group>`: clicking destroys the deed, charges nothing, and **the ship
+is never added** — permanently unobtainable. §4.622 (×3) — `<group><text>Metals
+</text><buy cargo="metals" quantity="1" shards="0" force="t"/><tick
+codeword="4.622.1"/></group>`: the codeword hides the option forever, the free
+salvage Cargo Unit never loads.
+
+Fix: include `buy`/`sell` in the group's executable collection, routing them
+through the same `buyTrade`/inline-buy transaction as standalone rows (price
+charged from the group click, ship-here/cargo-space checks enforced, `force=`
+and `quantity=` honoured). Test §5.192 (deed + 50 Shards → ship exists, docked
+here, crew poor) and §4.622 (click Metals → cargo aboard + codeword ticked).
+Web-only; stamp and run all sections.
+
+---
+
+## 127. Abbreviated cargo names are never canonicalised — the trans-book trading economy is broken — HIGH (market/engine/rules)
+
+*(Filed 2026-07-16 from a fourth full repository review.)* Three whole markets
+sell cargo under abbreviated names — §4.252 and §5.145/§5.225 use `grai`,
+`meta`, `mine`, `spic`, `text`, `timb`, `slav` — and §5.447 sells `mineral`
+(vs `minerals` everywhere else). The port stores the raw attribute on the
+manifest (`buyTrade`, market.js:101) and matches exactly everywhere:
+`ownsGoods`/`sellTrade`/`sellCargo` via `Array.includes` (market.js:73/126/217)
+and `matchCargo` via normalized equality (engine.js:377-383). JaFL's
+`Ship.getCargo` matches by **prefix** and stores a canonical enum.
+
+Consequence: cargo bought at those ports can never be sold at any full-name
+market and vice versa; §5.447's units are unsellable anywhere; `<if cargo=>` /
+`<lose cargo=>` full-name checks miss the abbreviated units; the manifest
+displays raw `meta`. The buy-low/sell-high shipping loop between books is dead
+through those ports.
+
+Fix: one canonical cargo list (rules.js, mirroring `SHIP_TYPE_ALIASES`, task 24)
+with prefix matching applied at every entry point — trade-row parsing, manifest
+writes, `matchCargo`, and ship-loss/transfer paths — plus a save sanitize that
+canonicalises already-stored names. Test: buy `meta` at §4.252, sell `metals` at
+a full-name port; `<if cargo="minerals">` sees a §5.447 unit; round-trip a save
+holding `grai`. Web-only; stamp and run all sections.
+
+---
+
+## 128. A bare `ability=` disjunct on `<if>` is always true — §5.680 gives away the ring of ultimate power — HIGH (engine)
+
+*(Filed 2026-07-16 from a fourth full repository review.)* `evaluateCondition`
+ORs its recognized attributes (engine.js:191-192), and the `ability=` condition
+with no `equals/greaterthan/lessthan` comparator defaults to `v > 0`
+(engine.js:250) — always true, since abilities floor at 1. In JaFL an ability
+condition without a comparator never matches, and in `<if tool="…" ability="…"
+bonus="…">` the ability/bonus attributes belong to the *item pattern* (a
+MAGIC+6 tool), not a standalone test (`IfNode.java:110`, :335-339).
+
+The only live no-comparator ability `<if>` is the one that matters most:
+§5.680's `<if tool="hyperium wand" ability="magic" bonus="6">…<goto
+section="564"/></if>` — the always-true ability disjunct forces the branch open
+with no wand, §5.564's `<lose item="hyperium wand"/>` removes nothing, and
+Targdaz forges the ring of ultimate power (+2 Rank, +10 Stamina auras, task 44):
+the entire Akatsurai tomb quest is skippable and the game's best item free.
+
+Fix: a no-comparator `ability=` condition must not match (mirror JaFL), and when
+an equipment selector (`tool=`/`weapon=`/`armour=`) is present, fold `ability=`/
+`bonus=` into that selector's pattern instead of treating them as disjuncts
+(`matchEquipment` already receives the element — engine.js:252-254). Test §5.680
+with no wand (branch inert, "If not" live), with a plain hyperium wand vs the
+MAGIC+6 one if distinguishable, and a regression that comparator forms
+(`<if ability="rank" greaterthan=…>`, task 68) still work. Web-only; stamp and
+run all sections.
+
+---
+
+## 129. Free fixed-amount `<rest stamina="N">` is infinitely repeatable — every hospitality rest heals to full — MEDIUM (render/engine)
+
+*(Filed 2026-07-16 from a fourth full repository review.)* `renderRest`
+(render.js:3706-3728) keeps the button clickable until Stamina is full, with no
+per-visit memo. JaFL's `RestNode` defaults `useOnce = (shards == 0)`: an
+**unpriced** rest may be used once per visit; only priced rests (pay per day)
+repeat. The corpus never sets `once=`, so the Java default is the operative rule
+everywhere.
+
+Live: §2.61 ("you are allowed to stay **one night**", `stamina="2"`), §1.518
+(+3), §1.614 (+5), §2.385/§2.519/§2.662/§3.153 (+1), §2.481/§2.677/§3.150
+(`1d`), §2.739 (`2d`), §3.314's per-day `<rest stamina="1">` — all currently
+click-to-full free heals.
+
+Fix: memoize an unpriced rest per visit (`rest@path` in ctx, like other one-shot
+actions); priced rests and the no-`stamina=` heal-to-full form (task 31) keep
+their current behaviour. Test: §2.61 heals 2 once then disables until re-entry;
+a priced rest still repeats; `<rest/>` still fills. Web-only; stamp and run all
+sections.
+
+---
+
+## 130. Inline `<buy>` allows one purchase per visit; JaFL's default is unlimited — MEDIUM (render)
+
+*(Filed 2026-07-16 from a fourth full repository review; adjusts a task-23
+default.)* `renderInlineBuy` defaults `quantity` to 1 (render.js:3576); JaFL's
+default is −1 = infinite (`TradeNode.java:319`; spec: quantity = "the number of
+times this action may be used", absent ⇒ no limit). Task 23 chose 1 "so a buy
+can no longer repeat forever", but three sections sell in bulk by prose:
+§1.342 and §5.639 ("You can buy as many as you can afford — each one costs 50
+Shards", six potions each) and §5.447 ("It costs you 350 … for every such Cargo
+Unit"). Players must leave and re-enter per unit today.
+
+Fix: default inline `<buy>` to unlimited-per-visit (disabled only by funds/
+capacity), honouring an explicit `quantity=` as the cap — matching the reference
+and the prose — and keep the §4.658-style `quantity="1"` rows one-shot. Test
+§1.342: buy the same potion twice in one visit while affordable; §4.658's
+barque still buys once. Web-only; stamp and run all sections.
+
+---
+
+## 131. Cache `max=` semantics: `max="0"` must bar deposits, and item caches must store Shards — MEDIUM (render)
+
+*(Filed 2026-07-16 from a fourth full repository review; follow-ups to tasks
+20/38.)* Two `max=` divergences from the spec ("Use '0' to bar money from this
+cache"; "an `<itemcache>` may contain both" items and money — JaFL `CacheNode`
+uses −1 as its no-limit default and renders a Shards field on item caches):
+
+- `renderMoneyCache` treats `max="0"` as *no cap* (`if (max > 0)` —
+  render.js:3764). §4.263's arena Winnings cache (`<moneycache name="4.127"
+  text="Winnings" max="0"/>`) therefore accepts fresh deposits at the result
+  section, and its sibling `<adjustmoney name="4.127" multiply="2">` becomes a
+  repeatable **money-doubling exploit**: deposit anything, double it, withdraw.
+  With `max="0"` honoured, only the bet locked in at §4.127 is doubled.
+- `renderItemCache` (render.js:3793-3882) ignores `max=` entirely and offers no
+  money controls, so §6.512's lacquer cabinet ("store up to 5000 Shards and six
+  possessions", `<itemcache … itemlimit="6" max="5000"/>`) cannot hold Shards.
+
+Fix: parse `max` with 0 = barred / absent = unlimited in both cache widgets, and
+add deposit/withdraw money controls (capped by `max=`) to item caches. Test
+§4.263: deposit refused, the ×2 still applies to the §4.127 bet; §6.512: deposit
+5000 accepted, 5001st refused, items still capped at 6. Web-only; stamp and run
+all sections.
+
+---
+
+## 132. `<if blessing="?">` never matches — §5.365's chapel stacks blessings — MEDIUM (engine/state)
+
+*(Filed 2026-07-16 from a fourth full repository review.)* `evaluateCondition`
+delegates to `state.hasBlessing('?')` (engine.js:229), which looks for a
+blessing literally named "?" (state.js:630) — always false. JaFL maps `"?"` to
+`MATCHANY_TYPE` (any blessing held). The only live use is §5.365: `<if
+blessing="?">If you already have a blessing of any sort, he cannot give you
+another.</if><else>…choose storm/disease/injury…</else>` — the `<else>` always
+renders, so a player already blessed takes another, violating "only one blessing
+at a time" (and, with task 123 unfixed, can hold several spellings at once).
+
+Fix: special-case `"?"` (and `"*"` for symmetry with the item matcher) in
+`hasBlessing` or at the condition site: any stored blessing matches. Test §5.365
+blessed (menu blocked) and unblessed (menu live); `<lose blessing="?">`'s
+existing chooser behaviour unchanged. Web-only; stamp and run all sections.
+
+---
+
+## 133. Adventure-Sheet mutations leave the story pane stale — item-gated choices stay live after the item is gone — MEDIUM (app/render/market)
+
+*(Filed 2026-07-16 from a fourth full repository review.)* Choice gating is
+render-time only: eligibility (incl. `hasItemMatch`) is computed when the choice
+renders (render.js:2219), and the click handler's `payChoiceCost`
+(market.js:198-203) never re-validates — a missing item is silently skipped
+(`if (it) state.removeItemById(…)`) and navigation proceeds; `adjustMoney`
+floors at 0 likewise. Sheet-initiated mutations only refresh the sheet:
+`state.onChange` (app.js:522) never rerenders the story, and the Drop handler
+(ui.js:163-168) and curse-lift (ui.js:240-263, task 112) mutate state directly —
+unlike `onUseItem` (app.js:553-564), which already calls `story.rerender()`.
+
+Repro: enter a section with `<choice item="X" pay="t">` (task 55's §2.400 green
+gem / §6.740 rope) holding X; Drop X from the sheet; the choice is still
+enabled — click it and cross for free. Curse-lift similarly leaves
+`<if curse=>`-gated content stale on screen.
+
+Fix (both belts): make `payChoiceCost` return success and block navigation when
+the cost cannot be taken in full, and rerender the story after sheet-initiated
+mutations (drop/move/lift) the way `onUseItem` does. Test: drop-then-click pays
+nothing and refuses; the rerendered choice greys out; lifting a curse reveals
+its gated content without re-entering. Web-only; stamp and run all sections.
+
+---
+
+## 134. Market sells with several candidates silently take the first match — LOW (market)
+
+*(Filed 2026-07-16 from a fourth full repository review.)* `sellTrade` picks the
+first ship of the type (market.js:122 — a **cargo-laden** ship can be sold,
+destroying its cargo, while an empty same-type ship sits in the same berth), and
+generic weapon/armour/item rows pick the first bonus/name match
+(market.js:131/137). JaFL prompts ("You have multiple ships of this type.
+Select one…", "Please select which one you want to sell") whenever matches are
+non-identical. Any generic `<weapon bonus="1" sell=…>` row (e.g. §1.215) with a
+mixed inventory, or any ship sale with two same-type ships, can take the wrong
+possession irrevocably.
+
+Fix: when candidates are non-identical, surface the same chooser UI the loss
+path uses (tasks 93/107; open 117/118 build the shared matcher — reuse its
+candidate enumeration), preferring cargo-empty ships and unnamed duplicates as
+the no-prompt fast path. Headless callers keep first-match determinism via an
+explicit chooser callback. Test: two brigantines (one laden) — sell offers a
+choice / defaults to the empty one headlessly; two bonus-1 weapons — the named
+one survives unless chosen. Web-only; stamp and run all sections.
+
+---
+
+## 135. Renouncing a god keeps that god's resurrection deal — LOW (state/engine)
+
+*(Filed 2026-07-16 from a fourth full repository review.)* `removeGod`
+(state.js:730-738) strips god-sourced effects but leaves `data.resurrections`
+untouched; JaFL's `removeAGod` cancels resurrections tied to the god, and a deal
+bought while *not* a worshipper is stored god-less (`Adventurer.java:518-534`,
+:833-843 — the port stores `god` unconditionally, engine.js:1333-1336). Seven
+live god-linked deals (§1.33/§1.478/§1.599 Tyrnai/Nagil, §2.41/§2.204/§2.316,
+§4.268); renounce paths: `<lose god=>` (engine.js:567) and `special="godless"`
+(§6.118, engine.js:809-811). A renouncer keeps a free extra life the rules
+forfeit.
+
+Fix: cancel resurrections whose `god` matches on renounce (both paths), and only
+stamp `god` on a deal when the buyer worships that god at purchase time. Test:
+buy the Tyrnai deal as a worshipper, renounce → deal gone; buy it godless →
+renouncing anything leaves it. Web-only; stamp and run all sections.
+
+---
+
+## 136. Engine grab-bag #2: five small reference divergences — LOW (engine/render)
+
+*(Filed 2026-07-16 from a fourth full repository review; precedent task 36.)*
+Each verified against code, corpus and the Java reference; none shares a fix
+seam with the others, all are a few lines:
+
+1. **`<transfer shards="tenth">` hardcodes floor(purse/10)** (engine.js:972),
+   shadowing §6.496's own `<set var="tenth" value="(shards+9)/10"/>` (rounded
+   *up*). JaFL has no `tenth` keyword — delete the special case and let the var
+   resolve; the tithe stops under-paying by 1 on non-multiples of 10.
+2. **Named `<lose cargo="grain">` removes one unit; JaFL removes every unit** of
+   the commodity (`LoseNode.java:600`). §5.634's salvage ("they are lost")
+   leaves extras aboard. Remove-all for plain named losses only — §3.569's
+   priced one-for-one exchange (open task 117) must stay single-unit.
+3. **`<effect description="+5 Stamina">` is dropped** — `readItemEffects`
+   (engine.js:1195-1216) reads only `text=`; §5.638 is the sole `description=`
+   corpus-wide. Accept it as a `text=` fallback so the sheet shows the effect.
+4. **`<set>` identifier edges**: `value="rank"` ignores `modifier="natural"`
+   (engine.js:1275 always returns `rankValue()` incl. the ring's +2 aura) and
+   the keyword shadows a same-named var — §2.270-style book 2 ceremonies
+   (`<set var="rank" value="rank" modifier="natural"/>` then `lessthan="rank"`)
+   misjudge ring-holders; and a **cursed** ability read under
+   `modifier="natural"/"affected"` returns the `CURSED_ABILITY` −1000 sentinel
+   (state.js:302-303) where JaFL's value-purpose read returns 0 — §6.332's
+   `value="12-charisma"` would yield 1012 under a CHARISMA curse. Resolve
+   value-context reads like JaFL (natural honours the modifier; cursed → 0).
+5. **`<buy force="t">` is not forced** — §4.658's free barque ("Note it on your
+   Adventure Sheet", the section's only ship) renders as an optional button a
+   player can walk past; JaFL blocks onward execution while an enabled forced
+   buy is pending. Gate the section's onward goto until the forced buy runs
+   (the task-104 gate pattern).
+
+Test each with a focused headless assertion (§6.496 tithe of 995 → 100; §5.634
+with 2 grain → 0 left; §5.638 effect text visible; §2.270 with +2 aura ring —
+natural rank compared; §6.332 under a charisma curse → 12−0; §4.658 goto gated
+until the barque is taken). Web-only; stamp and run all sections.
+
+---
+
+## 137. A save blob can persist without its `fl_meta` entry — the orphaned slot turns invisible and gets overwritten — LOW (state/app)
+
+*(Filed 2026-07-16 from a fourth full repository review; the seam tasks 4/7
+missed.)* `save()` writes `fl_save_<slot>` then `fl_meta` (state.js:866-887); if
+the meta write throws (quota reached between the writes) the blob **is**
+persisted while `nextFreeSlot()` (state.js:1247-1251), the title screen's
+`hasSaves` (app.js:167-168) and the save list consult only `fl_meta` — the
+adventurer vanishes from "Your Adventurers" and the next New Adventure or import
+claims the slot and silently overwrites it. `loadSlotMeta` also degrades corrupt
+meta JSON to `{}` wholesale, orphaning every slot at once; and `readSlotData`
+(state.js:1216-1219) has no try/catch, so exporting a corrupt-but-present slot
+throws uncaught from the click handler.
+
+Fix: make `nextFreeSlot` (and the overwrite confirm) probe
+`localStorage.getItem(SAVE_PREFIX + i)` as well as meta; on load, rebuild
+missing meta entries from readable blobs; guard `readSlotData`. Test: delete the
+meta entry for an occupied slot → the slot still lists (reconstructed) and is
+not offered as free; corrupt blob → export fails with the task-7 toast, no
+throw. Web-only; stamp and run all sections.
+
+---
+
+## 138. Offline navigations with a query string bypass the service-worker cache — LOW (sw)
+
+*(Filed 2026-07-16 from a fourth full repository review.)* The fetch handler
+uses `caches.match(req)` with no `ignoreSearch` (sw.js:99); the precache stores
+`./` and `./index.html` without queries, so an offline navigation to
+`./?demo=1.10` or `./?seed=42` (both documented hooks — README's deep-link
+section) misses, `fetch` rejects, and the `.catch(() => cached)` fallback
+(sw.js:107) returns `undefined` → a network-error page instead of the cached
+shell. Installed launches (`start_url: "./"`) are unaffected.
+
+Fix: for navigation requests, fall back to `caches.match(req, { ignoreSearch:
+true })` (or explicitly to `./index.html`). Test in the harness by faking a
+query-string navigation against the cache contract, and manually: install,
+offline, open `?seed=1`. Web-only; stamp and run all sections.
+
+---
+
+## 139. The Adventure Sheet never shows foreign-currency balances — LOW (ui)
+
+*(Filed 2026-07-16 from a fourth full repository review; completes task 40.)*
+`renderSheet` (ui.js:79-228) shows Shards only; `state.data.currencies`
+round-trips saves (state.js:1075-1076) but surfaces nowhere outside a
+same-currency market/choice widget. Sell a boar's tusk for 15 Mithral at §2.495
+and the wealth is invisible until the player happens into another Mithral
+widget (§2.545 toll) — a paper-sheet player would have it written down.
+
+Fix: list non-zero foreign balances under the Shards line (name + amount, same
+styling as ability rows). Test: adjustCurrency('Mithral', 15) → sheet shows
+"Mithral 15"; zero balances hidden. Web-only; stamp and run all sections.
+
+---
+
+## 140. Docs/CI accuracy: AGENTS.md's smoke-test URL 404s and the CI grep misses `RESULT FATAL` — LOW (docs/ci)
+
+*(Filed 2026-07-16 from a fourth full repository review.)* Two verified
+discrepancies that mislead exactly when something is failing:
+
+- AGENTS.md says "serve from the repo root" then drives Chrome at
+  `http://localhost:8848/_test.html` — a 404 from a root-rooted server (the file
+  is at `/web/_test.html`), producing the "no RESULT line" symptom the same doc
+  then misattributes to "server/Chrome never loaded the page". CI (smoke.yml:38)
+  uses the correct `/web/_test.html`. README's Testing section is internally
+  consistent (serve `web/` itself) but disagrees with AGENTS.md's serving
+  directory — align both on one recipe (serve repo root, test at
+  `/web/_test.html`) and fix the misattribution note.
+- smoke.yml:41 greps `RESULT (ALL PASS|FAILURES) …` — the task-82 bootstrap's
+  `RESULT FATAL pass=0 fail=1` line (_test.html:17) is unmatched, so a module
+  parse failure prints CI's "(no RESULT line — the suite did not run)": the
+  precise misleading diagnosis task 82 was built to eliminate (the job still
+  fails, via the ALL PASS check). One-line pattern fix; add a FATAL branch with
+  its own message.
+
+Docs/CI-only; no stamp needed; run the suite once to confirm the documented
+commands work as written. *(Related but filed separately: task 121 owns the
+`powershell` vs `pwsh` build-command question — keep the two consistent.)*
+
+---
+
+## 141. Archive completed task details out of TASKS.md — LOW (process)
+
+*(Filed 2026-07-16 from a fourth full repository review.)* TASKS.md is ~290KB /
+4,500+ lines and ~88% of it is detail sections for the 100+ **done** tasks; the
+workflow makes every agent read the file each task, and new open details land
+thousands of lines deep. Move the done detail sections verbatim to
+`TASKS-archive.md`, keyed by the same stable task numbers; keep in TASKS.md the
+header, the full checklist (open **and** done lines unchanged — they are the
+stable IDs commit messages reference), the open-task detail sections, the Review
+log, and a one-line pointer to the archive. Invariants: task numbering stays
+stable, new filings still append to TASKS.md, the Review log stays in the main
+file, and a moved section is never edited in transit (pure cut-and-paste).
+Docs-only; no build or test impact; verify by grepping a sample of done task
+numbers in both files (checklist line in TASKS.md, detail in the archive).
+
 ---
 
 ## Review log
@@ -4425,6 +4973,51 @@ then run all sections.
 *Running audit log of the backlog — each pass re-verifies the open items against
 the current code and records what was filed, split, or re-confirmed. Task
 numbers refer to the contents checklist at the top of the file.*
+
+Reviewed 2026-07-16 (fourth full pass): started clean at `b012eff` (no code
+changes since the third pass — this pass was an independent re-audit with fresh
+eyes: six parallel subsystem sweeps over engine/render/state/app/combat/market/
+corpus/build, each finding verified against code, live XML, the JaFL reference
+and TASKS.md before filing; the sweep was interrupted mid-run by an org spend
+limit and resumed, so its coverage is recorded per area below). All seven open
+premises re-verified: **115** confirmed but corrected (the live failure mode is
+a *stale* return frame, not the fresh-visit fallback; the death→resurrection
+path at app.js:649 added to the sweep), **116/117/118/119/120** confirmed as
+filed (scope notes added: 117 gains the forced-payment seam, 119 the
+non-recursive stamp collector trap, 120 two async-error harness gaps), and
+**121** confirmed by live repro but rescoped — stamp-version.ps1 already runs
+under 5.1, and the real blocker is engine-dependent output (culture-aware
+`Sort-Object` changed the stamp hash; `ConvertTo-Json` escaping reformats the
+book JSONs), so 5.1 parity is more than the punctuation fix. Filed tasks
+**122–141**: roll-less `<outcome codeword=>` tables dead-end eight sections —
+confirmed live at `?demo=4.2`, which renders the accept-your-fate button (122);
+the disease/poison blessing's two un-aliased names (123); load/import stripping
+aura Stamina (124); ungated flag-linked item rewards — §3.346's repeatable free
+200 Shards (125); collapsed groups dropping `<buy>` — §5.192's Wrath of God
+unobtainable (126); un-canonicalised abbreviated cargo names breaking the
+shipping economy (127); §5.680's always-true bare-ability disjunct handing out
+the ring of ultimate power (128); repeatable free fixed rests (129); inline-buy
+quantity default (130); cache `max=` semantics incl. §4.263's money-doubling
+(131); `<if blessing="?">` (132); stale story pane after sheet mutations (133);
+market-sell first-match (134); renounce keeping god-tied resurrections (135); an
+engine grab-bag — `tenth`, cargo-loss quantity, `description=`, `<set>`
+identifier edges, `<buy force>` (136); save/meta orphan slots (137); offline
+query-string navigations (138); foreign currencies missing from the sheet (139);
+AGENTS.md's 404 test URL + CI's unrecognised `RESULT FATAL` (140); and archiving
+done details out of this file (141). A fresh strict corpus pass re-confirmed
+**4,369 sections, 0 parse errors, 0 name mismatches, 0 dangling Book 1–6
+targets** (11 sections with no inbound markup link are inherited data quirks,
+e.g. book4/69's own text says so). Checked and deliberately **not** filed:
+market-level `buy=/sell="f"` column flags are ignored but harmless (no
+opposite-side prices exist in any of the 9 affected markets); `inferDice`'s
+1-die inference is correct for the corpus's only all-≤6 table (book3/411); the
+six non-storm `<reroll>`s carry no effect children; `<outcomes var="z">`
+(book6/731) works because every child repeats the `var=`; `<goto visit="t">`
+(§4.231) is a spec'd no-op; `<trade name=>` ship rows and `header type="ships"`
+are handled/display-only; task 30's documented repeat-outcome limitation was
+re-examined (§5.674's pay-per-attempt cure is its worst live case) and left as
+documented. Suite green at the reviewed tree, fresh profile:
+`RESULT ALL PASS pass=1076 fail=0`.
 
 Reviewed 2026-07-15 (third full pass): started clean at `37f2b2d`, moved the
 completed 110–114 entries into **Done**, and audited app/state/engine/render/
