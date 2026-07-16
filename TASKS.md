@@ -7,7 +7,7 @@ the tasks were filed, not work order).
 
 **HIGH**
 
-- [ ] 123. "Immunity to Disease and Poison" is stored under two un-aliased names — the blessing never protects
+- [x] 123. "Immunity to Disease and Poison" is stored under two un-aliased names — the blessing never protects
 - [ ] 124. Loading/importing a save clamps Stamina to the written max — aura Stamina (ring of ultimate power) is silently stripped
 - [ ] 120. Split the 4,790-line single-scope browser test into focused ES-module suites *(before the test-heavy 115–117 chain)*
 - [ ] 115. Adventure-Sheet item detours bypass `Story.navigate`, so `<return>` still re-enters the source section

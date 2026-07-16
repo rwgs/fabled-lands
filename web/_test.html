@@ -1829,6 +1829,35 @@ async function run() {
     ok('§T76 the THIEVERY blessing is consumed by the reroll (Luck kept)', !gdr76.hasBlessing('thievery') && gdr76.hasBlessing('luck'));
     ok('§T76 the reroll now succeeds and offers no further reroll', !cdr76.querySelector('.blessing-reroll') && /Success/.test(cdr76.textContent));
 
+    // --- task 123: "Immunity to Disease and Poison" is one blessing under two spellings ---
+    // The XML grants it as blessing="poison" (§2.133) and blessing="disease" (9 places),
+    // and tests/spends it under either spelling. Alias them to one canonical blessing so a
+    // grant in one spelling satisfies an <if>/<lose> in the other (like storm/storms).
+    const gdp = GameState.create({ name:'DP', gender:'m', profession:'Warrior', book:2, adv });
+    gdp.data.blessings = []; gdp.data.permanentBlessings = [];
+    eng.applyEffect(parse('<tick blessing="poison">Immunity to Disease and Poison</tick>'), gdp, {}); // §2.133 spelling
+    ok('§123 a "poison" grant is a single blessing', gdp.data.blessings.length === 1);
+    ok('§123 a "poison" grant satisfies <if blessing="disease">', eng.evaluateCondition(parse('<if blessing="disease"/>'), gdp));
+    eng.applyEffect(parse('<lose blessing="disease">used up</lose>'), gdp, {}); // §2.402 spelling
+    ok('§123 <lose blessing="disease"> consumes the "poison" grant', !gdp.hasBlessing('poison') && gdp.data.blessings.length === 0);
+    // …and the reverse: grant under "disease", check/spend under "poison".
+    eng.applyEffect(parse('<gain blessing="disease"/>'), gdp, {});
+    ok('§123 a "disease" grant satisfies <if blessing="poison">', eng.evaluateCondition(parse('<if blessing="poison"/>'), gdp));
+    eng.applyEffect(parse('<lose blessing="poison">cross it off</lose>'), gdp, {}); // §2.377 spelling
+    ok('§123 <lose blessing="poison"> consumes the "disease" grant', !gdp.hasBlessing('disease') && gdp.data.blessings.length === 0);
+    // Migration: a legacy save that stored either spelling survives as the one canonical
+    // blessing, and a save that held both spellings collapses to one (no duplicate).
+    const migdp = sanitizeData({ abilities:{combat:5}, stamina:9, blessings:['poison'] });
+    ok('§123 migrate: stored "poison" canonicalises to one blessing', migdp.blessings.length === 1 && migdp.blessings[0] === 'disease');
+    const migdp2 = sanitizeData({ abilities:{combat:5}, stamina:9, blessings:['disease','poison'] });
+    ok('§123 migrate: both spellings collapse to a single blessing', migdp2.blessings.length === 1 && migdp2.blessings[0] === 'disease');
+    // §5.365's chapel menu offers storm/disease/injury — still three DISTINCT blessings
+    // (the alias must merge only poison↔disease, not fold in the menu's other options).
+    const gch = GameState.create({ name:'CH', gender:'m', profession:'Warrior', book:5, adv });
+    gch.data.blessings = []; gch.data.permanentBlessings = [];
+    gch.addBlessing('storm'); gch.addBlessing('disease'); gch.addBlessing('injury');
+    ok('§5.365 storm/disease/injury remain three distinct blessings', gch.data.blessings.length === 3);
+
     // --- task 74: standalone force="f" effects are opt-in, not auto-applied ----------
     // book1/25: an optional mission codeword is a button; NOT recorded on entry.
     const g25 = GameState.create({ name:'M25', gender:'m', profession:'Warrior', book:1, adv });

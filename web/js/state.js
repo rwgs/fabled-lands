@@ -13,10 +13,15 @@ const SCHEMA = 3;
 const CURSED_ABILITY = -1000;
 
 // Some books spell the sea-safety blessing "storms" (book 1) and others "storm"
-// (books 2–6); they are the same blessing. Canonicalise so a grant in one book
-// satisfies an <if blessing="…"> check in another and the "only one at a time"
-// rule holds across the whole campaign. Match is case-insensitive.
-const BLESSING_ALIASES = { storms: 'storm' };
+// (books 2–6); they are the same blessing. The single "Immunity to Disease and
+// Poison" blessing is likewise granted as both blessing="disease" (9 places) and
+// blessing="poison" (§2.133), and each spelling is tested/spent under the other
+// throughout — JaFL folds any type containing "disease" or "poison" into one
+// DISEASE_TYPE. Canonicalise so a grant in one spelling satisfies an
+// <if blessing="…"> check (and its paired <lose>) in the other, and the "only one
+// blessing at a time" rule holds across the whole campaign. Match is
+// case-insensitive. (storm/storms: task 76; disease/poison: task 123)
+const BLESSING_ALIASES = { storms: 'storm', poison: 'disease' };
 function canonBlessing(b) {
   const k = String(b).trim().toLowerCase();
   return BLESSING_ALIASES[k] || k;
@@ -1030,7 +1035,10 @@ export function sanitizeData(raw) {
     if (o.pattern) rec.pattern = asStr(o.pattern); // patterned title format (task 75)
     return rec;
   }).filter(Boolean);
-  out.blessings = asArr(d.blessings).filter((b) => typeof b === 'string');
+  // Canonicalise + de-dupe stored blessings so a legacy save that wrote an alias
+  // spelling (storms, or a disease/poison grant under the other name) survives as
+  // the one canonical blessing rather than two — mirrors permanentBlessings below. (task 123)
+  out.blessings = [...new Set(asArr(d.blessings).filter((b) => typeof b === 'string').map((b) => canonBlessing(b)))];
   // Permanent-blessing markers (task 76): keep only string names that name a held
   // blessing, canonicalised and de-duplicated. Absent in legacy string-only saves ⇒ [].
   out.permanentBlessings = [...new Set(asArr(d.permanentBlessings)
