@@ -1288,6 +1288,30 @@ async function run() {
     ok('§564 dropping the ring restores Rank and the Stamina total', g564.rankValue() === baseRank44 && g564.effectiveStaminaMax() === baseMax44, `rank=${g564.rankValue()} max=${g564.effectiveStaminaMax()}`);
     ok('§564 dropping the ring re-clamps current Stamina to the restored max', g564.data.stamina === baseMax44, `stam=${g564.data.stamina} max=${baseMax44}`);
 
+    // --- task 124: load/import must not strip aura Stamina (ring of ultimate power) ---
+    // A save at 30/20 held by a ring-holder is legitimate (§5.564's +10 aura). sanitizeData
+    // (run on every load, import and SW-triggered reload) previously clamped current Stamina
+    // to the *written* max (20), silently stripping the aura Stamina. It must clamp to the
+    // effective ceiling: preserve the aura value, still floor a hand-edited over-max import.
+    const ring124 = { id:'ring124', kind:'item', name:'ring of ultimate power', bonus:0, ability:null, tags:[], effects:[{ type:'aura', ability:'Stamina', bonus:10, text:'+10 Stamina' }], group:null, wielded:false, worn:false };
+    const withRing124 = { schema:3, abilities:{ combat:5 }, staminaMax:20, stamina:30, items:[ring124], book:5, section:'564' };
+    const g124 = new GameState(sanitizeData(JSON.parse(JSON.stringify(withRing124))));
+    ok('§124 load keeps aura-raised Stamina (30/20 with the ring)', g124.data.stamina === 30, `stam=${g124.data.stamina}`);
+    ok('§124 the ring survives the round trip', g124.auraBonus('stamina') === 10 && g124.effectiveStaminaMax() === 30, `aura=${g124.auraBonus('stamina')} max=${g124.effectiveStaminaMax()}`);
+    // The same save without the ring clamps back to the written max (task 44 drop rule).
+    const g124b = new GameState(sanitizeData(JSON.parse(JSON.stringify({ ...withRing124, items: [] }))));
+    ok('§124 load without the ring clamps 30 → 20', g124b.data.stamina === 20, `stam=${g124b.data.stamina}`);
+    // A hand-edited import above even the effective ceiling is still floored.
+    const g124c = new GameState(sanitizeData(JSON.parse(JSON.stringify({ ...withRing124, stamina: 999 }))));
+    ok('§124 a 999 hand-edited value is floored to the effective ceiling (30)', g124c.data.stamina === 30, `stam=${g124c.data.stamina}`);
+    // The import path (importSave → migrate → sanitizeData) preserves it too.
+    if (nextFreeSlot() != null) {
+      const { slot: impSlot124 } = importSave(JSON.parse(JSON.stringify(withRing124)));
+      const loaded124 = GameState.load(impSlot124);
+      ok('§124 importSave + reload preserves the aura-raised Stamina', !!loaded124 && loaded124.data.stamina === 30, `stam=${loaded124 && loaded124.data.stamina}`);
+      deleteSlot(impSlot124);
+    } else ok('§124 importSave slot unavailable (skipped import round trip)', true);
+
     // --- task 36: grab-bag (godless clears god; difficultyCurse one-die; useCache Defence) ---
     const gGL = GameState.create({ name:'GL', gender:'m', profession:'Warrior', book:6, adv });
     gGL.setGod('Nagil');

@@ -39,6 +39,31 @@ function sameDock(a, b) {
   return na === nb;
 }
 
+// Summed passive-effect bonus for an ability across an items array (pure). A
+// type="aura" effect counts while carried; type="wielded" only while the item is
+// the wielded weapon / worn armour; ability="*" boosts every core ability. Shared
+// by GameState.auraBonus and the load-time Stamina reconcile. (task 41/44/124)
+function sumAuraBonus(items, key) {
+  const k = String(key || '').toLowerCase();
+  let sum = 0;
+  for (const it of (items || [])) {
+    for (const e of (it.effects || [])) {
+      const passive = e.type === 'aura' || (e.type === 'wielded' && (it.wielded || it.worn));
+      if (!passive) continue;
+      const ea = String(e.ability || '').toLowerCase();
+      if (ea === k || (ea === '*' && ABILITIES.includes(k))) sum += (e.bonus || 0);
+    }
+  }
+  return sum;
+}
+// Summed Stamina-total modifier (≤0) from affliction lists (pure). Shared by
+// GameState.afflictionStaminaMod and the load-time Stamina reconcile. (task 60/124)
+function sumAfflictionStamina(lists) {
+  let sum = 0;
+  for (const list of lists) for (const a of (list || [])) for (const e of (a.effects || [])) if (e.ability === 'stamina') sum += (e.bonus || 0);
+  return sum;
+}
+
 function freshData() {
   return {
     schema: SCHEMA,
@@ -212,11 +237,7 @@ export class GameState {
   /** Stamina-total change from active afflictions (≤0): book5/306's poison cuts
    *  the total by 6 until cured. Reversible — folded into effectiveStaminaMax(). */
   afflictionStaminaMod() {
-    let sum = 0;
-    for (const list of [this.data.curses, this.data.diseases, this.data.poisons]) {
-      for (const a of (list || [])) for (const e of (a.effects || [])) if (e.ability === 'stamina') sum += (e.bonus || 0);
-    }
-    return sum;
+    return sumAfflictionStamina([this.data.curses, this.data.diseases, this.data.poisons]);
   }
 
   /** The Stamina maximum the player currently has, after any affliction cut and any
@@ -233,19 +254,7 @@ export class GameState {
    *  counts while the item is carried; `type="wielded"` only while it is the
    *  wielded weapon / worn armour. `ability="*"` boosts every core ability. Used for
    *  the elemental swords (+2 to an ability), the rings, and the Jade Defender. */
-  auraBonus(key) {
-    const k = String(key || '').toLowerCase();
-    let sum = 0;
-    for (const it of this.data.items) {
-      for (const e of (it.effects || [])) {
-        const passive = e.type === 'aura' || (e.type === 'wielded' && (it.wielded || it.worn));
-        if (!passive) continue;
-        const ea = String(e.ability || '').toLowerCase();
-        if (ea === k || (ea === '*' && ABILITIES.includes(k))) sum += (e.bonus || 0);
-      }
-    }
-    return sum;
-  }
+  auraBonus(key) { return sumAuraBonus(this.data.items, key); }
 
   /** A drunk potion's temporary +N to an ability (task 41). Section-scoped — cleared
    *  on entering a new section (Story.begin), matching JaFL's "for that one roll or
@@ -1020,7 +1029,11 @@ export function sanitizeData(raw) {
   for (const ab of ABILITIES) out.abilities[ab] = clampAbility(asNum(d.abilities && d.abilities[ab], 4, { int: true }));
 
   out.staminaMax = asNum(d.staminaMax, base.staminaMax, { min: 1, int: true });
-  out.stamina = asNum(d.stamina, out.staminaMax, { min: 0, max: out.staminaMax, int: true });
+  // Clamp to the *effective* ceiling (written max + item-aura Stamina − affliction cut),
+  // computed from the sanitized items/afflictions below — never the written max alone.
+  // The ring of ultimate power (§5.564) raises current Stamina to staminaMax+10; clamping
+  // to staminaMax here silently stripped that on every load/import/SW reload. (task 124)
+  out.stamina = asNum(d.stamina, out.staminaMax, { min: 0, int: true });
   out.rank = asNum(d.rank, base.rank, { min: 1, int: true });
   out.shards = asNum(d.shards, 0, { min: 0, int: true });
 
@@ -1047,6 +1060,13 @@ export function sanitizeData(raw) {
   out.curses = asArr(d.curses).map((a) => sanitizeAffliction(a, 'curse')).filter(Boolean);
   out.diseases = asArr(d.diseases).map((a) => sanitizeAffliction(a, 'disease')).filter(Boolean);
   out.poisons = asArr(d.poisons).map((a) => sanitizeAffliction(a, 'poison')).filter(Boolean);
+
+  // Now that items and afflictions are sanitized, clamp current Stamina to the
+  // effective ceiling — mirrors GameState.effectiveStaminaMax / reconcileEquipment
+  // so an aura-raised save (ring +10) is preserved while a hand-edited over-max
+  // value is still floored to what the character could legitimately hold. (task 124)
+  const staminaCeiling = Math.max(1, out.staminaMax + sumAfflictionStamina([out.curses, out.diseases, out.poisons]) + sumAuraBonus(out.items, 'stamina'));
+  if (out.stamina > staminaCeiling) out.stamina = staminaCeiling;
 
   out.codewords = {};
   for (const [k, v] of Object.entries(asObj(d.codewords))) if (v) out.codewords[k] = true;
