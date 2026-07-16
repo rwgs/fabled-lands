@@ -2906,6 +2906,64 @@ async function run() {
     const s524 = await data.getSection(5, '24'); st524.begin(s524, 5, '24');
     ok('§5.24 the per-round Hangman drain does not fire on entry (hang unset)', g524.data.stamina === 20, `st=${g524.data.stamina}`);
 
+    // --- task 122: roll-less <outcome codeword=…> dispatch tables resolve --------
+    {
+      // §4.2 "Which of these codewords do you have?" — no <random>, so the table
+      // must resolve against live codewords, and its bare default is the catch-all.
+      const gNone = GameState.create({ name:'CW0', gender:'m', profession:'Warrior', book:4, adv });
+      const cNone = document.createElement('div');
+      new Story(cNone, gNone, { navigate(){}, onDeath(){}, notify(){} }).begin(await data.getSection(4,'2'), 4, '2');
+      ok('§4.2 with no codewords, the default reveals →97', /Continue → 97/.test(cNone.textContent) && !/Continue → 57/.test(cNone.textContent), cNone.textContent.replace(/\s+/g,' ').slice(0,120));
+
+      const gDef = GameState.create({ name:'CWd', gender:'m', profession:'Warrior', book:4, adv });
+      gDef.addCodeword('Defend');
+      const cDef = document.createElement('div');
+      new Story(cDef, gDef, { navigate(){}, onDeath(){}, notify(){} }).begin(await data.getSection(4,'2'), 4, '2');
+      ok('§4.2 with Defend, the codeword row reveals →57 (not the default →97)', /Continue → 57/.test(cDef.textContent) && !/Continue → 97/.test(cDef.textContent), cDef.textContent.replace(/\s+/g,' ').slice(0,120));
+
+      // §4.184 has NO default row: a held codeword reveals; nothing else does.
+      const gDel = GameState.create({ name:'CWx', gender:'m', profession:'Warrior', book:4, adv });
+      gDel.addCodeword('Deliver');
+      const cDel = document.createElement('div');
+      new Story(cDel, gDel, { navigate(){}, onDeath(){}, notify(){} }).begin(await data.getSection(4,'184'), 4, '184');
+      ok('§4.184 with Deliver reveals →247 only', /Continue → 247/.test(cDel.textContent) && !/Continue → 211/.test(cDel.textContent));
+      const gNo184 = GameState.create({ name:'CWn', gender:'m', profession:'Warrior', book:4, adv });
+      const cNo184 = document.createElement('div');
+      new Story(cNo184, gNo184, { navigate(){}, onDeath(){}, notify(){} }).begin(await data.getSection(4,'184'), 4, '184');
+      ok('§4.184 with neither codeword reveals no table goto (no false default)', !/Continue → (247|211)/.test(cNo184.textContent));
+
+      // §2.301 keys on a hidden box codeword ticked THIS visit (initiate of Alvir
+      // and Valmir) — the same-visit write must be visible to the table below it.
+      const gIni = GameState.create({ name:'INI', gender:'m', profession:'Warrior', book:2, adv });
+      gIni.setGod('Alvir and Valmir');
+      const cIni = document.createElement('div');
+      new Story(cIni, gIni, { navigate(){}, onDeath(){}, notify(){} }).begin(await data.getSection(2,'301'), 2, '301');
+      ok('§2.301 an initiate (tick this visit) takes the initiate row →269', /Continue → 269/.test(cIni.textContent) && !/Continue → 292/.test(cIni.textContent), cIni.textContent.replace(/\s+/g,' ').slice(0,120));
+      const gLay = GameState.create({ name:'LAY', gender:'m', profession:'Warrior', book:2, adv });
+      const cLay = document.createElement('div');
+      new Story(cLay, gLay, { navigate(){}, onDeath(){}, notify(){} }).begin(await data.getSection(2,'301'), 2, '301');
+      ok('§2.301 a non-initiate falls to the default →292', /Continue → 292/.test(cLay.textContent) && !/Continue → 269/.test(cLay.textContent), cLay.textContent.replace(/\s+/g,' ').slice(0,120));
+
+      // §4.457: a lone <outcome codeword> inside <choices> (the Initiate row) shows
+      // only for a Tambu initiate; the donate/leave choices are always present.
+      const gTam = GameState.create({ name:'TAM', gender:'m', profession:'Warrior', book:4, adv });
+      gTam.setGod('Tambu');
+      const cTam = document.createElement('div');
+      new Story(cTam, gTam, { navigate(){}, onDeath(){}, notify(){} }).begin(await data.getSection(4,'457'), 4, '457');
+      ok('§4.457 a Tambu initiate sees the Initiate row →345', !!Array.from(cTam.querySelectorAll('.goto-primary')).find((b)=>/345/.test(b.textContent)));
+      const gOut = GameState.create({ name:'OUT', gender:'m', profession:'Warrior', book:4, adv });
+      const cOut = document.createElement('div');
+      new Story(cOut, gOut, { navigate(){}, onDeath(){}, notify(){} }).begin(await data.getSection(4,'457'), 4, '457');
+      ok('§4.457 a non-initiate sees no Initiate row but keeps its choices', !Array.from(cOut.querySelectorAll('.goto-primary')).find((b)=>/345/.test(b.textContent)) && cOut.querySelectorAll('.choice').length >= 2, `gotos=${Array.from(cOut.querySelectorAll('.goto-primary')).map(b=>b.textContent)} choices=${cOut.querySelectorAll('.choice').length}`);
+
+      // Regression: a ROLL-fed <outcomes> table (range branches + <random>) still
+      // waits — no outcome reveals on entry; the roll control is offered instead.
+      const gRoll = GameState.create({ name:'ROLL', gender:'m', profession:'Warrior', book:1, adv });
+      const cRoll = document.createElement('div');
+      new Story(cRoll, gRoll, { navigate(){}, onDeath(){}, notify(){} }).begin(await data.getSection(1,'120'), 1, '120');
+      ok('§1.120 a rolled travel table reveals no outcome before rolling', !/Continue → (324|559|207)/.test(cRoll.textContent) && !!cRoll.querySelector('.btn-roll'), cRoll.textContent.replace(/\s+/g,' ').slice(0,120));
+    }
+
     // --- task 51: <difficulty|rankcheck flag=> roll gates + shared-success binding ---
     // §6.731: the CHARISMA boon roll is gated behind the 100-Shard donation (flag x).
     const g731 = GameState.create({ name:'D731', gender:'m', profession:'Warrior', book:6, adv });

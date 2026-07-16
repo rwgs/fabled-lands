@@ -2638,9 +2638,13 @@ export class Story {
       const flag = node.getAttribute('flag');
       let match;
       if (flag != null) match = this.state.getFlag(flag);
+      // A codeword= outcome is a roll-less dispatch — "which codeword do you have?"
+      // (§4.457's Initiate row) — so match it against live codewords before the roll
+      // gate, like flag= (task 122). A same-visit hidden tick has already applied
+      // (it renders above the table), so an initiate ticked this visit counts.
+      else if (node.getAttribute('codeword') != null) match = node.getAttribute('codeword').split(/[|,]/).some((w) => this.state.hasCodeword(w.trim()));
       else if (!this.branchResolved(node, roll)) return; // wait for the roll / var write
       else if (node.getAttribute('range') != null) match = matchRange(node.getAttribute('range'), node.getAttribute('var') ? this.state.getVar(node.getAttribute('var')) : roll.total);
-      else if (node.getAttribute('codeword')) match = node.getAttribute('codeword').split(/[|,]/).some((w) => this.state.hasCodeword(w.trim()));
       else if (node.hasAttribute('var')) match = this.branchSuccess(node, roll);
       else match = true;
       // A held blessing vetoes a blessing-guarded outcome (task 108): the range
@@ -2657,13 +2661,29 @@ export class Story {
       const branches = kids.filter((c) => /^(outcome|success|failure)$/.test(c.tagName.toLowerCase()));
       const choiceKids = kids.filter((c) => c.tagName.toLowerCase() === 'choice');
 
+      // A roll-less codeword-dispatch table — "which of these codewords do you
+      // have?" (§4.2/§4.184/§2.301) — carries no <random>, so activeRoll stays null
+      // and the branches must resolve against live state instead of waiting forever
+      // (task 122). It qualifies when every keyed (non-default) branch is codeword=.
+      // A bare default row then resolves too, as the catch-all; any range/success/
+      // failure/var branch marks the table roll-fed, so its default keeps waiting.
+      const isDefaultOutcome = (c) => c.tagName.toLowerCase() === 'outcome'
+        && c.getAttribute('codeword') == null && c.getAttribute('range') == null
+        && c.getAttribute('flag') == null && !c.hasAttribute('var');
+      const keyed = branches.filter((c) => !isDefaultOutcome(c));
+      const codewordDispatch = keyed.length > 0 && keyed.every((c) => c.getAttribute('codeword') != null);
+
       // Reveal the single matching branch once it is resolved — a roll for plain/
       // range branches, or a written var (roll OR active <set>) for var-keyed ones,
       // so a set-sentinel outcome (book3/43 Chill → success) resolves with no roll
-      // while an unwritten var stays pending (task 50).
+      // while an unwritten var stays pending (task 50). Codeword branches (and a
+      // default in a codeword-dispatch table) resolve with no roll (task 122).
       for (let i = 0; i < branches.length; i++) {
         const c = branches[i];
-        if (!this.branchResolved(c, roll)) continue;
+        const resolved = c.getAttribute('codeword') != null
+          || (isDefaultOutcome(c) && codewordDispatch)
+          || this.branchResolved(c, roll);
+        if (!resolved) continue;
         const ctag = c.tagName.toLowerCase();
         let match = false;
         if (ctag === 'success') match = this.branchSuccess(c, roll) === true && this.branchAbilityMatches(c, roll);
