@@ -7,9 +7,11 @@ the tasks were filed, not work order).
 
 **HIGH**
 
+- [ ] 141. Archive completed task details out of TASKS.md *(do first: zero-risk, and every later task reads this file)*
 - [ ] 122. Roll-less `<outcome codeword=…>` decision tables never resolve — eight sections render as dead ends
 - [ ] 123. "Immunity to Disease and Poison" is stored under two un-aliased names — the blessing never protects
 - [ ] 124. Loading/importing a save clamps Stamina to the written max — aura Stamina (ring of ultimate power) is silently stripped
+- [ ] 120. Split the 4,790-line single-scope browser test into focused ES-module suites *(before the test-heavy 115–117 chain)*
 - [ ] 115. Adventure-Sheet item detours bypass `Story.navigate`, so `<return>` still re-enters the source section
 - [ ] 116. Save/load restarts the current visit — effects can repeat and rolls/return state disappear
 - [ ] 117. Priced equipment/cargo losses can arm their reward without taking the required payment
@@ -38,8 +40,6 @@ the tasks were filed, not work order).
 - [ ] 138. Offline navigations with a query string bypass the service-worker cache
 - [ ] 139. The Adventure Sheet never shows foreign-currency balances
 - [ ] 140. Docs/CI accuracy: AGENTS.md's smoke-test URL 404s and the CI grep misses `RESULT FATAL`
-- [ ] 141. Archive completed task details out of TASKS.md
-- [ ] 120. Split the 4,790-line single-scope browser test into focused ES-module suites
 
 **Done**
 
@@ -4421,9 +4421,14 @@ the stamp collector alongside the sw.js precache list and README table.
 
 ---
 
-## 120. Split the 4,790-line single-scope browser test into focused ES-module suites — LOW (tests)
+## 120. Split the 4,790-line single-scope browser test into focused ES-module suites — HIGH (tests)
 
-*(Filed 2026-07-15 from a third full repository review.)* `web/_test.html` now
+*(Filed 2026-07-15 from a third full repository review as LOW; moved to HIGH
+2026-07-16, positioned after the quick severe fixes 122–124 and before the
+test-heavy 115–117 chain: every open task adds test blocks, and doing the split
+first means they land in focused suites instead of deepening the single-scope
+monolith — and the async silent-pass gaps below get closed before the results of
+the big fixes are trusted.)* `web/_test.html` now
 contains about 4,790 lines inside one `async function run()`. The repository's own
 instructions warn that reusing any top-level `const`/`let` is a parse-time fatal;
 task 82 only made that failure visible, and newer blocks already need manual `{}`
@@ -4951,9 +4956,11 @@ commands work as written. *(Related but filed separately: task 121 owns the
 
 ---
 
-## 141. Archive completed task details out of TASKS.md — LOW (process)
+## 141. Archive completed task details out of TASKS.md — HIGH (process)
 
-*(Filed 2026-07-16 from a fourth full repository review.)* TASKS.md is ~290KB /
+*(Filed 2026-07-16 from a fourth full repository review as LOW; moved to the top
+of the list the same day: it is zero-risk cut-and-paste, has no dependencies,
+and every subsequent task pays the cost of reading this file — do it first.)* TASKS.md is ~290KB /
 4,500+ lines and ~88% of it is detail sections for the 100+ **done** tasks; the
 workflow makes every agent read the file each task, and new open details land
 thousands of lines deep. Move the done detail sections verbatim to
@@ -5018,6 +5025,15 @@ are handled/display-only; task 30's documented repeat-outcome limitation was
 re-examined (§5.674's pay-per-attempt cure is its worst live case) and left as
 documented. Suite green at the reviewed tree, fresh profile:
 `RESULT ALL PASS pass=1076 fail=0`.
+
+Re-prioritised 2026-07-16 (same day, follow-up): tasks **141** and **120** moved
+LOW → HIGH. 141 (archive done details) goes **first** — zero-risk, no
+dependencies, and every subsequent task pays the cost of reading this file. 120
+(test split + async-gap hardening) slots after the quick severe fixes 122–124
+and **before** the test-heavy 115–117 chain, so the ~20 open tasks write their
+tests into focused suites rather than deepening the single-scope monolith, and
+the silent-pass vectors are closed before the big fixes' green runs are trusted.
+Work order is now 141 → 122 → 123 → 124 → 120 → 115 → 116 → 117 → 125–128.
 
 Reviewed 2026-07-15 (third full pass): started clean at `37f2b2d`, moved the
 completed 110–114 entries into **Done**, and audited app/state/engine/render/
