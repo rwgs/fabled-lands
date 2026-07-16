@@ -7,7 +7,6 @@ the tasks were filed, not work order).
 
 **HIGH**
 
-- [ ] 140. Docs/CI accuracy: AGENTS.md's smoke-test URL 404s and the CI grep misses `RESULT FATAL` *(zero-risk; every task runs this loop)*
 - [ ] 122. Roll-less `<outcome codeword=…>` decision tables never resolve — eight sections render as dead ends
 - [ ] 123. "Immunity to Disease and Poison" is stored under two un-aliased names — the blessing never protects
 - [ ] 124. Loading/importing a save clamps Stamina to the written max — aura Stamina (ring of ultimate power) is silently stripped
@@ -160,6 +159,7 @@ section below); detail sections remain in filed order, not this order.*
 - [x] 113. `<lose item="?" bonus="N">` ignores `bonus=` — §4.456 accepts any item as a +2/+3 offering
 - [x] 114. Reroll-form storm sections (§232/502/716) never consume the blessing — the rerunnable `keepblessing=1` set resets the guard each render
 - [x] 141. Archive completed task details out of TASKS.md
+- [x] 140. Docs/CI accuracy: AGENTS.md's smoke-test URL 404s and the CI grep misses `RESULT FATAL`
 
 ---
 

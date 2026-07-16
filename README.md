@@ -246,13 +246,13 @@ Two behaviours follow the original Java app rather than a simpler "hide it" appr
 `web/_test.html` is a headless smoke test: it creates a character, exercises the engine 
 (conditions, effects, dice, ranges, combat), verifies interactions (rolling, choosing,
 fighting), and renders **every section of all six books** to confirm none throw. Serve the
-`web/` folder and open `/_test.html`, or run it headlessly:
+repo root and open `/web/_test.html`, or run it headlessly:
 
 ```powershell
 & "C:\Program Files\Google\Chrome\Application\chrome.exe" `
   --headless=new --disable-gpu --no-sandbox --dump-dom --virtual-time-budget=60000 `
   --user-data-dir="$env:TEMP\fl-test-profile" `
-  "http://localhost:8848/_test.html"
+  "http://localhost:8848/web/_test.html"
 ```
 
 The first line of the dumped `#results` reads `RESULT ALL PASS …` when healthy.

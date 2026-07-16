@@ -39,7 +39,7 @@ the rules testable headlessly in `web/_test.html`.
 2. Run the headless smoke test (serves `web/`, exercises the engine, and renders
    **every section of all six books** to confirm none throw):
    - Serve from the repo root: `python -m http.server 8848`
-   - `& "C:\Program Files\Google\Chrome\Application\chrome.exe" --headless=new --disable-gpu --no-sandbox --dump-dom --virtual-time-budget=90000 --user-data-dir="$env:TEMP\fl-test-profile" "http://localhost:8848/_test.html"`
+   - `& "C:\Program Files\Google\Chrome\Application\chrome.exe" --headless=new --disable-gpu --no-sandbox --dump-dom --virtual-time-budget=90000 --user-data-dir="$env:TEMP\fl-test-profile" "http://localhost:8848/web/_test.html"`
 3. Healthy when the dumped `#results` starts with **`RESULT ALL PASS`** (the page
    title becomes `TESTS_OK`).
 
@@ -56,7 +56,8 @@ Notes:
   *parse-time* `SyntaxError` that aborts the whole module. A bootstrap error handler now
   surfaces this as **`RESULT FATAL … Identifier 'x' has already been declared`** (title
   `TESTS_FAIL`) instead of hanging at `running…` — so a "no RESULT line" result means
-  the server/Chrome never loaded the page, not a duplicate declaration. Fix: rename the
+  the page never loaded at all (server down, or a 404 from the wrong path — serve the
+  repo root and request `/web/_test.html`), not a duplicate declaration. Fix: rename the
   clashing identifier or wrap the block in its own `{ … }` scope (many blocks already are).
 
 ## Command execution (Bitdefender on Windows)

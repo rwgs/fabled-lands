@@ -38,9 +38,13 @@ jobs:
             "http://localhost:8848/web/_test.html" > "$DOM" || true
 
           echo "----- result -----"
-          grep -oE 'RESULT (ALL PASS|FAILURES) pass=[0-9]+ fail=[0-9]+' "$DOM" | head -1 || echo "(no RESULT line — the suite did not run)"
+          grep -oE 'RESULT (ALL PASS|FAILURES|FATAL) pass=[0-9]+ fail=[0-9]+' "$DOM" | head -1 || echo "(no RESULT line — the suite did not run)"
           if grep -q 'RESULT ALL PASS' "$DOM"; then
             echo "✓ Smoke suite passed."
+          elif grep -q 'RESULT FATAL' "$DOM"; then
+            echo "✗ Smoke suite aborted before running (module parse/bootstrap error, e.g. a duplicate top-level const):"
+            grep -oE 'FATAL [^<]{0,160}' "$DOM" | head -2 || true
+            exit 1
           else
             echo "✗ Smoke suite failed. First FAIL lines:"
             grep -oE 'FAIL [^<]{0,160}' "$DOM" | head -50 || true
