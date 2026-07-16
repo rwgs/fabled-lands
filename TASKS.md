@@ -8,6 +8,7 @@ the tasks were filed, not work order).
 **HIGH**
 
 - [ ] 141. Archive completed task details out of TASKS.md *(do first: zero-risk, and every later task reads this file)*
+- [ ] 140. Docs/CI accuracy: AGENTS.md's smoke-test URL 404s and the CI grep misses `RESULT FATAL` *(zero-risk; every task runs this loop)*
 - [ ] 122. Roll-less `<outcome codeword=…>` decision tables never resolve — eight sections render as dead ends
 - [ ] 123. "Immunity to Disease and Poison" is stored under two un-aliased names — the blessing never protects
 - [ ] 124. Loading/importing a save clamps Stamina to the written max — aura Stamina (ring of ultimate power) is silently stripped
@@ -15,6 +16,7 @@ the tasks were filed, not work order).
 - [ ] 115. Adventure-Sheet item detours bypass `Story.navigate`, so `<return>` still re-enters the source section
 - [ ] 116. Save/load restarts the current visit — effects can repeat and rolls/return state disappear
 - [ ] 117. Priced equipment/cargo losses can arm their reward without taking the required payment
+- [ ] 118. Choice/equipment losses can remove `keep`-tagged possessions *(immediately after 117 — same shared loss matcher)*
 - [ ] 125. Flag-linked item rewards outside choose-one menus are free, and paying can never grant them
 - [ ] 126. A collapsed `<group>` action never executes its `<buy>` children — §5.192's ship and §4.622's cargo are unobtainable
 - [ ] 127. Abbreviated cargo names (`grai`, `meta`, …) are never canonicalised — the trans-book trading economy is broken
@@ -22,7 +24,6 @@ the tasks were filed, not work order).
 
 **MEDIUM**
 
-- [ ] 118. Choice/equipment losses can remove `keep`-tagged possessions
 - [ ] 129. Free fixed-amount `<rest stamina="N">` is infinitely repeatable — every hospitality rest heals to full
 - [ ] 130. Inline `<buy>` allows one purchase per visit; JaFL's default is unlimited ("buy as many as you can afford")
 - [ ] 131. Cache `max=` semantics: `max="0"` must bar deposits (§4.263 money-doubling), and item caches must store Shards (§6.512)
@@ -39,7 +40,6 @@ the tasks were filed, not work order).
 - [ ] 137. A save blob can persist without its `fl_meta` entry — the orphaned slot turns invisible and gets overwritten
 - [ ] 138. Offline navigations with a query string bypass the service-worker cache
 - [ ] 139. The Adventure Sheet never shows foreign-currency balances
-- [ ] 140. Docs/CI accuracy: AGENTS.md's smoke-test URL 404s and the CI grep misses `RESULT FATAL`
 
 **Done**
 
@@ -4360,10 +4360,14 @@ having taken nothing. Route its eligibility and commit through the same matcher.
 
 ---
 
-## 118. Choice/equipment losses can remove `keep`-tagged possessions — MEDIUM (engine/render)
+## 118. Choice/equipment losses can remove `keep`-tagged possessions — HIGH (engine/render)
 
-*(Filed 2026-07-15 from a third full repository review; follow-up to tasks 16 and
-111.)* `applyLose(item="*")` and `itemAt=` protect `keep`, but
+*(Filed 2026-07-15 from a third full repository review as MEDIUM; moved to HIGH
+2026-07-16 to sit immediately after task 117 — it implements the keep-tag rules
+inside 117's shared loss matcher, and doing the two back-to-back keeps that
+design context warm instead of rebuilding it four tasks later; the consequence
+— irreversibly losing a plot item the books say cannot be lost — also supports
+HIGH. Follow-up to tasks 16 and 111.)* `applyLose(item="*")` and `itemAt=` protect `keep`, but
 `loseItemMatches()` still includes protected possessions for `item="?"` /
 `multiple=`, while `loseEquipment()` includes them for weapon/armour/tool `?` and
 `*`. A generic theft/confiscation can therefore offer or silently select the royal
@@ -4930,9 +4934,13 @@ styling as ability rows). Test: adjustCurrency('Mithral', 15) → sheet shows
 
 ---
 
-## 140. Docs/CI accuracy: AGENTS.md's smoke-test URL 404s and the CI grep misses `RESULT FATAL` — LOW (docs/ci)
+## 140. Docs/CI accuracy: AGENTS.md's smoke-test URL 404s and the CI grep misses `RESULT FATAL` — HIGH (docs/ci)
 
-*(Filed 2026-07-16 from a fourth full repository review.)* Two verified
+*(Filed 2026-07-16 from a fourth full repository review as LOW; moved to second
+position the same day, on the same logic as task 141: zero-risk, no
+dependencies, and it corrects the build-and-test instructions every subsequent
+task follows — the misleading docs should be fixed before the burn-down, not
+after.)* Two verified
 discrepancies that mislead exactly when something is failing:
 
 - AGENTS.md says "serve from the repo root" then drives Chrome at
@@ -5033,7 +5041,18 @@ dependencies, and every subsequent task pays the cost of reading this file. 120
 and **before** the test-heavy 115–117 chain, so the ~20 open tasks write their
 tests into focused suites rather than deepening the single-scope monolith, and
 the silent-pass vectors are closed before the big fixes' green runs are trusted.
-Work order is now 141 → 122 → 123 → 124 → 120 → 115 → 116 → 117 → 125–128.
+A second ordering pass the same day moved **140** LOW → HIGH second position
+(same logic as 141: zero-risk, and it corrects the test instructions every task
+follows) and **118** MEDIUM → HIGH immediately after 117 (hard dependency on
+117's shared loss matcher — back-to-back keeps the design context warm; the
+irreversible plot-item loss also supports HIGH). Checked and deliberately left:
+119 stays after the bug burn-down (the fixes build its planners and their tests
+de-risk the refactor); 121 stays MEDIUM (dev-only, and its rescope made it a
+decision + larger job, not a quick win); 132 stays MEDIUM despite sharing 123's
+blessing seam (that seam is trivial to re-enter, unlike 117's matcher); 137
+stays after 116 (116 rewrites the persistence schema 137 would touch); 134/136
+stay after the matcher and buy-transaction work they reuse. Work order is now
+141 → 140 → 122 → 123 → 124 → 120 → 115 → 116 → 117 → 118 → 125–128.
 
 Reviewed 2026-07-15 (third full pass): started clean at `37f2b2d`, moved the
 completed 110–114 entries into **Done**, and audited app/state/engine/render/
