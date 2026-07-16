@@ -5,16 +5,21 @@ priority — work the first open (`- [ ]`) item top-down. Task numbers are
 stable IDs pointing at the detail sections below (sections are in the order
 the tasks were filed, not work order).
 
+**HIGH**
+
+- [ ] 115. Adventure-Sheet item detours bypass `Story.navigate`, so `<return>` still re-enters the source section
+- [ ] 116. Save/load restarts the current visit — effects can repeat and rolls/return state disappear
+- [ ] 117. Priced equipment/cargo losses can arm their reward without taking the required payment
+
 **MEDIUM**
 
-- [x] 110. `<return>` starts a fresh visit instead of restoring the section at the point it was left
-- [x] 111. Rolled `itemAt=` losses can remove `keep`-tagged possessions
+- [ ] 118. Choice/equipment losses can remove `keep`-tagged possessions
+- [ ] 119. Re-establish the rules/view boundary and split the 4,060-line renderer by responsibility
+- [ ] 121. The documented `powershell` build command no longer parses `build-data.ps1` on Windows PowerShell 5.1
 
 **LOW**
 
-- [x] 112. The Adventure Sheet stores but cannot activate a curse's `lift=` prompt (§5.505)
-- [x] 113. `<lose item="?" bonus="N">` ignores `bonus=` — §4.456 accepts any item as a +2/+3 offering
-- [x] 114. Reroll-form storm sections (§232/502/716) never consume the blessing — the rerunnable `keepblessing=1` set resets the guard each render
+- [ ] 120. Split the 4,790-line single-scope browser test into focused ES-module suites
 
 **Done**
 
@@ -130,6 +135,11 @@ section below); detail sections remain in filed order, not this order.*
 - [x] 107. Visible `<transfer>` actions auto-execute and ignore chooser/filter/price semantics *(fixed; surfaced the §4.456 `<lose bonus>` gap → task 113)*
 - [x] 108. `<outcome blessing="…">` ignores Safety from Storms and exposes the capsize/storm redirect *(fixed; surfaced the reroll-form non-consume → task 114)*
 - [x] 109. Multi-ability success routing ignores `<success ability="…">` (§2.37 always takes SANCTITY)
+- [x] 110. `<return>` starts a fresh visit instead of restoring the section at the point it was left
+- [x] 111. Rolled `itemAt=` losses can remove `keep`-tagged possessions
+- [x] 112. The Adventure Sheet stores but cannot activate a curse's `lift=` prompt (§5.505)
+- [x] 113. `<lose item="?" bonus="N">` ignores `bonus=` — §4.456 accepts any item as a +2/+3 offering
+- [x] 114. Reroll-form storm sections (§232/502/716) never consume the blessing — the rerunnable `keepblessing=1` set resets the guard each render
 
 ---
 
@@ -4217,11 +4227,222 @@ survives. Web-only; stamp and run all sections.
 
 ---
 
+## 115. Adventure-Sheet item detours bypass `Story.navigate`, so `<return>` still re-enters the source section — HIGH (app/render)
+
+*(Filed 2026-07-15 from a third full repository review; follow-up to task 110.)*
+Task 110 fixed normal choices/gotos by wrapping the app router in
+`Story.navigate`: it captures the source visit's return frame, runs leave hooks,
+then calls the raw async navigation function. `app.js:onUseItem`, however, sends
+an effect's `res.goto` straight to the raw app-level `navigate()`. The destination
+therefore has history but no `_returnFrame`; its `<return>` takes `goBack()`'s
+fallback and re-enters the origin through `goTo()`/`begin()` — exactly the fresh-
+visit bug task 110 was meant to eliminate.
+
+This is live in the treasure map (§1.30 → §1.200), Black Diptych (§5.412/712 →
+§5.410), Vade Mecum (§5.549 → §5.550), blue potion (§5.698 → §5.306), and
+lacquer box (§6.252 → §6.272). Returning can repeat the source's entry rewards/
+costs/ticks, discard its variables/rolls/action state, and add an `A → B → A`
+history bounce. The existing task-41 test checks only that `useItemEffect` returns
+a target; task 110's synthetic test leaves through a Story-rendered link, so
+neither covers the app seam.
+
+Route every in-game navigation source through one public Story/controller entry
+point (item use included), leaving only that entry point able to call the raw app
+router. Preserve the item effect/removal before capturing/leaving so the detour's
+legitimate state changes remain. Add an app/Story integration test using one live
+item detour: return restores the exact source visit, does not repeat its entry
+effect/tick or add a forward visit, and marks the source action consistently with
+task 110. Web-only; stamp and run all sections.
+
+---
+
+## 116. Save/load restarts the current visit — effects can repeat and rolls/return state disappear — HIGH (state/app/render)
+
+*(Filed 2026-07-15 from a third full repository review.)* Every state mutation
+autosaves (`GameState.changed()` → `save()`), but all per-visit execution state is
+held only in `Story.ctx` / `_returnFrame`. Loading a slot builds a new `Story` and
+`loadCurrent()` calls `story.begin()` on the already-mutated current section.
+`begin()` creates an empty memo, clears variables and temporary bonuses, resets
+price/flag coordination, resets rolls/fights/market stock/action picks, and walks
+the section's passive effects again. A save made after receiving Shards/items,
+ticking a box, paying, rolling, or entering an item detour can therefore reload
+as a different visit: one-shot effects can repeat, interactive progress vanishes,
+and a later `<return>` falls back to fresh navigation.
+
+Persist a versioned, serializable current-visit record alongside the game state:
+at minimum the section identity, variables, applied/action memo, resolved rolls
+and fights, stock/pick state, used source action, entry tick baseline, deferred
+leave bookkeeping, and the one-level return visit needed by task 110. Store stable
+node paths/IDs rather than DOM nodes and rebuild their references from the parsed
+section on load. Loading must resume the current visit without `begin()`'s entry
+side effects; new/legacy saves without the record need a conservative migration
+that cannot duplicate rewards. State changes earned during a detour must remain
+when its source frame is restored.
+
+Add a real save-slot round-trip test: save after a synthetic gain+tick and resolved
+roll/action, reconstruct `GameState` and `Story`, and prove the effect/tick do not
+repeat and the roll/action remains resolved. Add a second round trip while inside
+a live return detour and prove return restores the source variables/memo/history
+without incrementing turns. Web-only; schema/migration may change; stamp and run
+all sections.
+
+---
+
+## 117. Priced equipment/cargo losses can arm their reward without taking the required payment — HIGH (engine/render)
+
+*(Filed 2026-07-15 from a third full repository review; follow-up to task 113.)*
+Task 113 made `renderOptionalPay` and `applyLose` validate `item=` offerings, but
+the equivalent equipment/cargo selectors still bypass that contract. The view's
+eligibility guard looks only at `item=` and Shards; the price branch also runs
+before the renderer's equipment-choice path. In `applyLose`, the `price` flag is
+set before `loseEquipment` / `applyShipLose`, and is unconditional whenever there
+is no `item=` attribute.
+
+Two live consequences are exploitable:
+
+- §2.90 offers `<lose weapon="?" price="x">` or `<lose armour="?" price="x">`.
+  Either button stays enabled without that kind of equipment, sets `x`, and the
+  linked loss renounces Elnir; with several matches it silently takes the first
+  instead of asking which one to forfeit.
+- §3.569 exchanges one named Cargo Unit for two textiles. A named-cargo button
+  remains enabled when the current ship lacks that cargo; it sets `x` anyway and
+  the linked textile gain can run for free.
+
+Create one DOM-free loss plan/matcher shared by eligibility, chooser candidates,
+and commit. It must cover item/equipment/cargo selectors, bonus/tags/using/cache,
+current-ship locality, required quantities, and report whether the requested loss
+actually completed. A priced action may set its flag/apply linked rewards only
+after the full payment is taken. Wire visible `?` equipment/cargo losses to choose
+the exact candidate rather than silently defaulting; keep deterministic/all forms
+headless. Test both live sections with no eligible payment, wrong cargo, multiple
+equipment choices, and a successful payment/reward. Web-only; stamp and run all
+sections.
+
+---
+
+## 118. Choice/equipment losses can remove `keep`-tagged possessions — MEDIUM (engine/render)
+
+*(Filed 2026-07-15 from a third full repository review; follow-up to tasks 16 and
+111.)* `applyLose(item="*")` and `itemAt=` protect `keep`, but
+`loseItemMatches()` still includes protected possessions for `item="?"` /
+`multiple=`, while `loseEquipment()` includes them for weapon/armour/tool `?` and
+`*`. A generic theft/confiscation can therefore offer or silently select the royal
+ring (§1.385) or white sword (§4.103), whose source text says they cannot be lost
+or stolen. The current default-first behavior makes the bug reachable even
+without a chooser.
+
+The reference semantics first match while respecting `keep`; only when an
+explicit *named* item has no ordinary match may that exact kept item be handed
+over deliberately. The open `?` form never falls back to protected possessions,
+and all-of-kind removal also skips them. Implement that distinction in the shared
+loss matcher/plan from task 117 (not as a renderer-only filter), preserving valid
+scripted named handovers. Add tests for `item="?"`, `multiple=`, equipment `?`/`*`,
+only-protected inventories, mixed protected/ordinary inventories, and an explicit
+named kept-item handover. Web-only; stamp and run all sections.
+
+---
+
+## 119. Re-establish the rules/view boundary and split the 4,060-line renderer by responsibility — MEDIUM (architecture)
+
+*(Filed 2026-07-15 from a third full repository review.)* The overall module map
+is still sound: state, combat, economy, data, shell, UI and TTS have recognizable
+homes, and the core modules do not depend on browser UI globals. `render.js` has
+nevertheless grown to 4,060 lines and now owns section lifecycle/return state,
+XML traversal, payment and reward semantics, roll/branch/fight/transfer gates,
+storm-blessing veto/spend rules, caches, markets, combat widgets and modal choices.
+Recent fixes added bespoke rule decisions such as `isGuardedBlessingLoss`,
+`blessingSpendForGoto` and reroll consumption directly to this DOM class. That no
+longer matches the documented invariant that the renderer wires controls while
+DOM-free modules decide and execute rules; the duplicated eligibility seam behind
+tasks 113/117 and the raw-navigation seam behind task 115 are concrete costs.
+
+Refactor incrementally, preserving `render.js` as the small public facade that
+exports `Story`/`previewProse`. Move composite rule planning and transactions
+(loss/payment eligibility, blessing outcomes, branch/gate resolution, return-
+visit serialization) into tested DOM-free helpers. Split DOM construction into a
+few responsibility-based ES modules — section/lifecycle, actions/rolls, combat
+view, and market/cache view are the current natural seams — without introducing a
+framework, build tool, speculative abstraction, or circular dependency. DOM code
+may call a state/engine operation from a click handler, but must not independently
+encode the rule or mutate several rule fields as its own transaction.
+
+Keep the existing `Story` API so `app.js` and tests do not churn unnecessarily;
+update README's module table and service-worker inputs for any new files. Add
+focused unit tests for every extracted planner before moving the corresponding
+view. Success: no behavior change beyond the filed fixes, no browser globals in
+the rule modules, the all-section suite stays green after each extraction, and no
+single replacement file simply inherits the same god-object role. Web-only;
+stamp and run all sections.
+
+---
+
+## 120. Split the 4,790-line single-scope browser test into focused ES-module suites — LOW (tests)
+
+*(Filed 2026-07-15 from a third full repository review.)* `web/_test.html` now
+contains about 4,790 lines inside one `async function run()`. The repository's own
+instructions warn that reusing any top-level `const`/`let` is a parse-time fatal;
+task 82 only made that failure visible, and newer blocks already need manual `{}`
+scopes to avoid collisions. The single function also makes it hard to find a rule's
+coverage or run a focused subset, while mixing pure engine assertions, DOM
+integration, persistence, and the every-section scan.
+
+Keep `_test.html` as the zero-dependency browser harness and result reporter, but
+move suites into plain ES modules grouped by responsibility (engine/state,
+combat, market, render/app integration, corpus scan). Export one async runner per
+suite and pass a tiny shared assertion/context object; do not add npm or a test
+framework. Preserve the fatal bootstrap handler, deterministic RNG controls,
+`RESULT ALL PASS`/`TESTS_OK` contract, fresh-profile compatibility, and the final
+render of all six books. Document the suite map next to the README test command.
+Web-only; stamp and run the aggregate and at least one focused suite.
+
+---
+
+## 121. The documented `powershell` build command no longer parses `build-data.ps1` on Windows PowerShell 5.1 — MEDIUM (build/docs)
+
+*(Filed 2026-07-15 while verifying the third full repository review.)* Both
+README and `AGENTS.md` prescribe:
+`powershell -ExecutionPolicy Bypass -File build/build-data.ps1`. Running that
+exact command with Windows PowerShell 5.1 fails at parse time around lines 48/162.
+The script is BOM-less UTF-8 and contains em dashes in double-quoted messages;
+5.1 reads those bytes through its legacy code page, and the mojibake smart-quote
+byte is treated as a string delimiter. `pwsh` 7 reads the same file correctly,
+which is why recent builds passed there, but PowerShell 7 is not declared as a
+dependency and the documented built-in Windows command is currently unusable.
+
+Keep the no-dependency Windows workflow working: make both build scripts parse
+under Windows PowerShell 5.1 (prefer ASCII punctuation in `.ps1` source/messages,
+or a deliberately BOM-encoded file if the repository can preserve it), then run
+the exact README command as well as `pwsh` if available. Add a lightweight CI or
+documented verification step that exercises the prescribed command so script
+encoding cannot silently regress. Do not merely change the docs to require an
+undeclared tool. Build-only; confirm XML validation, generated output and stamp,
+then run all sections.
+
+---
+
 ## Review log
 
 *Running audit log of the backlog — each pass re-verifies the open items against
 the current code and records what was filed, split, or re-confirmed. Task
 numbers refer to the contents checklist at the top of the file.*
+
+Reviewed 2026-07-15 (third full pass): started clean at `37f2b2d`, moved the
+completed 110–114 entries into **Done**, and audited app/state/engine/render/
+combat/market/UI/data/build/test seams plus the live XML that exercises each new
+finding. A strict independent corpus pass found **4,369 sections, 0 parse errors,
+0 filename/name mismatches and 0 dangling Book 1–6 section targets**. Filed tasks
+**115–121**: item-use detours bypass the task-110 return wrapper (115); save/load
+restarts the already-mutated current visit and loses its execution/return state
+(116); priced equipment/cargo selectors can grant their linked result without a
+payment (117); generic/equipment losses can take `keep` items (118); restore the
+rules/view boundary while splitting the 4,060-line renderer (119); split the
+4,790-line, one-scope browser suite (120); and restore Windows PowerShell 5.1
+compatibility for the documented build command (121). The module map remains a
+good foundation and the headless cores remain UI-DOM-free; concentration in
+`render.js` and `_test.html`, not the overall directory layout, is the structural
+problem. The exact documented `powershell` build reproduced task 121's parse
+failure; `pwsh` 7 validated all **4,377 XML files** and rebuilt successfully. The
+fresh-profile Chrome suite is green: `RESULT ALL PASS pass=1076 fail=0`.
 
 Reviewed 2026-07-14 (second full pass): started from a clean worktree with no
 open backlog items, parsed and inventoried all **4,369** numeric section XML files
