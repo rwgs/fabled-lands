@@ -1,0 +1,559 @@
+// FL test suite — travel gates, transfers, returns, curse lift, blessing veto, reroll storm
+// Extracted verbatim from web/_test.html run() lines 4350-4891 (task 120).
+import * as data from '../js/data.js';
+import { GameState, readSlotData, importSave, loadSlotMeta, deleteSlot, makeItem, nextFreeSlot, sanitizeData, currencyAward, splitItemName } from '../js/state.js';
+import * as eng from '../js/engine.js';
+import { fightRound, makeFight, groupFightRound, isDefeated, useWrathBlessing, useDefenceBlessing, rerollAttack } from '../js/combat.js';
+import { goodsFrom, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo, canUpgradeCrew, payChoiceCost } from '../js/market.js';
+import { Story, previewProse } from '../js/render.js';
+import { Narrator } from '../js/tts.js';
+import { renderSheet } from '../js/ui.js';
+import { renderStatic } from '../js/app.js';
+
+export async function run(ctx) {
+  const { ok, parse } = ctx;
+  await data.loadMeta();
+  const adv = data.parseAdventurers(data.bookInfo(1).adventurers);
+    // --- task 104: travel/encounter roll gates the onward choices ---
+    // A mandatory <random> → <outcomes> → <choices> section must be rolled before the
+    // onward destinations unlock, and a "get lost" outcome carrying its own <goto>
+    // suppresses those choices so only the redirect is offered.
+    {
+      window.__FL_INSTANT_DICE__ = true;
+      const settle104 = () => new Promise((r) => setTimeout(r, 30));
+      const rnd104 = Math.random;
+
+      // §1.278: die 1 → "you get lost" → §82 (redirect); die 4 → nothing → destinations.
+      const g278 = GameState.create({ name:'T278', gender:'m', profession:'Warrior', book:1, adv });
+      const c278 = document.createElement('div');
+      const st278 = new Story(c278, g278, { navigate(){}, onDeath(){}, notify(){} });
+      const choices278 = () => Array.from(c278.querySelectorAll('.choice'));
+      const goto82 = () => Array.from(c278.querySelectorAll('.goto')).find((b) => b.textContent.trim() === '82');
+      st278.begin(await data.getSection(1,'278'), 1, '278');
+      ok('§278 draws four onward choices', choices278().length === 4, `n=${choices278().length}`);
+      ok('§278 choices are all gated before the travel roll',
+         choices278().length === 4 && choices278().every((b) => b.disabled && b.dataset.rollnav === '1'),
+         choices278().map((b) => b.disabled).join(','));
+      ok('§278 shows the travel roll button', !!c278.querySelector('.btn-roll'));
+
+      Math.random = () => 0; // die = 1 → outcome 1,2 → get lost → goto 82
+      c278.querySelector('.btn-roll').click(); await settle104();
+      ok('§278 rolling 1 reveals the "get lost" redirect to 82', !!goto82() && goto82().disabled === false);
+      ok('§278 a redirect keeps the destinations suppressed',
+         choices278().length === 4 && choices278().every((b) => b.disabled),
+         choices278().map((b) => b.disabled).join(','));
+
+      st278.begin(await data.getSection(1,'278'), 1, '278'); // fresh visit
+      Math.random = () => 0.5; // die = 4 → outcome 3,4 → nothing happens (no redirect)
+      c278.querySelector('.btn-roll').click(); await settle104();
+      ok('§278 rolling 4 unlocks all four destinations',
+         choices278().length === 4 && choices278().every((b) => !b.disabled),
+         choices278().map((b) => b.disabled).join(','));
+      ok('§278 a non-redirect outcome offers no forced goto', !goto82());
+
+      // §1.668 (mining, a plain untyped <random>): the gate is structural, not keyed on
+      // type="travel", so a non-travel mandatory roll gates its onward choices too.
+      const g668 = GameState.create({ name:'T668', gender:'m', profession:'Warrior', book:1, adv });
+      g668.data.stamina = 20; g668.data.staminaMax = 20;
+      const c668 = document.createElement('div');
+      const st668 = new Story(c668, g668, { navigate(){}, onDeath(){}, notify(){} });
+      const choices668 = () => Array.from(c668.querySelectorAll('.choice'));
+      st668.begin(await data.getSection(1,'668'), 1, '668');
+      ok('§668 (non-travel roll) gates its onward choices before the roll',
+         choices668().length === 4 && choices668().every((b) => b.disabled && b.dataset.rollnav === '1'),
+         `n=${choices668().length}`);
+      Math.random = () => 0.9; // 6+6 = 12 → silver nugget (no redirect) → unlock
+      c668.querySelector('.btn-roll').click(); await settle104();
+      ok('§668 unlocks the choices once the roll resolves', choices668().every((b) => !b.disabled));
+
+      // §5.674 (physician): the cure roll is OPTIONAL (pay-gated flag="c"), so declining
+      // and leaving must stay possible — its choices must NOT be roll-gated.
+      const g674t = GameState.create({ name:'T674', gender:'m', profession:'Warrior', book:5, adv });
+      g674t.data.shards = 100;
+      const c674t = document.createElement('div');
+      const st674t = new Story(c674t, g674t, { navigate(){}, onDeath(){}, notify(){} });
+      st674t.begin(await data.getSection(5,'674'), 5, '674');
+      const choices674 = Array.from(c674t.querySelectorAll('.choice'));
+      ok('§674 gate is not built for an optional pay-gated roll', st674t.rollGate === null);
+      ok('§674 onward choices stay live beside the optional cure roll',
+         choices674.length === 3 && choices674.every((b) => !b.disabled && b.dataset.rollnav !== '1'),
+         `n=${choices674.length}`);
+
+      Math.random = rnd104;
+      window.__FL_INSTANT_DICE__ = false;
+    }
+
+    // --- task 107: <transfer> is a player action (chooser/filter/price/force) ---
+    { // block-scoped
+      // §4.456: the +1 offering is a price-gated transfer — it must NOT auto-run on
+      // entry; offering a +1 item moves THAT item to the cache, sets flag 1 and
+      // reveals →641; an ineligible (+0) item is never touched.
+      const g456 = GameState.create({ name:'V456', gender:'m', profession:'Warrior', book:4, adv });
+      g456.data.items = [];
+      g456.addItem(makeItem('item', 'apple'));                     // +0 → ineligible
+      g456.addItem(makeItem('tool', 'lucky ring', 1, 'charisma')); // +1 → the eligible offering
+      const before456 = g456.itemCount();
+      const c456 = document.createElement('div');
+      const st456 = new Story(c456, g456, { navigate(){}, onDeath(){}, notify(){} });
+      st456.begin(await data.getSection(4, '456'), 4, '456');
+      ok('task107: §456 offers nothing on entry (no auto-transfer, flag clear)',
+         g456.itemCount() === before456 && g456.cacheItems('4.641').length === 0 && !g456.getFlag('1'),
+         `n=${g456.itemCount()} cache=${g456.cacheItems('4.641').length} flag=${g456.getFlag('1')}`);
+      ok('task107: §456 →641 hidden before the offering',
+         !Array.from(c456.querySelectorAll('.goto')).some((b)=>/641/.test(b.textContent)));
+      const offer = Array.from(c456.querySelectorAll('button')).find((b)=>/offer a \+1 item/i.test(b.textContent));
+      ok('task107: §456 the +1 offering is armed (enabled)', !!offer && !offer.disabled);
+      offer.click();
+      ok('task107: §456 offering a +1 item moves it to the cache and sets flag 1',
+         g456.getFlag('1') === true && g456.cacheItems('4.641').some((i)=>i.name==='lucky ring') && g456.findItems('lucky ring').length === 0,
+         `flag=${g456.getFlag('1')} cache=${JSON.stringify(g456.cacheItems('4.641').map((i)=>i.name))}`);
+      ok('task107: §456 the ineligible +0 item is untouched', g456.findItems('apple').length === 1);
+      ok('task107: §456 →641 revealed after the offering',
+         Array.from(c456.querySelectorAll('.goto')).some((b)=>/641/.test(b.textContent)));
+
+      // §4.456 with no eligible item: the offer stays disabled and nothing moves.
+      const g456b = GameState.create({ name:'V456b', gender:'m', profession:'Warrior', book:4, adv });
+      g456b.data.items = [makeItem('item', 'apple')]; // no bonus items at all
+      const c456b = document.createElement('div');
+      new Story(c456b, g456b, { navigate(){}, onDeath(){}, notify(){} }).begin(await data.getSection(4, '456'), 4, '456');
+      const offerB = Array.from(c456b.querySelectorAll('button')).find((b)=>/offer a \+1 item/i.test(b.textContent));
+      ok('task107: §456 offer is disabled with no eligible +1 item',
+         !!offerB && offerB.disabled && !g456b.getFlag('1') && g456b.findItems('apple').length === 1);
+
+      // §6.310: "decide what item to present" — item="?" is a choose-one action; the
+      // SELECTED possession moves, not array position zero.
+      const g310 = GameState.create({ name:'V310', gender:'m', profession:'Warrior', book:6, adv });
+      g310.data.items = [makeItem('item','first thing'), makeItem('item','second thing'), makeItem('item','third thing')];
+      const c310 = document.createElement('div');
+      new Story(c310, g310, { navigate(){}, onDeath(){}, notify(){} }).begin(await data.getSection(6, '310'), 6, '310');
+      ok('task107: §310 presents nothing on entry', g310.itemCount() === 3 && g310.cacheItems('6.310').length === 0);
+      const picks310 = Array.from(c310.querySelectorAll('.ability-pick'));
+      const pick2 = picks310.find((btn)=>/second thing/i.test(btn.textContent));
+      ok('task107: §310 shows an item chooser (a pick per possession)', picks310.length === 3 && !!pick2);
+      pick2.click();
+      ok('task107: §310 the CHOSEN item moves (not the first)',
+         g310.cacheItems('6.310').length === 1 && g310.cacheItems('6.310')[0].name === 'second thing'
+         && g310.findItems('first thing').length === 1 && g310.findItems('second thing').length === 0,
+         `cache=${JSON.stringify(g310.cacheItems('6.310').map((i)=>i.name))}`);
+
+      // §6.635: giving a weapon is force="f" (optional) — →677 stays live without it.
+      const g635 = GameState.create({ name:'V635', gender:'m', profession:'Warrior', book:6, adv });
+      g635.data.items = [makeItem('weapon','broadsword',2)];
+      const c635 = document.createElement('div');
+      const st635 = new Story(c635, g635, { navigate(){}, onDeath(){}, notify(){} });
+      st635.begin(await data.getSection(6, '635'), 6, '635');
+      ok('task107: §635 builds no forced-transfer gate (both force="f")', st635.transferGate === null);
+      const cont677 = Array.from(c635.querySelectorAll('.goto')).find((b)=>/677/.test(b.textContent));
+      ok('task107: §635 →677 stays live beside the optional gift', !!cont677 && !cont677.disabled);
+      ok('task107: §635 no weapon given on entry',
+         g635.findItems('broadsword').length === 1 && g635.cacheItems('6.635').length === 0);
+
+      // §2.639: "lose any OTHER armour" — armour="*" xarmour="?" xgroup="2.639" spares
+      // the just-granted group-2.639 suit; forced, so it gates →342.
+      const g639 = GameState.create({ name:'V639', gender:'m', profession:'Warrior', book:2, adv });
+      g639.data.items = [
+        makeItem('armour','splint armour',4,null,[],[],'2.639'), // the gift (spared)
+        makeItem('armour','chainmail',2),                        // other armour (lost)
+      ];
+      const movers639 = eng.transferPlan(parse('<transfer to="null" armour="*" xarmour="?" xgroup="2.639"/>'), g639).movers;
+      ok('task107: §639 selector spares the group-2.639 suit, takes the rest',
+         movers639.length === 1 && movers639[0].name === 'chainmail', JSON.stringify(movers639.map((m)=>m.name)));
+      const c639 = document.createElement('div');
+      const st639 = new Story(c639, g639, { navigate(){}, onDeath(){}, notify(){} });
+      st639.begin(await data.getSection(2, '639'), 2, '639');
+      const goto342 = Array.from(c639.querySelectorAll('.goto')).find((b)=>/342/.test(b.textContent));
+      ok('task107: §639 nothing moved on entry; forced transfer gates →342',
+         g639.findItems('chainmail').length === 1 && !!goto342 && goto342.disabled);
+      const doIt639 = Array.from(c639.querySelectorAll('button')).find((b)=>/lose any other/i.test(b.textContent));
+      ok('task107: §639 the forced transfer is armed', !!doIt639 && !doIt639.disabled);
+      doIt639.click();
+      const goto342b = Array.from(c639.querySelectorAll('.goto')).find((b)=>/342/.test(b.textContent));
+      ok('task107: §639 running it loses other armour, keeps the gift, unlocks →342',
+         g639.findItems('chainmail').length === 0 && g639.findItems('splint armour').length === 1
+         && g639.cacheItems('null').some((i)=>i.name==='chainmail') && !!goto342b && !goto342b.disabled,
+         `items=${JSON.stringify(g639.data.items.map((i)=>i.name))} gated=${goto342b&&goto342b.disabled}`);
+
+      // Engine: keep-tagged possessions survive a plain item="*" transfer from the player.
+      const gkeep = GameState.create({ name:'Vkeep', gender:'m', profession:'Warrior', book:1, adv });
+      gkeep.data.items = [makeItem('item','white sword',0,null,['keep']), makeItem('item','junk')];
+      eng.applyEffect(parse('<transfer item="*" to="void"/>'), gkeep, {});
+      ok('task107: item="*" transfer from the player spares keep-tagged items',
+         gkeep.findItems('white sword').length === 1 && gkeep.findItems('junk').length === 0
+         && gkeep.cacheItems('void').some((i)=>i.name==='junk'),
+         `items=${JSON.stringify(gkeep.data.items.map((i)=>i.name))}`);
+    }
+
+    // --- task 108: <outcome blessing="…"> veto — Safety from Storms carries the
+    // protected traveller past the storm/capsize redirect ---
+    {
+      window.__FL_INSTANT_DICE__ = true;
+      const settle108 = () => new Promise((r) => setTimeout(r, 30));
+      const rnd108 = Math.random;
+      const cont527 = (c) => Array.from(c.querySelectorAll('.goto')).find((b) => /→\s*527/.test(b.textContent));
+      const goto619 = (c) => Array.from(c.querySelectorAll('.goto')).find((b) => b.textContent.trim() === '619');
+
+      // §200, ordinary storm blessing, roll 11-12: the storm outcome (→527) is vetoed,
+      // the blessing is NOT consumed on entry or by the veto, and the safe →619 unlocks.
+      const g200 = GameState.create({ name:'T200', gender:'m', profession:'Warrior', book:5, adv });
+      g200.addBlessing('storm');
+      let nav200 = null;
+      const c200 = document.createElement('div');
+      const st200 = new Story(c200, g200, { navigate(b,s){ nav200 = { b, s }; }, onDeath(){}, notify(){} });
+      st200.begin(await data.getSection(5,'200'), 5, '200');
+      ok('task108: §200 keeps the storm blessing on entry (not auto-consumed)', g200.hasBlessing('storm'));
+      Math.random = () => 0.9; // 6+6 = 12 → range 11-12
+      c200.querySelector('.btn-roll').click(); await settle108();
+      ok('task108: §200 a held blessing vetoes the →527 storm redirect', !cont527(c200));
+      ok('task108: §200 the safe →619 unlocks (roll gate sees no forced redirect)',
+         !!goto619(c200) && !goto619(c200).disabled);
+      ok('task108: §200 the blessing survives until the safe path is taken', g200.hasBlessing('storm'));
+      goto619(c200).click();
+      ok('task108: §200 taking the safe goto spends the blessing and turns to 619',
+         nav200 && String(nav200.s) === '619' && !g200.hasBlessing('storm'),
+         `nav=${JSON.stringify(nav200)} storm=${g200.hasBlessing('storm')}`);
+
+      // §200, permanent storm blessing: vetoed the same way, but never used up (task 90).
+      const g200p = GameState.create({ name:'T200p', gender:'m', profession:'Warrior', book:5, adv });
+      g200p.addBlessing('storm', true);
+      let nav200p = null;
+      const c200p = document.createElement('div');
+      const st200p = new Story(c200p, g200p, { navigate(b,s){ nav200p = { b, s }; }, onDeath(){}, notify(){} });
+      st200p.begin(await data.getSection(5,'200'), 5, '200');
+      Math.random = () => 0.9;
+      c200p.querySelector('.btn-roll').click(); await settle108();
+      ok('task108: §200 a permanent blessing also vetoes the storm', !cont527(c200p) && !!goto619(c200p) && !goto619(c200p).disabled);
+      goto619(c200p).click();
+      ok('task108: §200 the permanent blessing is not used up by the safe passage',
+         nav200p && String(nav200p.s) === '619' && g200p.hasBlessing('storm') && g200p.isBlessingPermanent('storm'));
+
+      // §200 unblessed: the storm redirect is the only result, and →619 stays suppressed.
+      const g200u = GameState.create({ name:'T200u', gender:'m', profession:'Warrior', book:5, adv });
+      const c200u = document.createElement('div');
+      const st200u = new Story(c200u, g200u, { navigate(){}, onDeath(){}, notify(){} });
+      st200u.begin(await data.getSection(5,'200'), 5, '200');
+      Math.random = () => 0.9;
+      c200u.querySelector('.btn-roll').click(); await settle108();
+      ok('task108: §200 unblessed rolls 11-12 into the storm (→527 revealed)', !!cont527(c200u));
+      ok('task108: §200 unblessed keeps the safe sibling →619 suppressed',
+         !goto619(c200u) || goto619(c200u).disabled);
+
+      // §200 blessed but rolls 4-10: plain sailing, blessing untouched, no storm.
+      const g200s = GameState.create({ name:'T200s', gender:'m', profession:'Warrior', book:5, adv });
+      g200s.addBlessing('storm');
+      const c200s = document.createElement('div');
+      const st200s = new Story(c200s, g200s, { navigate(){}, onDeath(){}, notify(){} });
+      st200s.begin(await data.getSection(5,'200'), 5, '200');
+      Math.random = () => 0.5; // 4+4 = 8 → range 4-10 (plain sailing → 619)
+      c200s.querySelector('.btn-roll').click(); await settle108();
+      ok('task108: §200 a safe (4-10) roll keeps the blessing and shows no storm',
+         g200s.hasBlessing('storm') && !cont527(c200s)
+         && Array.from(c200s.querySelectorAll('.goto')).some((b) => /→\s*619/.test(b.textContent)));
+
+      // §232 reroll form, storm blessing, roll 11-12: the capsize (→510) is vetoed and a
+      // reroll is offered (its keepblessing var owns the eventual spend).
+      const g232 = GameState.create({ name:'T232', gender:'m', profession:'Warrior', book:5, adv });
+      g232.data.shards = 100; g232.addBlessing('storm');
+      const c232 = document.createElement('div');
+      const st232 = new Story(c232, g232, { navigate(){}, onDeath(){}, notify(){} });
+      st232.begin(await data.getSection(5,'232'), 5, '232');
+      ok('task232: §232 keeps the storm blessing on entry (keepblessing var)', g232.hasBlessing('storm'));
+      Math.random = () => 0.9; // 12 → range 11-12
+      c232.querySelector('.btn-roll').click(); await settle108();
+      ok('task108: §232 a held blessing vetoes the →510 capsize',
+         !Array.from(c232.querySelectorAll('.goto')).some((b) => /→\s*510/.test(b.textContent)));
+      ok('task108: §232 offers the reroll (safe path) instead',
+         Array.from(c232.querySelectorAll('.btn-secondary')).some((b) => /roll again|reroll/i.test(b.textContent)));
+
+      Math.random = rnd108;
+      window.__FL_INSTANT_DICE__ = false;
+    }
+
+    // --- task 109: multi-ability <success ability="…"> routes by the CHOSEN ability ---
+    // §2.37 offers "SANCTITY or MAGIC (your choice)" then a SANCTITY success →60 and a
+    // MAGIC success →129; the branch must match the ability the player actually rolled.
+    {
+      window.__FL_INSTANT_DICE__ = true;
+      const settle109 = () => new Promise((r) => setTimeout(r, 30));
+      const rnd109 = Math.random;
+      const cont37 = (c, n) => Array.from(c.querySelectorAll('.goto')).some((b) => new RegExp('→\\s*' + n + '$').test(b.textContent.trim()));
+      const run37 = async (pick, rng) => {
+        const g = GameState.create({ name:'T37', gender:'m', profession:'Warrior', book:2, adv });
+        g.data.abilities.sanctity = 6; g.data.abilities.magic = 6; // 2d6(max 12)+6 vs 15
+        const c = document.createElement('div');
+        const st = new Story(c, g, { navigate(){}, onDeath(){}, notify(){} });
+        st.begin(await data.getSection(2, '37'), 2, '37');
+        const pickBtn = Array.from(c.querySelectorAll('.ability-pick')).find((b) => new RegExp(pick, 'i').test(b.textContent));
+        pickBtn.click(); await settle109();
+        Math.random = rng;
+        c.querySelector('.btn-roll').click(); await settle109();
+        return c;
+      };
+      const cS = await run37('sanctity', () => 0.9); // 12 + 6 = 18 > 15 → success
+      ok('task109: §37 a successful SANCTITY roll routes to →60',
+         cont37(cS, 60) && !cont37(cS, 129) && !cont37(cS, 83));
+      const cM = await run37('magic', () => 0.9);
+      ok('task109: §37 a successful MAGIC roll routes to →129, not the SANCTITY branch',
+         cont37(cM, 129) && !cont37(cM, 60) && !cont37(cM, 83));
+      const cF = await run37('sanctity', () => 0); // 2 + 6 = 8 ≤ 15 → failure
+      ok('task109: §37 a failed roll routes to →83 regardless of ability',
+         cont37(cF, 83) && !cont37(cF, 60) && !cont37(cF, 129));
+      Math.random = rnd109;
+      window.__FL_INSTANT_DICE__ = false;
+    }
+
+    // --- task 110: <return> restores the previous visit, not a fresh re-entry ---
+    // A → B → <return> must land back on A at the point it was left: its section-local
+    // variable/roll and render memo intact, its one-shot entry effect NOT repeated, no
+    // second forward visit pushed/counted, state changed during the detour kept, and
+    // only a revisit="t" source action left immediately reusable.
+    {
+      const buildReturn = () => {
+        const g = GameState.create({ name:'T110', gender:'m', profession:'Warrior', book:1, adv });
+        g.data.shards = 0;
+        const secA = parse('<section name="A" boxes="1"><gain shards="10"/><tick/><p>Hub.</p><choices><choice section="B">PlainGo</choice><choice section="B" revisit="t">RevisitGo</choice></choices></section>');
+        const secB = parse('<section name="B"><gain shards="5"/><p>Detour.</p><return>Turn back</return></section>');
+        const secs = { A: secA, B: secB };
+        const cont = document.createElement('div');
+        let story;
+        // Mirror the app: every entry is goTo()+begin() so state.data.section is set
+        // and history records the forward visit (a <return> needs that trail).
+        const enter = (b, s) => { g.goTo(b, s); story.begin(secs[String(s)], b, s); };
+        story = new Story(cont, g, { navigate: enter, onDeath(){}, notify(){} });
+        enter(1, 'A'); // first entry: no frame captured (nothing to return to)
+        return { g, cont, story };
+      };
+      const findChoice = (c, label) => Array.from(c.querySelectorAll('.choice')).find((b) => b.textContent.includes(label));
+
+      // Scenario 1 — leave via the plain (non-revisit) choice.
+      const s1 = buildReturn();
+      ok('task110: A\'s entry gain applies once on entry (10 shards)', s1.g.data.shards === 10, 'shards=' + s1.g.data.shards);
+      s1.g.setVar('rolled', 4); // stand in for an in-section roll result the player must resume with
+      const ctxA = s1.story.ctx;
+      findChoice(s1.cont, 'PlainGo').click(); // A → B
+      ok('task110: taking a choice enters the detour (B) and its state change applies', s1.story.section === 'B' && s1.g.data.shards === 15, 'sec=' + s1.story.section + ' shards=' + s1.g.data.shards);
+      s1.cont.querySelector('.goto').click(); // <return> → A
+      ok('task110: return restores the previous section (A)', s1.story.section === 'A' && s1.story.book === 1, 'sec=' + s1.story.section + ' book=' + s1.story.book);
+      ok('task110: return preserves A\'s section variable', s1.g.getVar('rolled') === 4, 'rolled=' + s1.g.getVar('rolled'));
+      ok('task110: return preserves A\'s render memo (same ctx object → roll/used-action state)', s1.story.ctx === ctxA);
+      ok('task110: return does NOT repeat A\'s entry gain, and keeps the detour\'s +5 (15 shards)', s1.g.data.shards === 15, 'shards=' + s1.g.data.shards);
+      // Entering A counted turn 1, entering B counted turn 2; the return must add no
+      // third turn and must pop the A→B→A bounce back to an empty trail.
+      ok('task110: return counts no second forward visit and pops the history bounce', s1.g.data.turns === 2 && (s1.g.data.history || []).length === 0, 'turns=' + s1.g.data.turns + ' hist=' + (s1.g.data.history || []).length);
+      const plainBtn = findChoice(s1.cont, 'PlainGo');
+      const revBtn = findChoice(s1.cont, 'RevisitGo');
+      ok('task110: the taken non-revisit source is spent (crossed off) on return', !!plainBtn && plainBtn.disabled === true, 'dis=' + (plainBtn && plainBtn.disabled));
+      ok('task110: an untaken source stays usable on return', !!revBtn && revBtn.disabled === false, 'dis=' + (revBtn && revBtn.disabled));
+
+      // Scenario 2 — leave via the revisit="t" choice: it stays reusable after returning.
+      const s2 = buildReturn();
+      findChoice(s2.cont, 'RevisitGo').click(); // A → B via the revisit action
+      s2.cont.querySelector('.goto').click();    // <return> → A
+      const revBtn2 = findChoice(s2.cont, 'RevisitGo');
+      ok('task110: a taken revisit="t" source stays reusable on return', !!revBtn2 && revBtn2.disabled === false, 'dis=' + (revBtn2 && revBtn2.disabled));
+    }
+
+    // --- task 111: rolled itemAt= losses skip keep items and honour cache= ---
+    // §6.63/§6.168 take the possession at a rolled 1-based position; the loss must
+    // index the selected pool (player, or a cache= stash), skip currency, no-op past
+    // the end (task 93), and never remove a "keep"-tagged possession — the royal ring
+    // (§1.385) / white sword (§4.103) are explicitly items that cannot be lost.
+    {
+      // an ordinary item at the rolled position → removed
+      const g111 = GameState.create({ name:'T111', gender:'m', profession:'Warrior', book:6, adv });
+      g111.data.items = [];
+      ['ring','sword','flask'].forEach((nm) => g111.addItem(makeItem('item', nm)));
+      g111.setVar('x', 2);
+      eng.applyEffect(parse('<lose itemAt="x"/>'), g111, {});
+      ok('task111: itemAt removes the ordinary item at the rolled position', g111.data.items.map((i)=>i.name).join(',') === 'ring,flask', g111.data.items.map((i)=>i.name).join(','));
+
+      // a keep-tagged possession at the rolled position → left in place (no-op)
+      const g111k = GameState.create({ name:'T111k', gender:'m', profession:'Warrior', book:6, adv });
+      g111k.data.items = [];
+      g111k.addItem(makeItem('item', 'junk'));
+      g111k.addItem(makeItem('item', 'royal ring', 0, null, ['keep'])); // position 2, protected
+      g111k.addItem(makeItem('item', 'flask'));
+      g111k.setVar('x', 2);
+      eng.applyEffect(parse('<lose itemAt="x"/>'), g111k, {});
+      ok('task111: itemAt leaves a keep-tagged possession in place', g111k.data.items.some((i)=>i.name==='royal ring') && g111k.itemCount() === 3, g111k.data.items.map((i)=>i.name).join(','));
+
+      // an out-of-range roll → still takes nothing (task 93 retained)
+      const g111o = GameState.create({ name:'T111o', gender:'m', profession:'Warrior', book:6, adv });
+      g111o.data.items = [];
+      ['a','b'].forEach((nm) => g111o.addItem(makeItem('item', nm)));
+      g111o.setVar('x', 5);
+      const before111 = g111o.itemCount();
+      eng.applyEffect(parse('<lose itemAt="x"/>'), g111o, {});
+      ok('task111: an out-of-range itemAt roll still takes nothing', g111o.itemCount() === before111);
+
+      // a cache-targeted itemAt → removes from the named stash, sparing carried items
+      const g111c = GameState.create({ name:'T111c', gender:'m', profession:'Warrior', book:6, adv });
+      g111c.data.items = []; g111c.addItem(makeItem('item', 'carried keepsake'));
+      g111c.cacheAddItem('vault', makeItem('item', 'stashed gem'));
+      g111c.cacheAddItem('vault', makeItem('item', 'stashed idol'));
+      g111c.setVar('x', 1);
+      eng.applyEffect(parse('<lose itemAt="x" cache="vault"/>'), g111c, {});
+      ok('task111: a cache-targeted itemAt removes from the stash, not carried items',
+         g111c.cacheItems('vault').map((i)=>i.name).join(',') === 'stashed idol' && g111c.data.items.length === 1,
+         'cache=' + g111c.cacheItems('vault').map((i)=>i.name).join(',') + ' carried=' + g111c.itemCount());
+    }
+
+    // --- task 112: a curse's lift= question drives a Lift… action on its chip ---
+    // §5.505 Skunk-juice cuts CHARISMA by 1 until you reach a river/village/town/city;
+    // its stored lift= question must be actionable on the Adventure Sheet — an honest
+    // "Yes" removes that one curse and restores CHARISMA, "No" leaves it untouched.
+    {
+      const settle112 = () => new Promise((r) => setTimeout(r, 0));
+      const LIFTQ = 'Are you at a river, village, town or city?';
+      const curseXml = `<curse name="Skunk-juice" lift="${LIFTQ}"><effect ability="charisma" bonus="-1"/></curse>`;
+      const mk505 = () => {
+        const g = GameState.create({ name:'T505', gender:'m', profession:'Warrior', book:5, adv });
+        g.data.curses = []; g.data.abilities.charisma = 6;
+        eng.applyEffect(parse(curseXml), g, {});
+        return g;
+      };
+
+      // curse applied: stored with its lift question + CHARISMA cut by 1
+      const g505 = mk505();
+      ok('task112: §5.505 stores the curse with its lift question and cuts CHARISMA',
+         g505.hasCurse('Skunk-juice') && g505.data.curses[0].lift === LIFTQ && g505.ability('charisma') === 5,
+         'lift=' + g505.data.curses[0].lift + ' cha=' + g505.ability('charisma'));
+
+      // save round-trip keeps the lift question
+      const g505rt = new GameState(sanitizeData(JSON.parse(JSON.stringify(g505.data))));
+      ok('task112: the lift question survives a save round-trip', !!g505rt.data.curses[0] && g505rt.data.curses[0].lift === LIFTQ, 'lift=' + (g505rt.data.curses[0] && g505rt.data.curses[0].lift));
+
+      // the sheet renders a keyboard/touch Lift… action carrying the exact question
+      const cSheet = document.createElement('div');
+      renderSheet(g505, cSheet, {});
+      const liftBtn = cSheet.querySelector('.chip-action');
+      ok('task112: the Adventure Sheet exposes a Lift… action for the curse', !!liftBtn && liftBtn.tagName === 'BUTTON' && liftBtn.title === LIFTQ, liftBtn ? 'title=' + liftBtn.title : 'no button');
+
+      // answering No leaves the curse and its CHARISMA effect unchanged
+      const gNo = mk505();
+      const cNo = document.createElement('div');
+      renderSheet(gNo, cNo, {});
+      cNo.querySelector('.chip-action').click();
+      ok('task112: the Lift… modal shows the exact stored question', !!document.querySelector('.modal-overlay') && document.querySelector('.modal-body').textContent.includes('river, village, town or city'));
+      Array.from(document.querySelectorAll('.modal-overlay .modal-buttons .btn')).find((b) => b.textContent === 'No').click();
+      await settle112();
+      ok('task112: answering No keeps the curse and its CHARISMA penalty', gNo.hasCurse('Skunk-juice') && gNo.ability('charisma') === 5, 'cha=' + gNo.ability('charisma'));
+
+      // answering Yes removes that one curse and restores CHARISMA
+      const gYes = mk505();
+      const cYes = document.createElement('div');
+      renderSheet(gYes, cYes, {});
+      cYes.querySelector('.chip-action').click();
+      Array.from(document.querySelectorAll('.modal-overlay .modal-buttons .btn')).find((b) => b.textContent === 'Yes').click();
+      await settle112();
+      ok('task112: answering Yes lifts the curse and restores CHARISMA', !gYes.hasCurse('Skunk-juice') && gYes.ability('charisma') === 6, 'cha=' + gYes.ability('charisma') + ' hasCurse=' + gYes.hasCurse('Skunk-juice'));
+
+      // a curse WITHOUT lift= stays inert (no Lift… action)
+      const gInert = GameState.create({ name:'TInert', gender:'m', profession:'Warrior', book:5, adv });
+      gInert.data.curses = [];
+      eng.applyEffect(parse('<curse name="Champion Curse"><effect ability="combat" bonus="-1"/></curse>'), gInert, {});
+      const cInert = document.createElement('div');
+      renderSheet(gInert, cInert, {});
+      ok('task112: a curse without lift= stays inert (no Lift… action)', !cInert.querySelector('.chip-action') && gInert.hasCurse('Champion Curse'));
+    }
+
+    // --- task 113: <lose item="?" bonus="N"> enforces the bonus= filter ---
+    // §4.456's Tambu offering routes its +2/+3 gifts through <lose item="?" bonus=…
+    // price=…>; the bonus filter must be honoured so only a genuinely +2/+3 item can be
+    // offered, and an ineligible offer must not set the price flag that opens §404/§568.
+    {
+      // a +2 lose takes only the +2 item and arms its price flag
+      const g113 = GameState.create({ name:'T113', gender:'m', profession:'Warrior', book:4, adv });
+      g113.data.items = [];
+      g113.addItem(makeItem('item', 'apple'));                      // +0
+      g113.addItem(makeItem('tool', 'lucky ring', 1, 'charisma'));  // +1
+      g113.addItem(makeItem('weapon', 'fine blade', 2));            // +2 — the only eligible
+      eng.applyEffect(parse('<lose item="?" bonus="2" price="2">a +2 item</lose>'), g113, {});
+      ok('task113: a +2 lose takes only the +2 item, sparing +0/+1',
+         !g113.findItems('fine blade').length && g113.findItems('apple').length === 1 && g113.findItems('lucky ring').length === 1,
+         g113.data.items.map((i)=>i.name).join(','));
+      ok('task113: offering a qualifying +2 item arms the price flag', g113.getFlag('2') === true);
+
+      // no qualifying item → nothing lost, price flag stays clear
+      const g113n = GameState.create({ name:'T113n', gender:'m', profession:'Warrior', book:4, adv });
+      g113n.data.items = [makeItem('item', 'apple'), makeItem('tool', 'lucky ring', 1, 'charisma')]; // +0/+1 only
+      eng.applyEffect(parse('<lose item="?" bonus="2" price="2">a +2 item</lose>'), g113n, {});
+      ok('task113: a +2 lose with no +2 item takes nothing and leaves the flag clear',
+         g113n.itemCount() === 2 && g113n.getFlag('2') !== true, 'n=' + g113n.itemCount() + ' flag=' + g113n.getFlag('2'));
+
+      // "N+" means N or greater
+      const g113h = GameState.create({ name:'T113h', gender:'m', profession:'Warrior', book:4, adv });
+      g113h.data.items = [makeItem('weapon', 'ok blade', 2), makeItem('weapon', 'great blade', 4)];
+      eng.applyEffect(parse('<lose item="?" bonus="3+" price="3">a +3 or greater item</lose>'), g113h, {});
+      ok('task113: a "3+" lose takes a +4 item but spares a +2, and arms flag 3',
+         !g113h.findItems('great blade').length && g113h.findItems('ok blade').length === 1 && g113h.getFlag('3') === true);
+
+      // §4.456 in the app: the +2/+3 offer buttons are inert with no qualifying item
+      const g456c = GameState.create({ name:'T456c', gender:'m', profession:'Warrior', book:4, adv });
+      g456c.data.items = [makeItem('item', 'apple'), makeItem('tool', 'lucky ring', 1, 'charisma')]; // +0/+1 only
+      const c456c = document.createElement('div');
+      new Story(c456c, g456c, { navigate(){}, onDeath(){}, notify(){} }).begin(await data.getSection(4, '456'), 4, '456');
+      const offer2 = Array.from(c456c.querySelectorAll('button')).find((b)=>/a \+2 item/i.test(b.textContent));
+      const offer3 = Array.from(c456c.querySelectorAll('button')).find((b)=>/\+3 or greater/i.test(b.textContent));
+      ok('task113: §456 the +2/+3 offers are inert without a qualifying item',
+         !!offer2 && offer2.disabled && !!offer3 && offer3.disabled,
+         `o2=${offer2 && offer2.disabled} o3=${offer3 && offer3.disabled}`);
+
+      // with a +2 item the +2 offer is live; taking it removes the item, arms flag 2 and reveals →404
+      const g456d = GameState.create({ name:'T456d', gender:'m', profession:'Warrior', book:4, adv });
+      g456d.data.items = [makeItem('weapon', 'fine blade', 2)];
+      const c456d = document.createElement('div');
+      const st456d = new Story(c456d, g456d, { navigate(){}, onDeath(){}, notify(){} });
+      st456d.begin(await data.getSection(4, '456'), 4, '456');
+      const offer2d = Array.from(c456d.querySelectorAll('button')).find((b)=>/a \+2 item/i.test(b.textContent));
+      ok('task113: §456 the +2 offer is enabled with a +2 item', !!offer2d && !offer2d.disabled);
+      offer2d.click();
+      ok('task113: §456 offering the +2 item takes it, arms flag 2 and reveals →404',
+         !g456d.findItems('fine blade').length && g456d.getFlag('2') === true &&
+         Array.from(c456d.querySelectorAll('.goto')).some((b)=>/404/.test(b.textContent)),
+         `has=${g456d.findItems('fine blade').length} flag=${g456d.getFlag('2')}`);
+    }
+
+    // --- task 114: the reroll-form storm spend consumes the blessing exactly once ---
+    // §232/502/716 avoid an 11-12 capsize by spending Safety from Storms via a reroll,
+    // but a rerunnable keepblessing entry set defeated the hidden loss — granting
+    // unlimited protection once task 108's veto took effect. The reroll must now consume
+    // an ordinary blessing (a second 11-12 then capsizes →510) while a permanent survives.
+    {
+      window.__FL_INSTANT_DICE__ = true;
+      const settle114 = () => new Promise((r) => setTimeout(r, 30));
+      const rnd114 = Math.random;
+      const rerollBtn = (c) => Array.from(c.querySelectorAll('.btn-secondary')).find((b) => /roll again|reroll/i.test(b.textContent));
+      const goto510 = (c) => Array.from(c.querySelectorAll('.goto')).find((b) => /→\s*510/.test(b.textContent));
+
+      // ordinary storm blessing: roll 11-12 → reroll (spends it) → a second 11-12 capsizes
+      const g114 = GameState.create({ name:'T114', gender:'m', profession:'Warrior', book:5, adv });
+      g114.data.shards = 100; g114.addBlessing('storm');
+      const c114 = document.createElement('div');
+      const st114 = new Story(c114, g114, { navigate(){}, onDeath(){}, notify(){} });
+      st114.begin(await data.getSection(5, '232'), 5, '232');
+      Math.random = () => 0.9; // 6+6 = 12 → range 11-12
+      c114.querySelector('.btn-roll').click(); await settle114();
+      ok('task114: §232 first 11-12 vetoes the capsize and offers a reroll (blessing still held)',
+         !goto510(c114) && !!rerollBtn(c114) && g114.hasBlessing('storm'));
+      rerollBtn(c114).click(); await settle114();
+      ok('task114: taking the reroll spends the ordinary storm blessing', !g114.hasBlessing('storm'));
+      c114.querySelector('.btn-roll').click(); await settle114();
+      ok('task114: a second 11-12 with the blessing spent now capsizes (→510 revealed)', !!goto510(c114));
+
+      // permanent storm blessing: the reroll never uses it up, so it keeps protecting
+      const g114p = GameState.create({ name:'T114p', gender:'m', profession:'Warrior', book:5, adv });
+      g114p.data.shards = 100; g114p.addBlessing('storm', true);
+      const c114p = document.createElement('div');
+      const st114p = new Story(c114p, g114p, { navigate(){}, onDeath(){}, notify(){} });
+      st114p.begin(await data.getSection(5, '232'), 5, '232');
+      Math.random = () => 0.9;
+      c114p.querySelector('.btn-roll').click(); await settle114();
+      rerollBtn(c114p).click(); await settle114();
+      ok('task114: a permanent storm blessing survives the reroll', g114p.hasBlessing('storm') && g114p.isBlessingPermanent('storm'));
+      c114p.querySelector('.btn-roll').click(); await settle114();
+      ok('task114: the permanent blessing still vetoes a second 11-12 capsize', !goto510(c114p) && !!rerollBtn(c114p));
+
+      Math.random = rnd114;
+      window.__FL_INSTANT_DICE__ = false;
+    }
+}

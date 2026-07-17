@@ -9,7 +9,7 @@ the tasks were filed, not work order).
 
 - [x] 123. "Immunity to Disease and Poison" is stored under two un-aliased names — the blessing never protects
 - [x] 124. Loading/importing a save clamps Stamina to the written max — aura Stamina (ring of ultimate power) is silently stripped
-- [ ] 120. Split the 4,790-line single-scope browser test into focused ES-module suites *(before the test-heavy 115–117 chain)*
+- [x] 120. Split the 4,790-line single-scope browser test into focused ES-module suites *(before the test-heavy 115–117 chain)*
 - [ ] 115. Adventure-Sheet item detours bypass `Story.navigate`, so `<return>` still re-enters the source section
 - [ ] 116. Save/load restarts the current visit — effects can repeat and rolls/return state disappear
 - [ ] 117. Priced equipment/cargo losses can arm their reward without taking the required payment
@@ -375,6 +375,21 @@ app code fails nothing; (b) a mid-run async `window.error` fires the task-82
 bootstrap handler and writes `RESULT FATAL`, but `run()`'s unconditional final
 report (_test.html:4786-4788) then **overwrites** it — potentially as `ALL PASS`.
 Make the fatal state sticky and fail the aggregate on any captured async error.
+
+*Done 2026-07-17:* `_test.html` is now only the harness + reporter; the former
+`run()` body was split verbatim (order preserved, so behaviour is unchanged) into
+seven ES-module suites under `web/tests/` — `suite-engine`, `suite-render`,
+`suite-inventory`, `suite-combat`, `suite-economy`, `suite-actions`, and
+`suite-corpus` (the six-book scan, run last). Each exports one `async run(ctx)`
+taking the shared `{ok, parse}`, rebuilds its own fixtures (so `?suite=<name>` runs
+any subset hermetically), and is its own module scope (a duplicate top-level
+`const` now aborts only that suite). Gap (a): added an `unhandledrejection`
+listener; gap (b): the reporter honours a sticky `window.__FL_ASYNC_FATAL__` flag,
+so a captured async error/rejection forces a failure that a later "ALL PASS" can
+never overwrite (verified by fault injection). Aggregate `RESULT ALL PASS pass=1098
+fail=0`; every suite also passes in isolation (147+87+293+226+266+78+1 = 1098). No
+version stamp: the stamp hashes shipped app source only and deliberately excludes
+`_test.html`/`web/tests/`, so a test-only change must not bust the PWA cache.
 
 ---
 

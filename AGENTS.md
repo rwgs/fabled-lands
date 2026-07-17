@@ -51,14 +51,18 @@ Notes:
 - Pure-logic modules (`engine.js`, `combat.js`, `market.js`, `state.js`) can also
   be imported and unit-checked directly in Node for fast feedback.
 - **Never edit `web/data/*.json` to make a test pass — fix the XML or the engine.**
-- Every assertion lives in one big `async function run()` in `web/_test.html`, so a
-  **duplicate top-level `const`/`let`** in a new test block (e.g. reusing `g53`) is a
-  *parse-time* `SyntaxError` that aborts the whole module. A bootstrap error handler now
-  surfaces this as **`RESULT FATAL … Identifier 'x' has already been declared`** (title
-  `TESTS_FAIL`) instead of hanging at `running…` — so a "no RESULT line" result means
-  the page never loaded at all (server down, or a 404 from the wrong path — serve the
-  repo root and request `/web/_test.html`), not a duplicate declaration. Fix: rename the
-  clashing identifier or wrap the block in its own `{ … }` scope (many blocks already are).
+- `web/_test.html` is only the harness + reporter; the assertions live in focused ES-module
+  suites under `web/tests/` (`suite-engine`, `suite-render`, `suite-inventory`, `suite-combat`,
+  `suite-economy`, `suite-actions`, `suite-corpus`), each exporting one `async run(ctx)` and
+  rebuilding its own fixtures. Add new assertions to the suite that owns the area; append
+  `?suite=<name>` (comma list ok) to run a focused subset. Each suite is its **own module
+  scope**, so a **duplicate top-level `const`/`let`** now only aborts *that* suite (not the
+  whole run), and the harness reports it as **`RESULT FATAL … Identifier 'x' has already been
+  declared`** (title `TESTS_FAIL`) via the bootstrap error handler instead of hanging at
+  `running…`. A "no RESULT line" therefore means the page never loaded (server down, or a 404
+  from the wrong path — serve the repo root and request `/web/_test.html`). The reporter is
+  **sticky-fatal**: an uncaught async error or unhandled promise rejection captured mid-run
+  fails the aggregate and can never be overwritten by a later "ALL PASS".
 
 ## Command execution (Bitdefender on Windows)
 The build and tests **require PowerShell**; running the repo's own vetted scripts

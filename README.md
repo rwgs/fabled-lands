@@ -255,7 +255,27 @@ repo root and open `/web/_test.html`, or run it headlessly:
   "http://localhost:8848/web/_test.html"
 ```
 
-The first line of the dumped `#results` reads `RESULT ALL PASS …` when healthy.
+The first line of the dumped `#results` reads `RESULT ALL PASS …` when healthy (page title
+`TESTS_OK`); any failure, or any uncaught async error / unhandled promise rejection captured
+during the run, reports `RESULT FAILURES`/`RESULT FATAL` and title `TESTS_FAIL` — the fatal
+state is sticky and can never be overwritten by a later "ALL PASS".
+
+`_test.html` itself is just the harness + reporter; the assertions live in focused ES-module
+suites under [`web/tests/`](web/tests), each exporting one `async run(ctx)` and rebuilding its
+own fixtures so it runs in isolation. They execute in this order (the six-book scan runs last):
+
+| Suite | File | Covers |
+| --- | --- | --- |
+| `engine`    | `tests/suite-engine.js`    | conditions, effects, dice, rank checks, caches/transfer, resurrection |
+| `render`    | `tests/suite-render.js`    | section render + interaction: rolls, choices, fights, pays, choose-one |
+| `inventory` | `tests/suite-inventory.js` | adventure sheet, afflictions, items, ships, blessings, RNG/expr parsing |
+| `combat`    | `tests/suite-combat.js`    | current-vessel rules, combat blessings, fightrounds, fights, roll branches |
+| `economy`   | `tests/suite-economy.js`   | markets, rest, TTS, persistence, item effects, rewards, quantity/replace |
+| `actions`   | `tests/suite-actions.js`   | travel gates, transfers, `<return>` restore, curse lift, blessing veto |
+| `corpus`    | `tests/suite-corpus.js`    | renders **every section of all six books** without throwing (final scan) |
+
+Append `?suite=<name>` (or a comma list, e.g. `?suite=combat,economy`) to run a focused
+subset in the same harness — handy for iterating on one area.
 
 > Use a **fresh `--user-data-dir`** (as above) so the service worker can't serve a stale
 > cached copy of the app — otherwise an old bundle can mask your changes and report a
