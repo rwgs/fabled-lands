@@ -644,9 +644,10 @@ function applyLose(el, state, opts) {
 }
 
 /** Candidate weapon/armour/tool a <lose kind=…> could take, after the bonus=/tags=/using=
- *  narrowing. Shared by the eligibility gate (losePaymentPlan), the forfeit chooser and
- *  the commit so the view and the engine agree on exactly what qualifies. (task 117;
- *  keep-tag protection is layered in by task 118.) */
+ *  narrowing and keep-tag protection. Shared by the eligibility gate (losePaymentPlan),
+ *  the forfeit chooser and the commit so the view and the engine agree on exactly what
+ *  qualifies. The open "?"/"*" forms never reach a kept item (the white sword §4.103 can't
+ *  be confiscated); only an explicit named piece with no ordinary match may. (tasks 117, 118) */
 function loseEquipmentCandidates(el, state, kind) {
   let cands = state.data.items.filter((it) => it.kind === kind);
   const bonus = el.getAttribute('bonus');
@@ -657,7 +658,7 @@ function loseEquipmentCandidates(el, state, kind) {
     const eq = kind === 'weapon' ? state.wieldedWeapon() : (kind === 'armour' ? state.wornArmour() : null);
     cands = eq ? [eq] : cands.slice(0, 1);
   }
-  return cands;
+  return applyKeepRule(cands, el.getAttribute(kind));
 }
 
 /** Lose a weapon/armour/tool. spec "*" = all of that kind; "?"/name = one (via
@@ -704,8 +705,10 @@ export function losePaymentPlan(el, state) {
   });
   if (g('item') != null) {
     if (g('item') === '*') {
-      const pool = g('cache') != null ? state.cacheItems(g('cache')) : state.data.items;
-      return { present: true, kind: 'item', candidates: pool.slice(), eligible: pool.length > 0, needsChoice: false };
+      // "Lose all your possessions" spares keep items — mirror applyLose so the eligibility
+      // gate agrees with what is actually takeable. (tasks 117, 118)
+      const pool = (g('cache') != null ? state.cacheItems(g('cache')) : state.data.items).filter((it) => !isKeep(it));
+      return { present: true, kind: 'item', candidates: pool, eligible: pool.length > 0, needsChoice: false };
     }
     const cands = loseItemMatches(el, state);
     return { present: true, kind: 'item', candidates: cands, eligible: cands.length > 0, needsChoice: false };
@@ -954,18 +957,37 @@ function filterByBonus(pool, bonus) {
   return m[2] ? pool.filter((it) => (it.bonus || 0) >= b) : pool.filter((it) => (it.bonus || 0) === b);
 }
 
+// A "keep"-tagged possession is one the books say cannot be lost or stolen — the royal
+// ring (§1.385), the white sword (§4.103). Recognised anywhere a forfeit is planned.
+function isKeep(it) { return (it.tags || []).map(normalize).includes('keep'); }
+
+// keep-tag protection for a possession forfeit (task 118). A kept item is spared while any
+// ordinary item satisfies the selector; only an explicitly NAMED selector (not the open
+// ?/blank/* forms) with no ordinary match may deliberately hand that kept item over — a
+// scripted "give up the royal ring" still works, a generic theft never reaches it.
+function applyKeepRule(matches, spec) {
+  const ordinary = matches.filter((it) => !isKeep(it));
+  if (ordinary.length) return ordinary;
+  const s = spec == null ? '' : String(spec).trim();
+  const named = s !== '' && s !== '?' && s !== '*';
+  return named ? matches : ordinary; // ordinary is [] here
+}
+
 // The possessions (or cache items) a `<lose item=…>` would take: name/tag pattern
 // (`?`/blank = any, else pipe-separated names/tags), an optional tags= narrowing,
 // group= provenance and a bonus= filter ("N"/"N+"). The `*` "all possessions" form is
 // handled separately by applyLose (keep/chance rules). Exported so the render layer's
-// offering gate and applyLose share one eligibility test. (task 113)
+// offering gate and applyLose share one eligibility test. (task 113) A carried keep item
+// is protected unless an explicit named selector has no ordinary alternative (task 118);
+// a cache theft targets a deliberately-stocked stash, where the carried-possession keep
+// rule does not apply (mirrors transferMovers).
 export function loseItemMatches(el, state) {
   const pattern = el.getAttribute('item');
   if (pattern == null || pattern === '*') return [];
   const cacheN = el.getAttribute('cache');
   const pool = cacheN != null ? state.cacheItems(cacheN) : state.data.items;
-  const matches = matchItemQuery(pool, pattern, el.getAttribute('tags'), el.getAttribute('group'));
-  return filterByBonus(matches, el.getAttribute('bonus'));
+  const matches = filterByBonus(matchItemQuery(pool, pattern, el.getAttribute('tags'), el.getAttribute('group')), el.getAttribute('bonus'));
+  return cacheN != null ? matches : applyKeepRule(matches, pattern);
 }
 
 // Items in `pool` matched by a transfer selector: kind, name (bare "*"/"?"/blank =

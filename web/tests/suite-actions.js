@@ -626,6 +626,91 @@ export async function run(ctx) {
       }
     }
 
+    // --- task 118: choice/equipment losses respect the keep tag ---
+    // A "keep" possession (royal ring §1.385, white sword §4.103 — "cannot be lost or
+    // stolen") is spared by the open item="?"/multiple= and weapon/armour ?/* forfeits, and
+    // by "lose all". Only an explicit NAMED selector with no ordinary alternative may hand
+    // that exact kept item over (a scripted, deliberate forfeit).
+    {
+      const mk118 = (items) => {
+        const g = GameState.create({ name:'T118', gender:'m', profession:'Warrior', book:1, adv });
+        g.data.items = []; items.forEach((it) => g.addItem(it));
+        return g;
+      };
+      const names = (g) => g.data.items.map((i) => i.name).join(',');
+      const ring = () => makeItem('item', 'royal ring', 0, null, ['keep']);
+      const whiteSword = () => makeItem('weapon', 'white sword', 3, null, ['keep']);
+
+      // item="?" with a mix: the ordinary item goes, the kept ring stays.
+      {
+        const g = mk118([ring(), makeItem('item', 'sword'), makeItem('item', 'flask')]);
+        eng.applyEffect(parse('<lose item="?"/>'), g, {});
+        ok('task118: item="?" takes an ordinary item and spares the kept ring',
+           g.data.items.some((i) => i.name === 'royal ring') && !g.data.items.some((i) => i.name === 'sword') && g.itemCount() === 2, names(g));
+      }
+
+      // item="?" with ONLY kept items: nothing is taken.
+      {
+        const g = mk118([ring()]);
+        eng.applyEffect(parse('<lose item="?"/>'), g, {});
+        ok('task118: item="?" against an only-kept inventory takes nothing', g.itemCount() === 1 && g.data.items[0].name === 'royal ring', names(g));
+      }
+
+      // multiple="2" never reaches a kept item — two ordinary items go, ring + one stay.
+      {
+        const g = mk118([ring(), makeItem('item', 'sword'), makeItem('item', 'flask'), makeItem('item', 'gem')]);
+        eng.applyEffect(parse('<lose item="?" multiple="2"/>'), g, {});
+        ok('task118: multiple= never takes a kept item',
+           g.data.items.some((i) => i.name === 'royal ring') && g.itemCount() === 2, names(g));
+      }
+
+      // "lose all possessions" spares the kept ring.
+      {
+        const g = mk118([ring(), makeItem('item', 'sword'), makeItem('item', 'flask')]);
+        eng.applyEffect(parse('<lose item="*"/>'), g, {});
+        ok('task118: "lose all" spares the kept ring', g.itemCount() === 1 && g.data.items[0].name === 'royal ring', names(g));
+      }
+
+      // weapon="?" spares a kept weapon while an ordinary one exists.
+      {
+        const g = mk118([whiteSword(), makeItem('weapon', 'axe', 1)]);
+        eng.applyEffect(parse('<lose weapon="?"/>'), g, {});
+        ok('task118: weapon="?" takes the ordinary weapon and spares the white sword',
+           g.data.items.some((i) => i.name === 'white sword') && !g.data.items.some((i) => i.name === 'axe'), names(g));
+      }
+
+      // weapon="*" (all of a kind) still skips the kept weapon.
+      {
+        const g = mk118([whiteSword(), makeItem('weapon', 'axe', 1), makeItem('weapon', 'club', 0)]);
+        eng.applyEffect(parse('<lose weapon="*"/>'), g, {});
+        ok('task118: weapon="*" removes every ordinary weapon but keeps the white sword',
+           g.itemCount() === 1 && g.data.items[0].name === 'white sword', names(g));
+      }
+
+      // weapon="?" against an only-kept weapon: nothing is taken (§4.103 can't be confiscated).
+      {
+        const g = mk118([whiteSword()]);
+        eng.applyEffect(parse('<lose weapon="?"/>'), g, {});
+        ok('task118: weapon="?" against only a kept weapon takes nothing', g.itemCount() === 1, names(g));
+      }
+
+      // A NAMED selector with no ordinary alternative may deliberately hand over the kept
+      // item (a scripted "give up the royal ring").
+      {
+        const g = mk118([ring()]);
+        eng.applyEffect(parse('<lose item="royal ring"/>'), g, {});
+        ok('task118: an explicit named selector may take the kept item deliberately', g.itemCount() === 0, names(g));
+      }
+
+      // The eligibility plan agrees: only-kept ⇒ ineligible; a mix ⇒ eligible.
+      {
+        const gk = mk118([ring()]);
+        ok('task118: losePaymentPlan marks an only-kept item="?" forfeit ineligible', eng.losePaymentPlan(parse('<lose item="?" price="x"/>'), gk).eligible === false);
+        gk.addItem(makeItem('item', 'sword'));
+        ok('task118: a mixed inventory makes the item="?" forfeit eligible', eng.losePaymentPlan(parse('<lose item="?" price="x"/>'), gk).eligible === true);
+      }
+    }
+
     // --- task 111: rolled itemAt= losses skip keep items and honour cache= ---
     // §6.63/§6.168 take the possession at a rolled 1-based position; the loss must
     // index the selected pool (player, or a cache= stash), skip currency, no-op past
