@@ -10,7 +10,7 @@ import {
   evaluateCondition, applyEffect, applyEffectBody, boolAttr, resolveValue, isDiceExpr,
   rollDifficulty, rollRankCheck, rollTraining, rollDice, matchRange, childAdjustment,
   applyRest, buyResurrectionDeal, reviveWithResurrection, abilityChoiceOptions, readItemEffects,
-  whileLoopDone, filterMatches, transferPlan, loseItemMatches,
+  whileLoopDone, filterMatches, transferPlan, loseItemMatches, useItemEffect,
 } from './engine.js';
 import { makeFight, fightRound, groupFightRound, isDefeated, useWrathBlessing, useDefenceBlessing, rerollAttack } from './combat.js';
 import { shopKind, goodsFrom, ownsGoods, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo, canUpgradeCrew, payChoiceCost } from './market.js';
@@ -278,6 +278,24 @@ export class Story {
   }
 
   rerender() { this.render(); }
+
+  // Use a usable Adventure-Sheet item effect (task 41) and route any section detour it
+  // opens through the SAME navigation entry point as a choice/goto (task 115). Applying
+  // the effect and consuming the charge FIRST keeps those legitimate state changes; the
+  // detour's <goto> then goes via this.navigate so the source visit's return frame is
+  // captured and its leave hooks run — otherwise a raw jump left the destination with a
+  // stale/blank frame and its <return> re-entered the wrong section. Returns the engine
+  // result so the caller can surface a revealed illustration (the map of Bazalek, task 62).
+  useItem(item, effect, bodyNode = null) {
+    const res = useItemEffect(this.state, item, effect, bodyNode);
+    if (res.removeItem) this.state.removeItemById(item.id);
+    if (res.goto && res.goto.section != null) {
+      this.navigate(res.goto.book || this.book || this.state.data.book, res.goto.section);
+    } else {
+      this.rerender();
+    }
+    return res;
+  }
 
   render() {
     this.root.innerHTML = '';

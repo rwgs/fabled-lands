@@ -352,6 +352,73 @@ export async function run(ctx) {
       ok('task110: a taken revisit="t" source stays reusable on return', !!revBtn2 && revBtn2.disabled === false, 'dis=' + (revBtn2 && revBtn2.disabled));
     }
 
+    // --- task 115: Adventure-Sheet item detours route through the one navigation entry point ---
+    // Using an item whose Use effect opens a section detour (treasure map §1.30→§1.200 etc.)
+    // must capture the SOURCE section's return frame exactly like a normal choice, so the
+    // detour's <return> restores that source visit — not a stale frame left by an earlier hop
+    // (the dominant mode), nor a fresh re-entry. Story.useItem is the single entry point the
+    // app delegates to; here we drive it directly and prove the return seam.
+    {
+      const buildDetour = () => {
+        const g = GameState.create({ name:'T115', gender:'m', profession:'Warrior', book:1, adv });
+        g.data.shards = 0;
+        const secP = parse('<section name="P"><p>Prior.</p><choices><choice section="A">GoA</choice></choices></section>');
+        const secA = parse('<section name="A" boxes="1"><gain shards="10"/><tick/><p>Source.</p></section>');
+        const secD = parse('<section name="D"><gain shards="5"/><p>Detour.</p><return>Turn back</return></section>');
+        const secs = { P: secP, A: secA, D: secD };
+        const cont = document.createElement('div');
+        let story;
+        const enter = (b, s) => { g.goTo(b, s); story.begin(secs[String(s)], b, s); };
+        story = new Story(cont, g, { navigate: enter, onDeath(){}, notify(){} });
+        return { g, cont, enter, story };
+      };
+      const findChoice = (c, label) => Array.from(c.querySelectorAll('.choice')).find((b) => b.textContent.includes(label));
+      const detourItem = () => ({ item: makeItem('item', 'treasure map'), effect: { uses: -1, body: '<goto section="D"/>' }, body: parse('<effect><goto section="D"/></effect>') });
+
+      // Scenario 1 — the dominant stale-frame mode. Arrive at the source (A) via a normal
+      // choice from a prior section (P): _returnFrame now points at P. An item detour from A
+      // must re-point it at A, so D's <return> lands on A, not the stale P.
+      {
+        const d = buildDetour();
+        d.enter(1, 'P');
+        findChoice(d.cont, 'GoA').click(); // P → A (normal choice)
+        const st = d.story;
+        ok('task115: arriving at the source (A) applies its entry gain once', st.section === 'A' && d.g.data.shards === 10, 'sec=' + st.section + ' shards=' + d.g.data.shards);
+        const ctxA = st.ctx;
+        const ticksAtA = d.g.tickCount();
+        const histAtA = (d.g.data.history || []).length;
+        d.g.setVar('mark', 7); // an in-section value the player must resume with
+        const it = detourItem();
+        st.useItem(it.item, it.effect, it.body); // A → D via the single entry point
+        ok('task115: using the item opens the detour (D) and its state change applies', st.section === 'D' && d.g.data.shards === 15, 'sec=' + st.section + ' shards=' + d.g.data.shards);
+        const turnsAtD = d.g.data.turns;
+        const histAtD = (d.g.data.history || []).length;
+        d.cont.querySelector('.goto').click(); // <return> → A (NOT P)
+        ok('task115: return from an item detour restores the source (A), not the pre-source (P)', st.section === 'A' && st.book === 1, 'sec=' + st.section + ' book=' + st.book);
+        ok('task115: return preserves the source section variable', d.g.getVar('mark') === 7, 'mark=' + d.g.getVar('mark'));
+        ok('task115: return preserves the source render memo (same ctx object)', st.ctx === ctxA);
+        ok('task115: return does NOT repeat the source entry gain, and keeps the detour +5 (15 shards)', d.g.data.shards === 15, 'shards=' + d.g.data.shards);
+        ok('task115: return does NOT repeat the source entry tick', d.g.tickCount() === ticksAtA, 'ticks=' + d.g.tickCount() + ' vs ' + ticksAtA);
+        ok('task115: return counts no extra forward visit and pops the A→D bounce', d.g.data.turns === turnsAtD && (d.g.data.history || []).length === histAtD - 1 && (d.g.data.history || []).length === histAtA, 'turns=' + d.g.data.turns + ' hist=' + (d.g.data.history || []).length);
+      }
+
+      // Scenario 2 — the null-frame mode (item used with no prior detour frame, as right
+      // after a load). The detour must still capture A, so <return> restores A rather than
+      // falling back to a fresh re-entry that would re-run A's entry gain.
+      {
+        const d = buildDetour();
+        d.enter(1, 'A'); // A is the first section: no return frame held
+        const st = d.story;
+        const ctxA = st.ctx;
+        d.g.setVar('mark', 3);
+        const it = detourItem();
+        st.useItem(it.item, it.effect, it.body); // A → D
+        d.cont.querySelector('.goto').click();    // <return>
+        ok('task115: with no prior frame, return still restores the source visit (A)', st.section === 'A' && st.ctx === ctxA && d.g.getVar('mark') === 3, 'sec=' + st.section + ' mark=' + d.g.getVar('mark'));
+        ok('task115: null-frame return does not re-run A\'s entry gain', d.g.data.shards === 15, 'shards=' + d.g.data.shards);
+      }
+    }
+
     // --- task 111: rolled itemAt= losses skip keep items and honour cache= ---
     // §6.63/§6.168 take the possession at a rolled 1-based position; the loss must
     // index the selected pool (player, or a cache= stash), skip currency, no-op past

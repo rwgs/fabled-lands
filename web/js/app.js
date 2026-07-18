@@ -4,7 +4,7 @@ import * as data from './data.js';
 import { GameState, loadSlotMeta, deleteSlot, nextFreeSlot, readSlotData, importSave } from './state.js';
 import { ABILITIES, ABILITY_LABEL, ABILITY_BLURB, PROFESSIONS, rankTitle, ordinal } from './rules.js';
 import { Story } from './render.js';
-import { useItemEffect, seedRng, reviveWithResurrection } from './engine.js';
+import { seedRng, reviveWithResurrection } from './engine.js';
 import { renderSheet, modal, toast, escapeHtml } from './ui.js';
 import { VERSION } from './version.js';
 import { Narrator } from './tts.js'; // [TTS] optional narration — remove this + the [TTS] hooks below to drop the feature
@@ -551,16 +551,15 @@ function refreshSheet() {
 // a charge (removing the item when spent), and follows any inner <goto> use-target
 // (the Vade Mecum consult). State mutations trigger the onChange sheet refresh.
 function onUseItem(item, effect) {
-  if (!state || !effect) return;
+  if (!state || !effect || !story) return;
   let bodyNode = null;
   if (effect.body) {
     try { bodyNode = data.parseXml(`<effect>${effect.body}</effect>`); } catch { bodyNode = null; }
   }
-  const res = useItemEffect(state, item, effect, bodyNode);
-  if (res.removeItem) state.removeItemById(item.id);
+  // Delegate to Story's single navigation entry point so an item detour captures the
+  // source section's return frame and runs its leave hooks, like a normal choice (task 115).
+  const res = story.useItem(item, effect, bodyNode);
   if (res.image && res.image.file) showIllustration(res.image.file, res.image.title); // map of Bazalek (task 62)
-  if (res.goto && res.goto.section != null) { navigate(res.goto.book || (story && story.book) || state.data.book, res.goto.section); return; }
-  if (story) story.rerender();
 }
 
 // Open a section illustration in a modal (the map an item's Use effect reveals).
@@ -646,7 +645,9 @@ async function handleDeath() {
   deathShown = false;
   if (choice === 'res' && res) {
     const target = reviveWithResurrection(state); // revive rule lives in engine.js (task 34)
-    if (target) navigate(target.book, target.section);
+    // Route through Story's single navigation entry point so the leave hooks run and no
+    // stale return frame lingers for the resurrection section's <return> (task 115).
+    if (target) { if (story) story.navigate(target.book, target.section); else navigate(target.book, target.section); }
   } else if (choice === 'undo') { undo(); }
   else if (choice === 'load') { showSaves(); }
   else { showCreate(); }
