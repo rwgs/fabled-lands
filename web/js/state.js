@@ -104,6 +104,12 @@ function freshData() {
     section: null,
     startBook: 1,
     history: [],          // [{book, section}] navigation trail
+    // The in-progress visit's execution record (task 116): section identity + the
+    // renderer's per-visit memo (applied effects, resolved rolls/fights, picks, the
+    // one-level return frame). Refreshed on every save() from the Story visit provider
+    // so a reload resumes the exact visit instead of re-entering it fresh. null before
+    // the first section, or for a legacy save that predates the record.
+    visit: null,
     turns: 0,
     created: Date.now(),
     updated: Date.now(),
@@ -127,6 +133,11 @@ export class GameState {
     // UI watches this to warn that progress is no longer being saved (task 7).
     this.lastSaveError = null;
     this._listeners = new Set();
+    // Callback the Story installs (setVisitProvider) that serialises the current
+    // visit's execution record; save() calls it so data.visit is always current at
+    // persist time — no matter which of the many mid-render mutations triggered the
+    // autosave. Null until a game screen is built (and for probe clones). (task 116)
+    this._visitProvider = null;
     this._undo = []; // in-memory stack of pre-section-effects state snapshots
     // A <tick special="attack|defence" bonus="N"> grants a per-fight modifier to
     // the player's attack rolls (COMBAT) or Defence, lasting only the current
@@ -152,6 +163,10 @@ export class GameState {
   }
 
   onChange(fn) { this._listeners.add(fn); return () => this._listeners.delete(fn); }
+  // Install the current-visit serialiser (task 116). save() invokes it to refresh
+  // data.visit just before writing, so the persisted record reflects every applied
+  // effect / resolved roll up to this instant.
+  setVisitProvider(fn) { this._visitProvider = fn || null; }
   changed() {
     this.data.updated = Date.now();
     this.save();
@@ -879,6 +894,9 @@ export class GameState {
    *  ephemeral preview game reports success without writing. */
   save() {
     if (this.ephemeral) { this.lastSaveError = null; return true; } // preview game: not persisted until kept
+    // Refresh the current-visit record so the write captures execution state as of now
+    // (task 116). Guarded: a provider fault must never block persisting the game itself.
+    if (this._visitProvider) { try { this.data.visit = this._visitProvider(); } catch (e) { this.data.visit = null; } }
     try {
       localStorage.setItem(SAVE_PREFIX + this.slot, JSON.stringify(this.data));
       const meta = loadSlotMeta();
@@ -1016,6 +1034,28 @@ function sanitizeShip(s) {
   };
 }
 
+// Validate a persisted current-visit record (task 116). Only its identity fields are
+// coerced/guarded here; the ctx/frame memo is passed through as-is because the renderer
+// rebuilds from it and loadCurrent's resume() has a conservative fallback if it is bad.
+// Dropped (→ null) unless it is a v:1 record whose section matches the game's current
+// section — a mismatched record would resume the wrong visit, so we discard it and let
+// the migration re-enter conservatively.
+function sanitizeVisit(v, curBook, curSection) {
+  const o = asObj(v);
+  if (o.v !== 1 || o.section == null || curSection == null) return null;
+  if (String(o.section) !== String(curSection) || asNum(o.book, 0, { int: true }) !== curBook) return null;
+  if (!o.ctx || typeof o.ctx !== 'object') return null;
+  return {
+    v: 1,
+    book: curBook,
+    section: String(o.section),
+    entryTicks: asNum(o.entryTicks, 0, { min: 0, int: true }),
+    sectionTodock: o.sectionTodock == null ? null : asStr(o.sectionTodock),
+    ctx: asObj(o.ctx),
+    frame: o.frame == null ? null : asObj(o.frame),
+  };
+}
+
 export function sanitizeData(raw) {
   const base = freshData();
   const d = asObj(raw);
@@ -1121,6 +1161,10 @@ export function sanitizeData(raw) {
 
   out.book = asNum(d.book, base.book, { min: 1, int: true });
   out.section = d.section == null ? null : asStr(d.section);
+  // The current-visit execution record (task 116). Kept only when it names the current
+  // section — the renderer re-checks this on load and resume() is wrapped in a fallback,
+  // so the deep contents pass through largely verbatim (they are our own serialised memo).
+  out.visit = sanitizeVisit(d.visit, out.book, out.section);
   out.startBook = asNum(d.startBook, out.book, { min: 1, int: true });
   out.history = asArr(d.history).map((h) => { const o = asObj(h); return { book: asNum(o.book, 1, { min: 1, int: true }), section: asStr(o.section) }; }).filter((h) => h.section);
   out.turns = asNum(d.turns, 0, { min: 0, int: true });

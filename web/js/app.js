@@ -518,6 +518,9 @@ function buildGameScreen() {
     notify: (msg, type) => toast(msg, type),
     onRender: () => { narrator.handleRerender(); syncNarrateBtn(); }, // [TTS] stop narration + refresh the button state when the DOM changes
   });
+  // Every autosave captures the current visit's execution record (task 116) so a reload
+  // resumes the exact visit instead of re-entering the section and repeating its effects.
+  state.setVisitProvider(() => (story ? story.serializeVisit() : null));
 
   state.onChange(() => { refreshSheet(); surfaceSaveError(); });
   refreshSheet();
@@ -615,13 +618,32 @@ async function startGame(section) {
 async function loadCurrent() {
   buildGameScreen();
   const sec = state.data.section;
-  if (sec == null) { await navigate(state.data.book, 1); }
-  else {
-    const sectionEl = await data.getSection(state.data.book, sec);
-    if (!sectionEl) { await navigate(state.data.book, 1); return; }
-    state.snapshot(); // baseline entry state for undo after a load
-    story.begin(sectionEl, state.data.book, sec);
-    narrator.autoplayIfEnabled(currentFlow()); // [TTS]
+  if (sec == null) { await navigate(state.data.book, 1); return; }
+  const sectionEl = await data.getSection(state.data.book, sec);
+  if (!sectionEl) { await navigate(state.data.book, 1); return; }
+  state.snapshot(); // baseline entry state for undo after a load
+  await resumeOrBegin(sectionEl, state.data.book, sec);
+  narrator.autoplayIfEnabled(currentFlow()); // [TTS]
+}
+
+// Resume the persisted current visit exactly (task 116). With a matching visit record we
+// rebuild the renderer's memo and pick up where the save was made — entry effects, ticks
+// and resolved rolls are NOT replayed. A missing/incompatible record (a legacy save) — or
+// a malformed one — falls back to a conservative migration that re-enters the section
+// without duplicating any reward.
+async function resumeOrBegin(sectionEl, book, sec) {
+  const rec = state.data.visit;
+  const usable = rec && rec.v === 1 && Number(rec.book) === Number(book) && String(rec.section) === String(sec);
+  if (!usable) { story.resumeStale(sectionEl, book, sec); return; }
+  try {
+    let frame = null;
+    if (rec.frame && rec.frame.section != null) {
+      const fEl = await data.getSection(rec.frame.book, rec.frame.section);
+      if (fEl) frame = story.deserializeFrame(rec.frame, fEl);
+    }
+    story.resume(sectionEl, book, sec, rec, frame);
+  } catch (e) {
+    story.resumeStale(sectionEl, book, sec);
   }
 }
 

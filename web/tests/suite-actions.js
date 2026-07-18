@@ -419,6 +419,110 @@ export async function run(ctx) {
       }
     }
 
+    // --- task 116: a save round-trip resumes the current visit; effects/rolls do not restart ---
+    // Autosave persists a serializable visit record; loading rebuilds the renderer's memo and
+    // resumes the exact visit instead of re-entering the section (which would repeat entry
+    // gains/ticks and drop resolved rolls / the return frame).
+    {
+      window.__FL_INSTANT_DICE__ = true;
+      const settle116 = () => new Promise((r) => setTimeout(r, 30));
+      const rnd116 = Math.random;
+
+      // Scenario 1 — entry gain + tick + a resolved roll survive a save/load round-trip.
+      {
+        const secRT = parse('<section name="RT" boxes="1"><gain shards="7"/><tick/><p>Test.</p><difficulty ability="COMBAT" level="1"/><success><p>WON-IT</p></success><failure><p>LOST-IT</p></failure></section>');
+        const g = GameState.create({ name:'T116', gender:'m', profession:'Warrior', book:1, adv });
+        g.data.shards = 0; g.data.abilities.combat = 8;
+        const cont = document.createElement('div');
+        const story = new Story(cont, g, { navigate(){}, onDeath(){}, notify(){} });
+        g.goTo(1, 'RT');
+        story.begin(secRT, 1, 'RT');
+        Math.random = () => 0.99; // level 1 vs COMBAT 8 → success regardless of the dice
+        cont.querySelector('.btn-roll').click(); await settle116();
+        Math.random = rnd116;
+        const rollsPlayed = story.ctx.rolls.size;
+        ok('task116: the visit applied its entry gain + tick once and resolved the roll',
+           g.data.shards === 7 && g.tickCount(1, 'RT') === 1 && rollsPlayed >= 1,
+           'shards=' + g.data.shards + ' ticks=' + g.tickCount(1, 'RT') + ' rolls=' + rollsPlayed);
+
+        // Serialise (what the save provider writes), round-trip through the storage sanitizer,
+        // and reconstruct GameState + Story.
+        const record = story.serializeVisit();
+        ok('task116: serializeVisit records the section identity + applied memo',
+           !!record && record.section === 'RT' && Array.isArray(record.ctx.applied) && record.ctx.applied.length >= 1);
+        const g2 = new GameState(sanitizeData(JSON.parse(JSON.stringify({ ...g.data, visit: record }))));
+        ok('task116: the visit record survives sanitize when its section matches', !!g2.data.visit && g2.data.visit.section === 'RT');
+
+        const cont2 = document.createElement('div');
+        const story2 = new Story(cont2, g2, { navigate(){}, onDeath(){}, notify(){} });
+        story2.resume(secRT, 1, 'RT', g2.data.visit, null);
+        ok('task116: resume does NOT repeat the entry gain', g2.data.shards === 7, 'shards=' + g2.data.shards);
+        ok('task116: resume does NOT repeat the entry tick', g2.tickCount(1, 'RT') === 1, 'ticks=' + g2.tickCount(1, 'RT'));
+        ok('task116: resume keeps the roll resolved (no re-roll button, outcome still shown)',
+           story2.ctx.rolls.size === rollsPlayed && !cont2.querySelector('.btn-roll') && /WON-IT|LOST-IT/.test(cont2.textContent),
+           'rolls=' + story2.ctx.rolls.size + ' hasBtn=' + !!cont2.querySelector('.btn-roll'));
+      }
+
+      // Scenario 2 — a save made WHILE inside a return detour keeps the one-level return frame,
+      // so <return> after the reload restores the source visit without re-entering it.
+      {
+        const secP = parse('<section name="P"><p>Prior.</p><choices><choice section="A">GoA</choice></choices></section>');
+        const secA = parse('<section name="A" boxes="1"><gain shards="10"/><tick/><p>Source.</p></section>');
+        const secD = parse('<section name="D"><gain shards="5"/><p>Detour.</p><return>Turn back</return></section>');
+        const secs = { P: secP, A: secA, D: secD };
+        const g = GameState.create({ name:'T116b', gender:'m', profession:'Warrior', book:1, adv });
+        g.data.shards = 0;
+        const cont = document.createElement('div');
+        let story;
+        const enter = (b, s) => { g.goTo(b, s); story.begin(secs[String(s)], b, s); };
+        story = new Story(cont, g, { navigate: enter, onDeath(){}, notify(){} });
+        enter(1, 'P');
+        Array.from(cont.querySelectorAll('.choice')).find((b) => b.textContent.includes('GoA')).click(); // P → A
+        g.setVar('mark', 9);
+        const it = { item: makeItem('item', 'map'), effect: { uses: -1, body: '<goto section="D"/>' }, body: parse('<effect><goto section="D"/></effect>') };
+        story.useItem(it.item, it.effect, it.body); // A → D, captures the return frame for A
+        const turnsAtD = g.data.turns;
+        ok('task116: mid-detour the return frame is held at D', story.section === 'D' && !!story._returnFrame, 'sec=' + story.section);
+
+        const record = story.serializeVisit();
+        ok('task116: the saved record carries the one-level return frame', !!record && !!record.frame && record.frame.section === 'A');
+        const g2 = new GameState(sanitizeData(JSON.parse(JSON.stringify({ ...g.data, visit: record }))));
+        const cont2 = document.createElement('div');
+        let story2;
+        story2 = new Story(cont2, g2, { navigate: (b, s) => { g2.goTo(b, s); story2.begin(secs[String(s)], b, s); }, onDeath(){}, notify(){} });
+        const frame2 = story2.deserializeFrame(g2.data.visit.frame, secA);
+        story2.resume(secD, 1, 'D', g2.data.visit, frame2);
+        ok('task116: resume lands back in the detour (D) with the frame restored', story2.section === 'D' && !!story2._returnFrame);
+
+        cont2.querySelector('.goto').click(); // <return> after the reload
+        ok('task116: post-reload <return> restores the source section (A)', story2.section === 'A', 'sec=' + story2.section);
+        ok('task116: post-reload <return> restores the source section variable', g2.getVar('mark') === 9, 'mark=' + g2.getVar('mark'));
+        ok('task116: post-reload <return> does not repeat A\'s entry gain (keeps 15 shards)', g2.data.shards === 15, 'shards=' + g2.data.shards);
+        ok('task116: post-reload <return> counts no extra turn and pops the A→D bounce',
+           g2.data.turns === turnsAtD && (g2.data.history || []).length === 1,
+           'turns=' + g2.data.turns + ' hist=' + (g2.data.history || []).length);
+      }
+
+      // Scenario 3 — a legacy save with no visit record migrates conservatively: the persisted
+      // totals are kept and the on-entry gain/tick are NOT replayed.
+      {
+        const secL = parse('<section name="L" boxes="1"><gain shards="4"/><tick/><p>Legacy.</p><choices><choice section="99">Onward</choice></choices></section>');
+        const g = GameState.create({ name:'T116c', gender:'m', profession:'Warrior', book:1, adv });
+        g.data.shards = 4;            // as if the entry gain had already been applied and saved
+        g.data.boxes[g.boxKey(1, 'L')] = 1; // and the box already ticked
+        g.data.section = 'L'; g.data.book = 1;
+        g.data.visit = null;          // legacy blob: no visit record
+        const cont = document.createElement('div');
+        const story = new Story(cont, g, { navigate(){}, onDeath(){}, notify(){} });
+        story.resumeStale(secL, 1, 'L');
+        ok('task116: a record-less (legacy) resume does not re-apply the entry gain', g.data.shards === 4, 'shards=' + g.data.shards);
+        ok('task116: a record-less (legacy) resume does not re-tick the entry box', g.tickCount(1, 'L') === 1, 'ticks=' + g.tickCount(1, 'L'));
+        ok('task116: a record-less resume still renders the onward choice', !!Array.from(cont.querySelectorAll('.choice')).find((b) => b.textContent.includes('Onward')));
+      }
+
+      window.__FL_INSTANT_DICE__ = false;
+    }
+
     // --- task 111: rolled itemAt= losses skip keep items and honour cache= ---
     // §6.63/§6.168 take the possession at a rolled 1-based position; the loss must
     // index the selected pool (player, or a cache= stash), skip currency, no-op past
