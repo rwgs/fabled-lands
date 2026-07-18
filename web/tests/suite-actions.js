@@ -523,6 +523,109 @@ export async function run(ctx) {
       window.__FL_INSTANT_DICE__ = false;
     }
 
+    // --- task 117: priced equipment/cargo losses can't arm a reward without taking payment ---
+    // §2.90 forfeits a weapon OR armour (price=x) to renounce Elnir; §3.569 trades a named
+    // Cargo Unit (price=x) for two textiles. An ineligible forfeit button (no such
+    // equipment / the wrong cargo) must stay disabled and never arm the linked reward; an
+    // open "?" forfeit with several candidates asks which; a real forfeit takes the exact
+    // item and only then opens the reward.
+    {
+      const sec90 = await data.getSection(2, '90');
+      const mk90 = (kinds) => {
+        const g = GameState.create({ name:'T90', gender:'m', profession:'Warrior', book:2, adv });
+        g.data.items = []; (kinds || []).forEach((it) => g.addItem(it));
+        g.data.gods = ['Elnir'];
+        const c = document.createElement('div');
+        const st = new Story(c, g, { navigate(){}, onDeath(){}, notify(){} });
+        g.goTo(2, '90'); st.begin(sec90, 2, '90');
+        return { g, c, st };
+      };
+      const payByText = (c, re) => Array.from(c.querySelectorAll('.pay-action')).find((b) => re.test(b.textContent));
+
+      // No weapon but an armour: the weapon forfeit is disabled, the armour forfeit live,
+      // and (because equipment is present) no money-fallback button appears.
+      {
+        const { g, c } = mk90([makeItem('armour', 'chainmail', 2)]);
+        const wBtn = payByText(c, /weapon/i);
+        const aBtn = payByText(c, /armour|armor/i);
+        ok('task117: §2.90 the weapon forfeit is disabled with no weapon', !!wBtn && wBtn.disabled === true, 'w=' + (wBtn && wBtn.disabled));
+        ok('task117: §2.90 the armour forfeit stays live when you own armour', !!aBtn && aBtn.disabled === false, 'a=' + (aBtn && aBtn.disabled));
+        ok('task117: §2.90 an ineligible forfeit keeps Elnir until a real payment', g.data.gods.includes('Elnir'));
+      }
+
+      // A single weapon: forfeiting it (no picker needed) takes that weapon and deletes Elnir.
+      {
+        const { g, c } = mk90([makeItem('weapon', 'sword', 1)]);
+        const wBtn = payByText(c, /weapon/i);
+        ok('task117: §2.90 a single owned weapon makes the forfeit live', !!wBtn && wBtn.disabled === false);
+        wBtn.click();
+        ok('task117: §2.90 forfeiting the weapon removes it and renounces Elnir',
+           g.data.items.length === 0 && !g.data.gods.includes('Elnir'),
+           'items=' + g.data.items.length + ' elnir=' + g.data.gods.includes('Elnir'));
+      }
+
+      // Several weapons: the forfeit asks WHICH; picking one takes exactly that weapon.
+      {
+        const { g, c } = mk90([makeItem('weapon', 'dagger', 0), makeItem('weapon', 'greatsword', 3)]);
+        const wBtn = payByText(c, /weapon/i);
+        ok('task117: §2.90 the forfeit is live with weapons to give up', !!wBtn && wBtn.disabled === false);
+        wBtn.click(); // reveal the which-one picker (2 candidates)
+        const picks = Array.from(c.querySelectorAll('.forfeit-choice .btn-mini'));
+        ok('task117: §2.90 several weapons prompt which to forfeit', picks.length === 2, 'picks=' + picks.length);
+        const great = picks.find((b) => /greatsword/i.test(b.textContent));
+        great.click();
+        ok('task117: §2.90 the chosen weapon is the one taken (dagger kept)',
+           g.data.items.length === 1 && g.data.items[0].name === 'dagger' && !g.data.gods.includes('Elnir'),
+           'kept=' + g.data.items.map((i)=>i.name).join(','));
+      }
+
+      // §3.569 named cargo: a Unit the ship lacks can't arm the textile gain; one it carries can.
+      const sec569 = await data.getSection(3, '569');
+      const mk569 = (cargo) => {
+        const g = GameState.create({ name:'T569', gender:'m', profession:'Warrior', book:3, adv });
+        g.data.location = null; // at sea
+        g.data.ships = [{ id: 's1', type: 'galleon', name: 'Ship', crew: 'average', cargo: cargo.slice(), docked: null }];
+        const c = document.createElement('div');
+        const st = new Story(c, g, { navigate(){}, onDeath(){}, notify(){} });
+        g.goTo(3, '569'); st.begin(sec569, 3, '569');
+        return { g, c, st };
+      };
+      const cargoBtn = (c, name) => Array.from(c.querySelectorAll('.pay-action')).find((b) => b.textContent.trim().toLowerCase() === name);
+
+      // Ship without furs: the furs trade is disabled and grants no textiles.
+      {
+        const { g, c } = mk569(['timber']);
+        const furs = cargoBtn(c, 'furs');
+        const timber = cargoBtn(c, 'timber');
+        ok('task117: §3.569 a cargo the ship lacks (furs) is a disabled trade', !!furs && furs.disabled === true, 'furs=' + (furs && furs.disabled));
+        ok('task117: §3.569 a cargo the ship carries (timber) is a live trade', !!timber && timber.disabled === false, 'timber=' + (timber && timber.disabled));
+        ok('task117: §3.569 no free textiles when the required cargo is absent', !g.data.ships[0].cargo.includes('textiles'));
+      }
+
+      // Ship with furs: trading it takes the furs and loads two textiles.
+      {
+        const { g, c } = mk569(['furs']);
+        const furs = cargoBtn(c, 'furs');
+        ok('task117: §3.569 the furs trade is live when carried', !!furs && furs.disabled === false);
+        furs.click();
+        const cargo = g.data.ships[0].cargo;
+        ok('task117: §3.569 trading furs removes them and loads two textiles',
+           !cargo.includes('furs') && cargo.filter((x) => x === 'textiles').length === 2,
+           'cargo=' + cargo.join(','));
+      }
+
+      // The DOM-free plan agrees: an absent possession is ineligible; a present one is eligible.
+      {
+        const gEmpty = GameState.create({ name:'T117p', gender:'m', profession:'Warrior', book:2, adv });
+        gEmpty.data.items = [];
+        const wLose = parse('<lose weapon="?" price="x">weapon</lose>');
+        ok('task117: losePaymentPlan reports an absent weapon forfeit as present-but-ineligible',
+           eng.losePaymentPlan(wLose, gEmpty).present === true && eng.losePaymentPlan(wLose, gEmpty).eligible === false);
+        gEmpty.addItem(makeItem('weapon', 'axe', 1));
+        ok('task117: losePaymentPlan reports an owned weapon forfeit as eligible', eng.losePaymentPlan(wLose, gEmpty).eligible === true);
+      }
+    }
+
     // --- task 111: rolled itemAt= losses skip keep items and honour cache= ---
     // §6.63/§6.168 take the possession at a rolled 1-based position; the loss must
     // index the selected pool (player, or a cache= stash), skip currency, no-op past

@@ -569,10 +569,15 @@ function applyLose(el, state, opts) {
   // book6/230); the death handler consumes a single one separately.
   if (get('resurrection') != null) { if (state.data.resurrections.length) { state.data.resurrections = []; state.changed(); notes.push('lost resurrection'); } }
   if (get('flag') != null) { state.setFlag(get('flag'), false); }
-  // Whether an item selector on this lose actually gave something up — gates the price
-  // flag below so an ineligible offering can't open its reward. (task 113)
+  // Whether a possession/cargo/ship payment on this lose actually gave something up —
+  // gates the price flag / linked reward at the end so an ineligible offering (no such
+  // weapon, the wrong cargo, a +0 item passed off as a "+2") can never open its reward
+  // for free. `paymentPresent` marks that the lose demands a tangible possession; it is
+  // resolved AFTER every possession selector has run, not before. (tasks 113, 117)
+  let paymentPresent = false, paymentTaken = false;
   let itemTaken = false;
   if (get('item') != null) {
+    paymentPresent = true;
     const pattern = get('item');
     // Remover: the player's inventory, or a named cache (a villa strongroom) when
     // cache= is present — a cache theft must never touch carried possessions.
@@ -604,13 +609,7 @@ function applyLose(el, state, opts) {
       toLose.slice(0, count).forEach((it) => removeById(it.id));
       if (toLose.length) { itemTaken = true; notes.push('lost item'); }
     }
-  }
-  if (get('price') != null) {
-    // The price flag opens this offering's linked reward/outcome. When the lose gives up
-    // an item, arm it only if a qualifying possession was actually taken — so an offering
-    // with nothing eligible (a +0/+1 item presented as a "+2"/"+3") can't open §404/§568.
-    // A price with no item selector arms unconditionally, as before. (task 113)
-    if (get('item') == null || itemTaken) state.setFlag(get('price'), true);
+    paymentTaken = itemTaken;
   }
   // <lose itemAt="x"> takes the item at a rolled 1-based position (§6.63 the loser's
   // forfeit, §6.168 the dream-compass swap). The position indexes the selected pool —
@@ -630,19 +629,25 @@ function applyLose(el, state, opts) {
     }
   }
   // Confiscation of equipment: <lose weapon|armour|tool="?"/"*"> — optionally
-  // using="t" ("the one you're wielding/wearing").
+  // using="t" ("the one you're wielding/wearing"). Each kind is a possession payment,
+  // so it counts toward paymentTaken only when a qualifying item was actually removed.
   for (const kind of ['weapon', 'armour', 'tool']) {
-    if (get(kind) != null) { const note = loseEquipment(el, state, kind, opts); if (note) notes.push(note); }
+    if (get(kind) != null) { paymentPresent = true; const note = loseEquipment(el, state, kind, opts); if (note) { notes.push(note); paymentTaken = true; } }
   }
-  if (get('cargo') != null || get('crew') != null || get('ship') != null) applyShipLose(el, state, opts);
+  // cargo/ship are possession payments (a crew shift is not — it never arms a reward).
+  if (get('cargo') != null || get('ship') != null) paymentPresent = true;
+  if (get('cargo') != null || get('crew') != null || get('ship') != null) { if (applyShipLose(el, state, opts)) paymentTaken = true; }
+  // Arm the price flag only once the demanded payment is actually taken (a lose with no
+  // possession selector — money, a god, a blessing — arms unconditionally). (tasks 113, 117)
+  if (get('price') != null && (!paymentPresent || paymentTaken)) state.setFlag(get('price'), true);
   return notes.join(', ');
 }
 
-/** Lose a weapon/armour/tool. spec "*" = all of that kind; "?"/name = one (via
- *  opts.chooser or the first in inventory order); using="t" targets the currently
- *  wielded weapon / worn armour. bonus=/tags= narrow the candidates. */
-function loseEquipment(el, state, kind, opts) {
-  const spec = el.getAttribute(kind);
+/** Candidate weapon/armour/tool a <lose kind=…> could take, after the bonus=/tags=/using=
+ *  narrowing. Shared by the eligibility gate (losePaymentPlan), the forfeit chooser and
+ *  the commit so the view and the engine agree on exactly what qualifies. (task 117;
+ *  keep-tag protection is layered in by task 118.) */
+function loseEquipmentCandidates(el, state, kind) {
   let cands = state.data.items.filter((it) => it.kind === kind);
   const bonus = el.getAttribute('bonus');
   if (bonus != null && /^-?\d+$/.test(bonus)) cands = cands.filter((it) => (it.bonus || 0) === parseInt(bonus, 10));
@@ -652,6 +657,16 @@ function loseEquipment(el, state, kind, opts) {
     const eq = kind === 'weapon' ? state.wieldedWeapon() : (kind === 'armour' ? state.wornArmour() : null);
     cands = eq ? [eq] : cands.slice(0, 1);
   }
+  return cands;
+}
+
+/** Lose a weapon/armour/tool. spec "*" = all of that kind; "?"/name = one (via
+ *  opts.chooser or the first in inventory order); using="t" targets the currently
+ *  wielded weapon / worn armour. Returns a note when something was taken, null when the
+ *  player had no qualifying piece (so the caller's price flag stays unarmed). */
+function loseEquipment(el, state, kind, opts) {
+  const spec = el.getAttribute(kind);
+  const cands = loseEquipmentCandidates(el, state, kind);
   if (!cands.length) return null;
   let toLose;
   if (spec === '*') toLose = cands;
@@ -660,9 +675,53 @@ function loseEquipment(el, state, kind, opts) {
   return toLose.length ? `lost ${kind}` : null;
 }
 
+/** The cargo Units aboard the current vessel a <lose cargo=…> could take: "*"/"?" = any
+ *  aboard, a named cargo = the matching Units. Empty when the ship lacks that cargo, so a
+ *  named-cargo offering (§3.569) can't arm its reward without the goods. (task 117) */
+function loseCargoCandidates(el, state) {
+  const ship = state.currentShip();
+  if (!ship) return [];
+  const cargo = ship.cargo || [];
+  const c = el.getAttribute('cargo');
+  if (c === '*' || c === '?') return cargo.slice();
+  return cargo.filter((x) => x === c);
+}
+
+/** The possession/cargo/ship a priced or forced <lose> demands as payment, and whether
+ *  the player can currently meet it (task 117). `present` is true when the lose gives up a
+ *  tangible possession (so its price flag / linked reward must wait until it is actually
+ *  taken); `eligible` is whether a qualifying candidate exists now; `needsChoice` marks an
+ *  open "?" equipment/cargo forfeit with more than one candidate, so the view offers a
+ *  picker instead of silently taking the first. shards/god/blessing/crew losses are not a
+ *  possession payment (present=false) and arm unconditionally, as before. */
+export function losePaymentPlan(el, state) {
+  const g = (a) => el.getAttribute(a);
+  const openForm = (spec) => spec === '?' || spec == null || String(spec).trim() === '';
+  const plan = (kind, spec, candidates) => ({
+    present: true, kind, candidates,
+    eligible: candidates.length > 0,
+    needsChoice: openForm(spec) && candidates.length > 1,
+  });
+  if (g('item') != null) {
+    if (g('item') === '*') {
+      const pool = g('cache') != null ? state.cacheItems(g('cache')) : state.data.items;
+      return { present: true, kind: 'item', candidates: pool.slice(), eligible: pool.length > 0, needsChoice: false };
+    }
+    const cands = loseItemMatches(el, state);
+    return { present: true, kind: 'item', candidates: cands, eligible: cands.length > 0, needsChoice: false };
+  }
+  for (const kind of ['weapon', 'armour', 'tool']) {
+    if (g(kind) != null) return plan(kind, g(kind), loseEquipmentCandidates(el, state, kind));
+  }
+  if (g('cargo') != null) return plan('cargo', g('cargo'), loseCargoCandidates(el, state));
+  if (g('ship') != null) { const s = state.currentShip(); return { present: true, kind: 'ship', candidates: s ? [s] : [], eligible: !!s, needsChoice: false }; }
+  return { present: false, kind: null, candidates: [], eligible: true, needsChoice: false };
+}
+
 function applyShipLose(el, state, opts = {}) {
   const ship = state.currentShip(); // the local/current vessel, not just ships[0] (task 73)
-  if (!ship) return;
+  if (!ship) return false;
+  let took = false; // whether a cargo Unit or the ship itself was actually given up (task 117)
   if (el.getAttribute('crew') != null) {
     // <lose crew="N"> shifts the crew grade by N along CREW_LEVELS: a positive N
     // demotes, a negative N (the crew *upgrade* idiom, e.g. crew="-1"/"-2") promotes.
@@ -676,17 +735,18 @@ function applyShipLose(el, state, opts = {}) {
   if (el.getAttribute('cargo') != null) {
     const c = el.getAttribute('cargo');
     const cargo = (ship.cargo ||= []);
-    if (c === '*') ship.cargo = [];
+    if (c === '*') { if (cargo.length) { ship.cargo = []; took = true; } }
     else if (c === '?') {
       if (cargo.length) {
         const pick = opts.chooser ? opts.chooser(cargo.slice(), 1, 'cargo') : null;
         const idx = (pick && pick.length) ? cargo.indexOf(pick[0]) : 0;
-        cargo.splice(idx >= 0 ? idx : 0, 1);
+        cargo.splice(idx >= 0 ? idx : 0, 1); took = true;
       }
-    } else { const i = cargo.indexOf(c); if (i >= 0) cargo.splice(i, 1); }
+    } else { const i = cargo.indexOf(c); if (i >= 0) { cargo.splice(i, 1); took = true; } }
   }
-  if (el.getAttribute('ship') != null) { const i = state.data.ships.indexOf(ship); state.data.ships.splice(i >= 0 ? i : 0, 1); }
+  if (el.getAttribute('ship') != null) { const i = state.data.ships.indexOf(ship); if (i >= 0) { state.data.ships.splice(i, 1); took = true; } }
   state.changed();
+  return took;
 }
 
 function applyTick(el, state, opts) {

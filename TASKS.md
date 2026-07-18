@@ -12,7 +12,7 @@ the tasks were filed, not work order).
 - [x] 120. Split the 4,790-line single-scope browser test into focused ES-module suites *(before the test-heavy 115–117 chain)*
 - [x] 115. Adventure-Sheet item detours bypass `Story.navigate`, so `<return>` still re-enters the source section
 - [x] 116. Save/load restarts the current visit — effects can repeat and rolls/return state disappear
-- [ ] 117. Priced equipment/cargo losses can arm their reward without taking the required payment
+- [x] 117. Priced equipment/cargo losses can arm their reward without taking the required payment
 - [ ] 118. Choice/equipment losses can remove `keep`-tagged possessions *(immediately after 117 — same shared loss matcher)*
 - [ ] 125. Flag-linked item rewards outside choose-one menus are free, and paying can never grant them
 - [ ] 126. A collapsed `<group>` action never executes its `<buy>` children — §5.192's ship and §4.622's cargo are unobtainable

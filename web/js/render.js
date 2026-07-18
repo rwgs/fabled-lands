@@ -10,7 +10,7 @@ import {
   evaluateCondition, applyEffect, applyEffectBody, boolAttr, resolveValue, isDiceExpr,
   rollDifficulty, rollRankCheck, rollTraining, rollDice, matchRange, childAdjustment,
   applyRest, buyResurrectionDeal, reviveWithResurrection, abilityChoiceOptions, readItemEffects,
-  whileLoopDone, filterMatches, transferPlan, loseItemMatches, useItemEffect,
+  whileLoopDone, filterMatches, transferPlan, useItemEffect, losePaymentPlan,
 } from './engine.js';
 import { makeFight, fightRound, groupFightRound, isDefeated, useWrathBlessing, useDefenceBlessing, rerollAttack } from './combat.js';
 import { shopKind, goodsFrom, ownsGoods, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo, canUpgradeCrew, payChoiceCost } from './market.js';
@@ -1674,14 +1674,23 @@ export class Story {
     const btn = document.createElement('button');
     btn.className = 'btn-mini pay-action';
     btn.textContent = text;
+    // A forced possession/cargo/ship payment must be inert when the player has nothing to
+    // give up — else clicking "Pay" memoises pay@ and unblocks the section having taken
+    // nothing (the task-117 scope note: an absent item/cargo/ship). (task 117)
+    const plan = losePaymentPlan(node, this.state);
+    const commit = (chooser) => {
+      applyEffect(node, this.state, chooser ? { chooser } : {});
+      this.ctx.applied.add(memo);
+      this.rerender();
+    };
     if (cost && this.state.data.shards < cost) {
       btn.disabled = true; btn.title = 'Not enough Shards';
+    } else if (plan.present && !plan.eligible) {
+      btn.disabled = true; btn.title = 'You have nothing to give up here.';
+    } else if (plan.needsChoice) {
+      btn.addEventListener('click', () => { btn.disabled = true; this.showForfeitPicker(container, plan, commit); });
     } else {
-      btn.addEventListener('click', () => {
-        applyEffect(node, this.state, {});
-        this.ctx.applied.add(memo);
-        this.rerender();
-      });
+      btn.addEventListener('click', () => commit(null));
     }
     container.appendChild(btn);
     this.blocked = true; // hide the rest of the section until this is resolved
@@ -1707,32 +1716,55 @@ export class Story {
     const btn = document.createElement('button');
     btn.className = 'btn-mini pay-action' + (done ? ' done' : '');
     btn.textContent = (done ? '☑ ' : '') + (label.textContent.trim() || (cost ? `Pay ${cost} Shards` : 'Confirm'));
-    // A paid offering that gives up an item (§4.456 Tambu's +2/+3 gifts) must be inert
-    // when the player owns nothing that qualifies for its bonus= requirement — else an
-    // ineligible offer would set the price flag and open the reward for free. (task 113)
-    const noEligibleItem = node.tagName.toLowerCase() === 'lose'
-      && node.getAttribute('item') != null && node.getAttribute('item') !== '*'
-      && loseItemMatches(node, this.state).length === 0;
+    // A paid offering that gives up a possession/cargo/ship (§4.456 Tambu's +2/+3 gifts,
+    // §2.90's weapon/armour, §3.569's named cargo) must be inert when the player has
+    // nothing that qualifies — else an ineligible offer would arm the price flag and open
+    // its linked reward for free. The shared plan reports eligibility and whether an open
+    // "?" forfeit needs a which-one picker. (tasks 113, 117)
+    const isLose = node.tagName.toLowerCase() === 'lose';
+    const plan = isLose ? losePaymentPlan(node, this.state) : null;
+    const commit = (chooser) => {
+      applyEffect(node, this.state, chooser ? { chooser } : {});
+      rewards.forEach((r) => applyEffect(r, this.state, {}));
+      if (!repeatable) this.ctx.applied.add(memo);
+      this.rerender();
+    };
     if (done) {
       btn.disabled = true;
-    } else if (noEligibleItem) {
-      btn.disabled = true; btn.title = 'You have nothing that qualifies for this offering.';
+    } else if (plan && plan.present && !plan.eligible) {
+      btn.disabled = true; btn.title = 'You have nothing to give up for this offering.';
     } else if (this.ownsSoleLinkedBlessing(node, key)) {
       // "You can have only one X blessing at a time" — refuse the re-buy so the
       // Shards aren't spent for a blessing that addBlessing would just dedupe away.
       btn.disabled = true; btn.title = 'You already have this blessing';
     } else if (cost && this.state.data.shards < cost) {
       btn.disabled = true; btn.title = 'Not enough Shards';
+    } else if (plan && plan.needsChoice) {
+      // Open "?" weapon/armour/cargo with more than one candidate: reveal a picker so the
+      // player names the exact forfeit rather than the engine silently taking the first.
+      btn.addEventListener('click', () => { btn.disabled = true; this.showForfeitPicker(container, plan, commit); });
     } else {
-      btn.addEventListener('click', () => {
-        applyEffect(node, this.state, {});
-        rewards.forEach((r) => applyEffect(r, this.state, {}));
-        if (!repeatable) this.ctx.applied.add(memo);
-        this.rerender();
-      });
+      btn.addEventListener('click', () => commit(null));
     }
     container.appendChild(btn);
     return btn;
+  }
+
+  // Reveal a "give up which?" picker for an open "?" equipment/cargo forfeit, so the exact
+  // item/cargo the player chooses is what leaves — not whatever the engine finds first.
+  // Each button commits the loss with a chooser bound to that candidate. (task 117)
+  showForfeitPicker(container, plan, commit) {
+    const box = document.createElement('div');
+    box.className = 'ship-choice forfeit-choice';
+    box.appendChild(document.createTextNode('Give up which? '));
+    plan.candidates.forEach((cand) => {
+      const b = document.createElement('button');
+      b.className = 'btn-mini';
+      b.textContent = plan.kind === 'cargo' ? String(cand) : (cand.name + (cand.bonus ? ` (${cand.bonus >= 0 ? '+' : ''}${cand.bonus})` : ''));
+      b.addEventListener('click', () => commit(() => [cand]));
+      box.appendChild(b);
+    });
+    container.appendChild(box);
   }
 
   // force="f" marks an OPTIONAL action (JaFL ActionNode defaults force=true); "f"/false
