@@ -28,13 +28,18 @@ to those modules. **Do not put game logic in `render.js`.** This is what keeps
 the rules testable headlessly in `web/_test.html`.
 
 ## Build + test loop — run after every change
+The build scripts **require PowerShell 7 (`pwsh`)** — invoke them with `pwsh`, not
+the Windows `powershell` (5.1). Under 5.1 the outputs diverge silently (`ConvertTo-Json`
+escaping and the culture-aware `Sort-Object` reformat every book JSON and the stamp), so
+both scripts carry `#Requires -Version 7.0` and 5.1 refuses to run them. The *web app
+itself* still has no runtime dependencies; only the offline build step needs pwsh 7. (task 121)
 1. If you changed `books/` or `rules/`, rebuild the bundled data (this also
    stamps `version.js`):
-   `powershell -ExecutionPolicy Bypass -File build/build-data.ps1`
+   `pwsh -ExecutionPolicy Bypass -File build/build-data.ps1`
    If you only touched `web/` (JS/CSS/HTML — no data rebuild needed), still
    refresh the build stamp so the in-game version and the service-worker cache
    key move (otherwise returning players keep the cached old build):
-   `powershell -ExecutionPolicy Bypass -File build/stamp-version.ps1`
+   `pwsh -ExecutionPolicy Bypass -File build/stamp-version.ps1`
    The stamp is a content hash of the app source, so it changes on any edit.
 2. Run the headless smoke test (serves `web/`, exercises the engine, and renders
    **every section of all six books** to confirm none throw):

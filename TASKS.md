@@ -26,7 +26,7 @@ the tasks were filed, not work order).
 - [x] 131. Cache `max=` semantics: `max="0"` must bar deposits (§4.263 money-doubling), and item caches must store Shards (§6.512)
 - [x] 132. `<if blessing="?">` never matches — §5.365's chapel stacks blessings
 - [x] 133. Adventure-Sheet mutations (drop/lift) leave the story pane stale — item-gated choices stay live after the item is gone
-- [ ] 121. The documented `powershell` build command no longer parses `build-data.ps1` on Windows PowerShell 5.1
+- [x] 121. The documented `powershell` build command no longer parses `build-data.ps1` on Windows PowerShell 5.1
 - [ ] 119. Re-establish the rules/view boundary and split the 4,060-line renderer by responsibility
 
 **LOW**
@@ -427,6 +427,20 @@ escaping) or make an explicit decision to require pwsh 7 and update README,
 AGENTS.md and CI to match — full 5.1 output parity is substantially more work
 than the punctuation fix. Any added verification step must pin the engine it
 runs under, or it will "verify" engine-dependent output.
+
+*Resolution (2026-07-19, user-decided):* **require pwsh 7.** Normalising
+`ConvertTo-Json` escaping across engines is fragile, high-effort work for a
+Windows-dev edge case end-users never hit (they load the static site; no build).
+Instead: (1) fixed the two em dashes and cleaned every remaining non-ASCII
+comment byte so `build-data.ps1` is pure ASCII and parses under any code page;
+(2) added `#Requires -Version 7.0` to **both** scripts so 5.1 *refuses to run*
+(clear message, exit 1) rather than silently emitting a divergent build —
+verified live; (3) README + AGENTS.md now prescribe `pwsh -File …`, noting only
+the offline build needs pwsh 7 (the web app stays dependency-free); (4) a new CI
+job (`build-scripts` in smoke.yml) lints both `.ps1` for non-ASCII bytes and the
+`#Requires` guard — a pure source check that never runs the engine-dependent
+build. Verified: pwsh 7.6.3 regenerates byte-identical book JSONs (only the
+meta.json `generated` date + stamp move), smoke suite RESULT ALL PASS.
 
 ---
 

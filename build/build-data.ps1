@@ -1,3 +1,9 @@
+#Requires -Version 7.0
+# The build requires PowerShell 7 (pwsh). Under Windows PowerShell 5.1 the outputs
+# diverge silently: ConvertTo-Json escapes non-ASCII differently and the culture-aware
+# Sort-Object reorders the stamp inputs, so 5.1 would rewrite every book JSON and the
+# version stamp. The #Requires line makes 5.1 refuse to run (with a clear message)
+# instead of producing a divergent build. Run: pwsh -File build/build-data.ps1 (task 121)
 <#
   build-data.ps1
   ---------------
@@ -37,7 +43,7 @@ function Read-Xml([string]$path) {
 # Parse a bundled fragment as strict XML so a malformed file is caught at build
 # time rather than throwing at render time in the browser. Returns $null when
 # valid, or an error string. `$expectRoot` (e.g. 'section') also checks the root
-# element. NOTE: use .get_Name() — PowerShell's XML type adapter overrides plain
+# element. NOTE: use .get_Name() - PowerShell's XML type adapter overrides plain
 # .Name to return the `name` ATTRIBUTE, not the element's tag name.
 function Test-XmlDoc([string]$xml, [string]$label, [string]$expectRoot, [string[]]$expectNames) {
     if (-not $xml) { return $null }   # an absent optional file is not an error
@@ -45,15 +51,15 @@ function Test-XmlDoc([string]$xml, [string]$label, [string]$expectRoot, [string[
         $doc = New-Object System.Xml.XmlDocument
         $doc.LoadXml($xml)
     } catch {
-        return "$label : not well-formed XML — $($_.Exception.Message)"
+        return "$label : not well-formed XML - $($_.Exception.Message)"
     }
     if ($expectRoot -and $doc.DocumentElement.get_Name() -ne $expectRoot) {
         return "$label : root is <$($doc.DocumentElement.get_Name())>, expected <$expectRoot>"
     }
     # A section file's <section name> must match its filename key (task 78). A purely
     # numeric file must match exactly; a lettered continuation may use either its full
-    # name (448a → "448a") or its printed parent number (609a → "609"), so both are
-    # passed in $expectNames. `.GetAttribute` is used deliberately — the plain .Name
+    # name (448a -> "448a") or its printed parent number (609a -> "609"), so both are
+    # passed in $expectNames. `.GetAttribute` is used deliberately - the plain .Name
     # property is overridden by PowerShell's XML adapter to return the `name` attribute.
     if ($expectNames -and $expectNames.Count -gt 0) {
         $actual = $doc.DocumentElement.GetAttribute('name')
@@ -122,7 +128,7 @@ if (Test-Path $iniPath) {
 # ---- Validate the source XML before bundling (task 13) ----------------------
 # Every section is parsed as strict XML (well-formed + rooted at <section>), plus
 # each book's Adventurers.xml and the rules files, BEFORE anything is written. A
-# malformed file aborts the build here — with the file named — instead of shipping
+# malformed file aborts the build here - with the file named - instead of shipping
 # broken JSON that only throws when the browser renders that section. The runtime
 # DOMParser is more lenient, so this is a deliberately stricter gate; the corpus
 # is clean, so it never fires spuriously.
@@ -137,7 +143,7 @@ for ($b = 1; $b -le 6; $b++) {
         ForEach-Object {
             $xmlChecked++
             # Accepted names: the full filename, and its numeric prefix for a lettered
-            # continuation (609a → "609" or "609a"). For a purely numeric file both are
+            # continuation (609a -> "609" or "609a"). For a purely numeric file both are
             # the same, so the match is exact. (task 78)
             $expectNames = @($_.BaseName, ($_.BaseName -replace '[a-z]+$', '')) | Select-Object -Unique
             $e = Test-XmlDoc (Read-Xml $_.FullName) ("book{0}/{1}" -f $b, $_.Name) 'section' $expectNames
@@ -159,7 +165,7 @@ foreach ($rf in @('Rules.xml', 'QuickRules.xml')) {
     }
 }
 if ($xmlErrors.Count -gt 0) {
-    Write-Host ("XML validation FAILED — {0} of {1} file(s) malformed:" -f $xmlErrors.Count, $xmlChecked)
+    Write-Host ("XML validation FAILED - {0} of {1} file(s) malformed:" -f $xmlErrors.Count, $xmlChecked)
     $xmlErrors | ForEach-Object { Write-Host "  $_" }
     throw "Build aborted: fix the source XML above and re-run."
 }
@@ -245,8 +251,8 @@ $mapsSrc = Join-Path $images 'maps'
 if (Test-Path $mapsSrc) { Copy-Item (Join-Path $mapsSrc '*') $mapsOut -Force -ErrorAction SilentlyContinue }
 
 # ---- Copy per-book section illustrations ------------------------------------
-# A handful of sections show an in-text illustration via <image file="…"> (or a
-# section image="…" attribute): the Forest of the Forsaken map, the map of
+# A handful of sections show an in-text illustration via <image file="..."> (or a
+# section image="..." attribute): the Forest of the Forsaken map, the map of
 # Bazalek Isle, the Black Diptych. Each image file lives beside its book's XML.
 # Copy every book-folder image that is NOT the "<Region>-Map" regional map into
 # web/assets/illus/ under its own name, so render.js can resolve it there. (task 62)

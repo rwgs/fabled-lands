@@ -1,3 +1,8 @@
+#Requires -Version 7.0
+# Requires PowerShell 7 (pwsh): the content hash sorts inputs with a culture-aware
+# Sort-Object, which orders the hyphenated asset names differently under .NET Framework
+# (5.1) vs .NET Core (7), so 5.1 would emit a different stamp from identical content.
+# #Requires makes 5.1 refuse to run. Run: pwsh -File build/stamp-version.ps1 (task 121)
 <#
   stamp-version.ps1
   -----------------

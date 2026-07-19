@@ -11,6 +11,32 @@ on:
   pull_request:
 
 jobs:
+  # Guards the build scripts against the encoding trap that made build-data.ps1
+  # unusable under Windows PowerShell 5.1 (task 121): a non-ASCII byte in the .ps1
+  # source (an em dash in a double-quoted string) is misread through 5.1's legacy
+  # code page and breaks parsing. This is a pure source check — it never runs the
+  # engine-dependent build, so it can't "verify" engine-specific JSON/stamp output.
+  build-scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build scripts stay ASCII-only and pin pwsh 7
+        run: |
+          set -euo pipefail
+          fail=0
+          for f in build/build-data.ps1 build/stamp-version.ps1; do
+            if grep -nP '[^\x00-\x7F]' "$f"; then
+              echo "✗ $f contains non-ASCII bytes (breaks Windows PowerShell 5.1 parsing)."
+              fail=1
+            fi
+            if ! grep -q '^#Requires -Version 7.0' "$f"; then
+              echo "✗ $f is missing the '#Requires -Version 7.0' guard."
+              fail=1
+            fi
+          done
+          if [ "$fail" -ne 0 ]; then exit 1; fi
+          echo "✓ Build scripts are ASCII-only and require pwsh 7."
+
   smoke:
     runs-on: ubuntu-latest
     steps:

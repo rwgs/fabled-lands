@@ -43,7 +43,7 @@ fabled-lands/
 ├── rules/            Rules.xml, QuickRules.xml
 ├── images/           world-map.jpg (+ icons). General per-section art is NOT included.
 ├── java-engine/      The original Java engine (JaFL) — kept for reference, UNTOUCHED
-├── build/            Build scripts (PowerShell)
+├── build/            Build scripts (PowerShell 7 / pwsh)
 │   ├── build-data.ps1  Bundles books/ + rules/ + maps → web/data & web/assets
 │   └── stamp-version.ps1  Writes the in-game version stamp
 └── web/              ← the web app (this is what you deploy)
@@ -103,11 +103,16 @@ number works), so a run is reproducible and manual testing is repeatable — e.g
 ## Regenerating the data
 
 `web/data/*.json` is compiled from `books/` and `rules/`. If you edit or add section XML,
-rebuild it (Windows PowerShell — no Node required):
+rebuild it with **PowerShell 7 (`pwsh`) — no Node required**:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File build/build-data.ps1
+pwsh -ExecutionPolicy Bypass -File build/build-data.ps1
 ```
+
+The build requires pwsh 7, not the Windows `powershell` (5.1): under 5.1 `ConvertTo-Json`
+and the culture-aware `Sort-Object` would silently reformat every book JSON and the version
+stamp, so both scripts carry `#Requires -Version 7.0` and 5.1 refuses to run them. Only this
+offline build step needs pwsh 7 — the shipped web app has no runtime dependencies.
 
 This reads every numeric `books/book<n>/<section>.xml`, each book's `Adventurers.xml`
 (starting stats/items) and the rules, then writes one compact JSON file per book plus
@@ -133,7 +138,7 @@ edit to the app — not only on a new commit — so returning visitors' service 
 see a fresh cache key after a deploy. After changing anything in `web/`, refresh it with:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File build/stamp-version.ps1
+pwsh -ExecutionPolicy Bypass -File build/stamp-version.ps1
 ```
 
 (`build-data.ps1` runs this automatically at the end.)
