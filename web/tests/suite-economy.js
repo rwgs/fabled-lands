@@ -170,7 +170,7 @@ export async function run(ctx) {
     ok('applyRest full-restore still charges the cost', eng.applyRest(gR, null, 20) === 4 && gR.data.shards === 30 && gR.data.stamina === 12, `st=${gR.data.stamina} sh=${gR.data.shards}`);
     // render: a <rest stamina="2"> still labels a fixed +2; a bare <rest> labels "heal all".
     const stRl = new Story(document.createElement('div'), gR, { navigate(){}, onDeath(){}, notify(){} });
-    stRl.sectionEl = parse('<section/>'); stRl.book = 1; gR.data.stamina = 1;
+    stRl.sectionEl = parse('<section/>'); stRl.book = 1; stRl.ctx = stRl._newCtx(); gR.data.stamina = 1;
     const restFixed = stRl.renderRest(document.createElement('div'), parse('<rest stamina="2">rest a bit</rest>'), 'rr');
     ok('<rest stamina="2"> labels a fixed +2 Stamina', /\+2 Stamina/.test(restFixed.textContent), restFixed.textContent);
     // §1.114 safe house: a bare <rest> heals all lost Stamina on click.
@@ -183,6 +183,37 @@ export async function run(ctx) {
     ok('§114 shows a "heal all Stamina" rest button', !!restBtn() && /heal all Stamina/.test(restBtn().textContent), restBtn() ? restBtn().textContent : 'none');
     restBtn().click();
     ok('§114 resting heals all lost Stamina', g114.data.stamina === 12, `st=${g114.data.stamina}`);
+
+    // --- task 129: an unpriced fixed-amount <rest> heals once per visit ---
+    // §2.61 abbey: "stay one night", <rest stamina="2">. Keep max high so +2 can't
+    // reach full — the button must then lock on the per-visit memo, not on being full.
+    const g261 = GameState.create({ name:'R261', gender:'m', profession:'Warrior', book:2, adv });
+    g261.data.staminaMax = 20; g261.data.stamina = 4;
+    const c261 = document.createElement('div');
+    const st261 = new Story(c261, g261, { navigate(){}, onDeath(){}, notify(){} });
+    const s261 = await data.getSection(2,'61'); st261.begin(s261,2,'61');
+    const rest261 = () => Array.from(c261.querySelectorAll('.btn-secondary')).find(b => /Rest/.test(b.textContent));
+    ok('§2.61 shows a +2 Stamina rest button, enabled', !!rest261() && /\+2 Stamina/.test(rest261().textContent) && !rest261().disabled, rest261() ? rest261().textContent : 'none');
+    rest261().click();
+    ok('§2.61 first rest heals +2', g261.data.stamina === 6, `st=${g261.data.stamina}`);
+    ok('§2.61 rest button disabled after one use (not full)', !!rest261() && rest261().disabled, rest261() ? 'disabled='+rest261().disabled : 'none');
+    g261.data.stamina = 4; st261.begin(s261,2,'61'); // re-enter the section: fresh visit
+    ok('§2.61 rest re-enabled on re-entry', !!rest261() && !rest261().disabled, rest261() ? 'disabled='+rest261().disabled : 'none');
+
+    // A priced per-day rest still repeats: pay again for a second night. A synthetic
+    // section holds <rest stamina="1" shards="2"> so the live rerender path reproduces
+    // the button; with a low fill (max 20) and plenty of coin it stays enabled.
+    const gPay = GameState.create({ name:'RPay', gender:'m', profession:'Warrior', book:1, adv });
+    gPay.data.staminaMax = 20; gPay.data.stamina = 4; gPay.data.shards = 50;
+    const cPay = document.createElement('div');
+    const stPay = new Story(cPay, gPay, { navigate(){}, onDeath(){}, notify(){} });
+    stPay.begin(parse('<section><rest stamina="1" shards="2">Stay another night</rest></section>'), 1, '999');
+    const payBtn = () => Array.from(cPay.querySelectorAll('button')).find(b => /Rest/.test(b.textContent));
+    payBtn().click();
+    ok('priced rest first night heals +1 and charges 2', gPay.data.stamina === 5 && gPay.data.shards === 48, `st=${gPay.data.stamina} sh=${gPay.data.shards}`);
+    ok('priced rest still repeatable (button stays enabled)', !!payBtn() && !payBtn().disabled, payBtn() ? 'disabled='+payBtn().disabled : 'none');
+    payBtn().click();
+    ok('priced rest second night heals again', gPay.data.stamina === 6 && gPay.data.shards === 46, `st=${gPay.data.stamina} sh=${gPay.data.shards}`);
 
     // --- narration (TTS): sentence wrapping preserves interactivity ---
     const narrator = new Narrator();

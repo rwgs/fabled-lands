@@ -4034,16 +4034,24 @@ export class Story {
     const hasAmt = node.hasAttribute('stamina');
     const perUse = hasAmt ? node.getAttribute('stamina') : null;
     const cost = node.getAttribute('shards') ? resolveValue(this.state, node.getAttribute('shards')) : 0;
+    // JaFL's RestNode defaults useOnce = (shards == 0): an unpriced fixed-amount rest
+    // is one night's hospitality — heal once per visit. Priced rests (pay per day)
+    // repeat, and the no-stamina= heal-to-full form already self-limits at full. (task 129)
+    const onceOnly = hasAmt && cost === 0;
+    const memo = 'rest@' + path;
+    const used = onceOnly && this.ctx.applied.has(memo);
     const box = document.createElement('span');
     const btn = document.createElement('button');
     btn.className = 'btn-secondary';
     const healLabel = hasAmt ? `+${/d/i.test(perUse) ? perUse : parseInt(perUse, 10)} Stamina` : 'heal all Stamina';
     btn.textContent = cost ? `Rest (${healLabel}, ${cost} Shards)` : `Rest (${healLabel})`;
     const full = this.state.data.stamina >= this.state.effectiveStaminaMax();
-    btn.disabled = full || (cost > 0 && this.state.data.shards < cost);
-    if (full) btn.title = 'Already at full Stamina';
+    btn.disabled = used || full || (cost > 0 && this.state.data.shards < cost);
+    if (used) btn.title = 'You have already rested here';
+    else if (full) btn.title = 'Already at full Stamina';
     btn.addEventListener('click', () => {
       applyRest(this.state, perUse, cost);
+      if (onceOnly) this.ctx.applied.add(memo);
       this.rerender();
     });
     box.appendChild(btn);
