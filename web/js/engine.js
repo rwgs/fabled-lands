@@ -236,7 +236,14 @@ export function evaluateCondition(el, state) {
   add(get('book'), () => availableBooks().includes(Number(get('book'))));
   add(get('var'), () => { const v = state.getVar(get('var')); const cmp = compare(v); return cmp == null ? v !== 0 : cmp; });
   add(get('name'), () => { const v = state.codewordValue(get('name')); const cmp = compare(v); return cmp == null ? v !== 0 : cmp; });
-  add(get('ability'), () => {
+  // ability= is a standalone stat test ONLY without an equipment selector; with a
+  // tool=/weapon=/armour= present, ability=/bonus= describe the ITEM being sought
+  // (a MAGIC+6 tool) and fold into matchEquipment's pattern — never a separate OR
+  // disjunct. A bare ability= with no comparator then never matches (JaFL IfNode),
+  // instead of defaulting v>0 (always true, since abilities floor at 1 — which forced
+  // §5.680's branch open with no wand and gave away the ring of ultimate power). (task 128)
+  const hasEquipSelector = get('weapon') != null || get('armour') != null || get('tool') != null;
+  if (!hasEquipSelector) add(get('ability'), () => {
     // `rank`/`stamina` are stats, not core abilities — firstAbility() ignores them,
     // so route them the way evalExpression/adjustAmount do (else the comparison ran
     // against 0: every `<if ability="rank" greaterthan=N>` gate stayed shut). (task 68)
@@ -247,7 +254,7 @@ export function evaluateCondition(el, state) {
     else if (spec === 'stamina') v = get('modifier') ? state.effectiveStaminaMax() : state.data.stamina;
     else { const ab = firstAbility(get('ability')); v = ab ? state.abilityForCheck(ab, natural) : 0; }
     const cmp = compare(v);
-    return cmp == null ? v > 0 : cmp;
+    return cmp == null ? false : cmp; // no comparator ⇒ never matches (JaFL)
   });
   add(get('weapon'), () => matchEquipment(itemPool, state, 'weapon', get('weapon'), el));
   add(get('armour'), () => matchEquipment(itemPool, state, 'armour', get('armour'), el));
@@ -322,6 +329,11 @@ function matchEquipment(pool, state, kind, spec, el) {
     const m = String(bonus).match(/^(-?\d+)(\+)?$/);
     if (m) { const b = parseInt(m[1], 10); items = m[2] ? items.filter((it) => (it.bonus || 0) >= b) : items.filter((it) => (it.bonus || 0) === b); }
   }
+  // ability= is part of the item pattern here (a MAGIC tool), not a separate stat test:
+  // §5.680 seeks a "hyperium wand (MAGIC +6)" — a tool named hyperium wand, ability magic,
+  // bonus 6 — so narrow to items carrying that ability. (task 128)
+  const abil = el.getAttribute('ability');
+  if (abil != null) { const want = abil.split('|').map((a) => normalize(a)); items = items.filter((it) => it.ability != null && want.includes(normalize(it.ability))); }
   const tags = el.getAttribute('tags');
   if (tags) { const want = tags.split(/[,|]/).map((t) => normalize(t)); items = items.filter((it) => want.every((t) => (it.tags || []).map(normalize).includes(t))); }
   if (boolAttr(el.getAttribute('using'))) {

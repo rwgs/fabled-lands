@@ -59,6 +59,32 @@ export async function run(ctx) {
     ok('not over OR: neither ⇒ true', eng.evaluateCondition(parse('<if not="t" item="torch" profession="Warrior"/>'), gcond));
     ok('not over OR: one present ⇒ false', eng.evaluateCondition(parse('<if not="t" item="lantern" profession="Warrior"/>'), gcond) === false);
 
+    // task 128: ability=/bonus= alongside an equipment selector describe the ITEM sought,
+    // not a standalone always-true disjunct. §5.680's ring-forging branch must gate on
+    // actually holding the MAGIC+6 hyperium wand.
+    const wandIf = '<if tool="hyperium wand" ability="magic" bonus="6"/>';
+    const g680n = GameState.create({ name:'W0', gender:'m', profession:'Warrior', book:5, adv });
+    ok('task128: §680 wand branch FALSE with no wand (no free ring)', eng.evaluateCondition(parse(wandIf), g680n) === false);
+    const g680p = GameState.create({ name:'Wp', gender:'m', profession:'Warrior', book:5, adv });
+    g680p.addItem(makeItem('tool', 'hyperium wand', 0, 'magic')); // a plain +0 wand, not the relic
+    ok('task128: §680 wand branch FALSE with a plain (+0) hyperium wand', eng.evaluateCondition(parse(wandIf), g680p) === false);
+    const g680w = GameState.create({ name:'Ww', gender:'m', profession:'Warrior', book:5, adv });
+    g680w.addItem(makeItem('tool', 'hyperium wand', 6, 'magic')); // the real MAGIC+6 wand
+    ok('task128: §680 wand branch TRUE only with the MAGIC+6 hyperium wand', eng.evaluateCondition(parse(wandIf), g680w) === true);
+    // a no-comparator standalone ability= never matches; comparator forms still do (task 68)
+    ok('task128: bare <if ability="magic"> never matches (no comparator)', eng.evaluateCondition(parse('<if ability="magic"/>'), g680n) === false);
+    const rk680 = g680n.rankValue();
+    ok('task128: comparator ability forms still compare (regression)', eng.evaluateCondition(parse(`<if ability="rank" greaterthan="${rk680 - 1}"/>`), g680n) === true && eng.evaluateCondition(parse(`<if ability="rank" greaterthan="${rk680}"/>`), g680n) === false);
+    // rendered §680: no wand grays the §564 ring path but keeps the "If not" §245 exit live
+    const c680 = document.createElement('div');
+    new Story(c680, g680n, { navigate(){}, onDeath(){}, notify(){} }).begin(await data.getSection(5, '680'), 5, '680');
+    const goto680 = (n) => Array.from(c680.querySelectorAll('button.goto')).find((b) => b.textContent.trim() === n);
+    ok('task128: §680 with no wand disables the §564 ring path, keeps §245 live', !!goto680('564') && goto680('564').disabled && !!goto680('245') && !goto680('245').disabled, `564d=${goto680('564') && goto680('564').disabled} 245d=${goto680('245') && goto680('245').disabled}`);
+    const c680w = document.createElement('div');
+    new Story(c680w, g680w, { navigate(){}, onDeath(){}, notify(){} }).begin(await data.getSection(5, '680'), 5, '680');
+    const goto680w = Array.from(c680w.querySelectorAll('button.goto')).find((b) => b.textContent.trim() === '564');
+    ok('task128: §680 with the MAGIC+6 wand opens the §564 ring path', !!goto680w && !goto680w.disabled);
+
     // effects
     const before = gs.data.shards;
     eng.applyEffect(parse('<lose shards="10"/>'), gs, {});
