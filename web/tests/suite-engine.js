@@ -184,6 +184,31 @@ export async function run(ctx) {
     ok('lose blessing="?" removes the chosen blessing', !gbl.hasBlessing('luck') && gbl.hasBlessing('combat'));
     eng.applyEffect(parse('<lose blessing="*"/>'), gbl, {});
     ok('lose blessing="*" removes every blessing', gbl.data.blessings.length === 0);
+    // task 132: "?"/"*" are match-any wildcards — any blessing satisfies <if blessing="?">
+    ok('hasBlessing("?")/"*" false with no blessing', gbl.hasBlessing('?') === false && gbl.hasBlessing('*') === false);
+    ok('<if blessing="?"> false with no blessing', eng.evaluateCondition(parse('<if blessing="?"/>'), gbl) === false);
+    gbl.addBlessing('injury');
+    ok('hasBlessing("?")/"*" true once any blessing is held', gbl.hasBlessing('?') === true && gbl.hasBlessing('*') === true);
+    ok('<if blessing="?"> true once any blessing is held', eng.evaluateCondition(parse('<if blessing="?"/>'), gbl) === true);
+    // §5.365 chapel: "he can bestow only one blessing at a time". Blessed → the choose-
+    // one menu is blocked; unblessed → storm/disease/injury are live pick buttons.
+    {
+      const s365 = await data.getSection(5,'365');
+      const gBlessed = GameState.create({ name:'C365b', gender:'m', profession:'Warrior', book:5, adv });
+      gBlessed.addBlessing('storm');
+      const cB = document.createElement('div');
+      new Story(cB, gBlessed, { navigate(){}, onDeath(){}, notify(){} }).begin(s365,5,'365');
+      const liveB = Array.from(cB.querySelectorAll('.reward-pick')).filter((b)=>!b.disabled);
+      ok('§5.365 blessed: the choose-one menu is blocked (no live pick)', liveB.length === 0, `live=${liveB.length}`);
+
+      const gFree = GameState.create({ name:'C365f', gender:'m', profession:'Warrior', book:5, adv });
+      const cF = document.createElement('div');
+      new Story(cF, gFree, { navigate(){}, onDeath(){}, notify(){} }).begin(s365,5,'365');
+      const liveF = Array.from(cF.querySelectorAll('.reward-pick')).filter((b)=>!b.disabled);
+      ok('§5.365 unblessed: three blessing picks are live', liveF.length === 3, `live=${liveF.length}`);
+      liveF[0].click();
+      ok('§5.365 unblessed: picking one grants exactly one blessing', gFree.data.blessings.length === 1, JSON.stringify(gFree.data.blessings));
+    }
     // equipment confiscation via using="t"
     const ge2 = GameState.create({ name:'E', gender:'m', profession:'Warrior', book:1, adv });
     const hadWeapon = !!ge2.wieldedWeapon();

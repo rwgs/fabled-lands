@@ -656,7 +656,13 @@ export class GameState {
   // ---- blessings / curses ---------------------------------------------
   // Compared/stored canonically so "storm"/"storms" (and any casing) are one
   // blessing — this also repairs legacy saves that stored the alias spelling.
-  hasBlessing(b) { const c = canonBlessing(b); return this.data.blessings.some((x) => canonBlessing(x) === c); }
+  hasBlessing(b) {
+    const c = canonBlessing(b);
+    // "?"/"*" are JaFL's match-any wildcards (§5.365 "if you already have a blessing of
+    // any sort, he cannot give you another"): any stored blessing satisfies the test. (task 132)
+    if (c === '?' || c === '*') return this.data.blessings.length > 0;
+    return this.data.blessings.some((x) => canonBlessing(x) === c);
+  }
   // permanent="true" (book6/159 Safety from Storms) marks a blessing that is never
   // used up; re-granting an existing blessing as permanent upgrades it. (task 76)
   addBlessing(b, permanent = false) {
