@@ -2,7 +2,7 @@
 // Reads attributes off the parsed XML elements and applies them to a GameState.
 
 import { ABILITIES, canonShipType, CREW_LEVELS, SHIP_TYPES } from './rules.js';
-import { makeItem, normalize, matchItems, matchItemQuery, isShardsCurrency } from './state.js';
+import { makeItem, normalize, matchItems, matchItemQuery, isShardsCurrency, currencyAward, splitItemName, parseTags } from './state.js';
 import { availableBooks } from './data.js';
 
 // ---- dice / RNG ------------------------------------------------------------
@@ -415,6 +415,13 @@ const EFFECT_APPLIERS = {
   adjustmoney: (el, state)       => applyAdjustMoney(el, state),
   transfer:    (el, state, opts) => applyTransfer(el, state, opts),
   effect:      (el, state, opts) => applyItemEffect(el, state, opts),
+  // Item-family rewards: applying an <item>/<weapon>/<armour>/<tool> node grants it,
+  // so a flag-linked reward routed through applyEffect actually lands instead of being
+  // a silent no-op (§3.346 medallion, §1.342/§4.111 potion). (task 125)
+  item:        (el, state) => applyItemAward(el, state),
+  weapon:      (el, state) => applyItemAward(el, state),
+  armour:      (el, state) => applyItemAward(el, state),
+  tool:        (el, state) => applyItemAward(el, state),
 };
 
 export function applyEffect(el, state, opts = {}) {
@@ -641,6 +648,27 @@ function applyLose(el, state, opts) {
   // possession selector — money, a god, a blessing — arms unconditionally). (tasks 113, 117)
   if (get('price') != null && (!paymentPresent || paymentTaken)) state.setFlag(get('price'), true);
   return notes.join(', ');
+}
+
+/** Grant an <item>/<weapon>/<armour>/<tool> reward node (task 125). The DOM-free twin of
+ *  the render layer's award transaction — render.js's grantItemNode delegates here — so a
+ *  flag-linked reward routed through applyEffect actually lands. A "N Shards" award banks
+ *  its value; a possession is added when a carry slot is free (the 12-item cap), carrying
+ *  its |-alt names as tags and its <effect> children; any <curse>/<disease>/<poison> child
+ *  bites on pickup. quantity= is handled by the caller (renderChoosableReward). */
+function applyItemAward(el, state) {
+  const kind = el.tagName.toLowerCase();
+  const rawName = el.getAttribute('name') || (kind === 'weapon' ? 'weapon' : kind);
+  const currency = kind === 'item' ? currencyAward(rawName) : null;
+  if (currency != null) { state.adjustMoney(currency); return `+${currency} Shards`; }
+  if (state.freeSlots() <= 0) return ''; // no room, no grant (12-item carry cap)
+  const { name, alts } = splitItemName(rawName);
+  const bonus = el.getAttribute('bonus') ? parseInt(el.getAttribute('bonus'), 10) : 0;
+  const ability = el.getAttribute('ability') || null;
+  const tags = [...parseTags(el.getAttribute('tags')), ...alts];
+  state.addItem(makeItem(kind, name, bonus, ability, tags, readItemEffects(el), el.getAttribute('group')));
+  Array.from(el.querySelectorAll(':scope > curse, :scope > disease, :scope > poison')).forEach((aff) => applyEffect(aff, state));
+  return 'gained item';
 }
 
 /** Candidate weapon/armour/tool a <lose kind=…> could take, after the bonus=/tags=/using=

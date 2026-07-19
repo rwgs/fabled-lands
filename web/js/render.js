@@ -1122,6 +1122,22 @@ export class Story {
     // so the award can't render its own Take button — grant it headlessly on the
     // click via the normal award transaction (capacity-checked). (task 96)
     const itemNodes = Array.from(node.querySelectorAll('item, weapon, armour, tool'));
+    // Item/weapon/... rewards linked by flag= to a price this group pays but rendered
+    // OUTSIDE the group — §1.342/§4.111's potion of restoration sits after the group,
+    // inside an affordability <if shards><if item> that flips false the moment the group
+    // is paid, so the reward's own gated Take button vanishes before it can be clicked.
+    // The group is the real payment, so grant those awards on its click and consume the
+    // flag so the (now-hidden) Take can never double-grant. (task 125)
+    const linkedAwards = [];
+    if (this.sectionEl) {
+      effects.forEach((fx) => {
+        const k = fx.getAttribute('price');
+        if (!k) return;
+        this.sectionEl.querySelectorAll(`[flag="${k}"]`).forEach((r) => {
+          if (ITEM_FAMILY_TAGS.has(r.tagName.toLowerCase()) && !node.contains(r)) linkedAwards.push(r);
+        });
+      });
+    }
     // A <rest> child heals on the group click (book6/628 "regain 1 Stamina point"):
     // applyRest headlessly, since the group renders as one button, not a rest widget.
     // Without this the daily inn group cleared its flag but never healed. (task 61)
@@ -1155,6 +1171,7 @@ export class Story {
       btn.addEventListener('click', () => {
         effects.forEach((fx) => applyEffect(fx, this.state, {}));
         itemNodes.forEach((n) => this.grantItemNode(n));
+        linkedAwards.forEach((n) => { this.grantItemNode(n); const f = n.getAttribute('flag'); if (f) this.state.setFlag(f, false); });
         restNodes.forEach((r) => {
           const perUse = r.hasAttribute('stamina') ? r.getAttribute('stamina') : null;
           const cost = r.getAttribute('shards') ? resolveValue(this.state, r.getAttribute('shards')) : 0;
@@ -1250,21 +1267,12 @@ export class Story {
   // Grant an <item>/<weapon>/<armour>/<tool> reward headlessly — no button — for a
   // reward bundled inside a <group> action, which collapses to a single button and so
   // can't show the award its own Take button (§1.228/509 gold chain mail, §4.189 Sun
-  // Goddess mirror). A "N Shards" reward banks its value; a possession is added when a
-  // slot is free (the 12-item carry cap), and any <curse>/<disease>/<poison> child
-  // bites on pickup. Mirrors renderItemAward's grant, minus the widget. (task 96)
+  // Goddess mirror). Delegates to the engine's item-family applier (the DOM-free award
+  // transaction): a "N Shards" reward banks its value, a possession is added when a slot
+  // is free (the 12-item carry cap), and any <curse>/<disease>/<poison> child bites on
+  // pickup. (tasks 96, 125)
   grantItemNode(node) {
-    const kind = node.tagName.toLowerCase();
-    const rawName = node.getAttribute('name') || (kind === 'weapon' ? 'weapon' : kind);
-    const currency = kind === 'item' ? currencyAward(rawName) : null;
-    if (currency != null) { this.state.adjustMoney(currency); return; }
-    if (this.state.freeSlots() <= 0) return; // capacity handling: no room, no grant
-    const { name, alts } = splitItemName(rawName);
-    const bonus = node.getAttribute('bonus') ? parseInt(node.getAttribute('bonus'), 10) : 0;
-    const ability = node.getAttribute('ability') || null;
-    const tags = [...parseTags(node.getAttribute('tags')), ...alts];
-    this.state.addItem(makeItem(kind, name, bonus, ability, tags, readItemEffects(node), node.getAttribute('group')));
-    Array.from(node.querySelectorAll(':scope > curse, :scope > disease, :scope > poison')).forEach((aff) => applyEffect(aff, this.state));
+    applyEffect(node, this.state, {});
   }
 
   // ---- passive effects -----------------------------------------------------
@@ -1352,7 +1360,9 @@ export class Story {
         this.ctx.applied.add(memo);
         applyEffect(node, this.state, {}); // set the flag (and apply any real cost)
         const rewards = this.linkedRewards(price);
-        if (!this.isRollGate(price) && rewards.length === 1) applyEffect(rewards[0], this.state, {});
+        // Skip an item-family reward here — it grants through its own gated Take button
+        // (renderChoosableReward), so firing it now would double-grant. (task 125)
+        if (!this.isRollGate(price) && rewards.length === 1 && !ITEM_FAMILY_TAGS.has(rewards[0].tagName.toLowerCase())) applyEffect(rewards[0], this.state, {});
       }
       return null;
     }
@@ -1705,7 +1715,11 @@ export class Story {
   //    to add again, so it is never permanently memoised (book4/93, book6/117/731). (task 43)
   //  - Otherwise a one-shot purchase: apply once and lock the button for this visit.
   renderOptionalPay(container, node, path, key) {
-    if (this.isChooseOne(key)) return this.renderChooseOnePay(container, node, path, key);
+    // A choose-one menu or a priced item-family award grants through its own pick/Take
+    // button, so the payment must only ARM the flag — never fire the reward here, or a
+    // single payment would over-grant the whole menu and double with the Take button.
+    // (tasks 43, 125)
+    if (this.isChooseOne(key) || this.isPricedItemAward(key)) return this.renderChooseOnePay(container, node, path, key);
     const rewards = this.linkedRewards(key);
     const repeatable = rewards.some((r) => this.isCounterReward(r));
     const memo = 'pay@' + path;
@@ -1849,6 +1863,20 @@ export class Story {
     if (rewards.length < 2) return false;
     if (!rewards.every((n) => CHOOSE_ONE_TAGS.has(n.tagName.toLowerCase()))) return false;
     return rewards.some((n) => !ITEM_FAMILY_TAGS.has(n.tagName.toLowerCase()));
+  }
+
+  // A flag-linked item-family award (item/weapon/armour/tool) claimed by arm-then-take:
+  // a linked payment ([price=key] cost) arms the flag, then the award's own Take button
+  // grants it and consumes the flag. Covers the cases isChooseOne excludes — a *single*
+  // priced item reward (§3.346 medallion, §1.342/§4.111 potion of restoration) and a pure
+  // item-family barter (§4.634 "give one, take one") — which otherwise render a free Take
+  // button and grant nothing when paid. Requires a [price=key] cost, so an item that
+  // carries a flag but has no linked payment stays an ordinary always-live take. (task 125)
+  isPricedItemAward(key) {
+    if (key == null || key === '' || !this.sectionEl) return false;
+    if (!this.sectionEl.querySelector(`[price="${key}"]`)) return false;
+    const rewards = this.linkedRewards(key);
+    return rewards.length > 0 && rewards.every((n) => ITEM_FAMILY_TAGS.has(n.tagName.toLowerCase()));
   }
 
   // The "choose one" cost button: paying only *arms* the choice (deducts the cost
@@ -2260,6 +2288,10 @@ export class Story {
     // live only once the choice is armed and blocking its siblings when taken. (task 63)
     const awardFlag = node.getAttribute('flag');
     if (awardFlag != null && this.isChooseOne(awardFlag)) return this.renderChoosableReward(container, node, path, awardFlag);
+    // A single priced item reward or a pure item-family barter (§3.346, §1.342, §4.634):
+    // gate the Take button on the flag its payment arms — armed → live, taken → consumed —
+    // so it is neither free to take unpaid nor a no-op once paid. (task 125)
+    if (awardFlag != null && this.isPricedItemAward(awardFlag)) return this.renderChoosableReward(container, node, path, awardFlag);
     const rawName = node.getAttribute('name') || (kind === 'weapon' ? 'weapon' : kind);
     // A "N Shards" award is stackable currency, not a possession (dragon hoard §1.16).
     const currency = kind === 'item' ? currencyAward(rawName) : null;

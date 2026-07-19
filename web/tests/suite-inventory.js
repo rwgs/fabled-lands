@@ -345,13 +345,63 @@ export async function run(ctx) {
     Array.from(c597b.querySelectorAll('.reward-pick')).find((b) => /resurrection/i.test(b.textContent)).click();
     ok('§597 taking resurrection arranges the deal and blocks the other two', g597b.hasResurrection() && g597b.findItems('amber wand').length === 0 && g597b.data.shards === sh0597b && Array.from(c597b.querySelectorAll('.reward-pick')).every((b) => b.disabled), `res=${g597b.hasResurrection()} wand=${g597b.findItems('amber wand').length} sh=${g597b.data.shards}`);
 
-    // book4/634 barter (pure item-family rewards) must NOT become a choose-one:
-    // its item awards stay independent Take buttons, not flag-gated reward picks.
+    // --- task 125: flag-linked item rewards gate on their payment ------------------
+    // §3.346: hand over a trophy for a 200-Shard medallion (no <if> wrapper → arm-then-
+    // take). No trophy ⇒ the Take is disabled and free Shards are impossible; paying arms
+    // the reward, which grants exactly once and is not repeatable on re-entry.
+    const g346 = GameState.create({ name:'Cultist', gender:'m', profession:'Warrior', book:3, adv });
+    const sh0346 = g346.data.shards;
+    const c346 = document.createElement('div');
+    const st346 = new Story(c346, g346, { navigate(){}, onDeath(){}, notify(){} });
+    st346.begin(await data.getSection(3, '346'), 3, '346');
+    ok('§346 no trophy: the 200-Shard Take is present but disabled', c346.querySelectorAll('.reward-pick').length === 1 && c346.querySelector('.reward-pick').disabled);
+    ok('§346 no trophy: pay buttons disabled and no free Shards on entry', Array.from(c346.querySelectorAll('.pay-action')).every((b) => b.disabled) && g346.data.shards === sh0346, `sh=${g346.data.shards}`);
+    g346.addItem(makeItem('item', "pirate captain's head"));
+    st346.begin(await data.getSection(3, '346'), 3, '346');
+    const payHead346 = Array.from(c346.querySelectorAll('.pay-action')).find((b) => /pirate captain/i.test(b.textContent));
+    ok('§346 with a trophy: its pay button is live but the Take is still disabled', !!payHead346 && !payHead346.disabled && c346.querySelector('.reward-pick').disabled);
+    payHead346.click();
+    ok('§346 paying hands over the head and grants nothing yet', g346.findItems("pirate captain's head").length === 0 && g346.data.shards === sh0346, `sh=${g346.data.shards}`);
+    ok('§346 the medallion Take is now armed', !c346.querySelector('.reward-pick').disabled);
+    c346.querySelector('.reward-pick').click();
+    ok('§346 taking grants the 200-Shard medallion exactly once', g346.data.shards === sh0346 + 200, `sh=${g346.data.shards}`);
+    ok('§346 the Take is spent (flag consumed) afterwards', c346.querySelector('.reward-pick').disabled);
+    st346.begin(await data.getSection(3, '346'), 3, '346');
+    ok('§346 re-entry with no trophy offers no free medallion', c346.querySelector('.reward-pick').disabled && g346.data.shards === sh0346 + 200);
+
+    // §1.342: the alchemist's potion needs 250 Shards AND an ink sac, bundled in one
+    // <group> inside an affordability <if> — paying the group must grant the potion (its
+    // own Take vanishes with the branch), and merely holding the ingredients does not.
+    const g342 = GameState.create({ name:'Alch', gender:'m', profession:'Warrior', book:1, adv });
+    g342.data.shards = 300;
+    g342.addItem(makeItem('item', 'ink sac'));
+    const c342 = document.createElement('div');
+    const st342 = new Story(c342, g342, { navigate(){}, onDeath(){}, notify(){} });
+    st342.begin(await data.getSection(1, '342'), 1, '342');
+    ok('§342 holding the ingredients does not grant the potion for free', g342.findItems('potion of restoration').length === 0);
+    ok('§342 the potion Take is shown disabled until the group is paid', (Array.from(c342.querySelectorAll('.reward-pick')).find((b) => /potion of restoration/i.test(b.textContent)) || {}).disabled === true);
+    const grp342 = c342.querySelector('.group-action');
+    ok('§342 shows the "cross it off" group payment', !!grp342);
+    grp342.click();
+    ok('§342 the group takes 250 Shards and the ink sac', g342.data.shards === 50 && g342.findItems('ink sac').length === 0, `sh=${g342.data.shards} ink=${g342.findItems('ink sac').length}`);
+    ok('§342 paying the group grants the potion of restoration exactly once', g342.findItems('potion of restoration').length === 1);
+
+    // book4/634 barter (task 63's free-take status quo, superseded by task 125): each
+    // offered good now gates on the flag its matching forfeit arms — give one, take one.
     const g634 = GameState.create({ name:'Fish', gender:'m', profession:'Warrior', book:4, adv });
     const c634 = document.createElement('div');
     const st634 = new Story(c634, g634, { navigate(){}, onDeath(){}, notify(){} });
     st634.begin(await data.getSection(4, '634'), 4, '634');
-    ok('§634 barter is untouched: item awards render as Take buttons, not reward picks', c634.querySelectorAll('.reward-pick').length === 0 && c634.querySelectorAll('.take-item').length >= 3, `picks=${c634.querySelectorAll('.reward-pick').length} takes=${c634.querySelectorAll('.take-item').length}`);
+    ok('§634 the three offered goods are Take picks, disabled before any forfeit', c634.querySelectorAll('.reward-pick').length === 3 && Array.from(c634.querySelectorAll('.reward-pick')).every((b) => b.disabled));
+    ok('§634 no forfeit to give: the exchange buttons are all disabled and nothing granted', Array.from(c634.querySelectorAll('.pay-action')).every((b) => b.disabled) && g634.findItems('magic trident').length === 0);
+    g634.addItem(makeItem('item', 'bag of pearls'));
+    st634.begin(await data.getSection(4, '634'), 4, '634');
+    const payPearls = Array.from(c634.querySelectorAll('.pay-action')).find((b) => /pearl/i.test(b.textContent));
+    ok('§634 with a bag of pearls: its exchange button is live', !!payPearls && !payPearls.disabled);
+    payPearls.click();
+    ok('§634 the forfeit takes the pearls and arms the picks', g634.findItems('bag of pearls').length === 0 && Array.from(c634.querySelectorAll('.reward-pick')).some((b) => !b.disabled));
+    Array.from(c634.querySelectorAll('.reward-pick')).find((b) => /magic trident/i.test(b.textContent)).click();
+    ok('§634 taking the trident grants exactly it and re-locks the other picks', g634.findItems('magic trident').length === 1 && g634.findItems('ink sac').length === 0 && Array.from(c634.querySelectorAll('.reward-pick')).every((b) => b.disabled), `trident=${g634.findItems('magic trident').length} ink=${g634.findItems('ink sac').length}`);
 
     // --- task 44: ring of ultimate power folds its Rank/Stamina auras (book5/564) ---
     const g564 = GameState.create({ name:'Ring', gender:'m', profession:'Warrior', book:5, adv });
