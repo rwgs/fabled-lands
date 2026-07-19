@@ -3,7 +3,7 @@
 // once loaded/installed. Progress lives in localStorage (per-origin), so it
 // survives offline and reloads.
 
-const VERSION = 'fl-26.07.19.7ef5c63';
+const VERSION = 'fl-26.07.19.41965c0';
 
 // REQUIRED = the app shell + all book data. Without every one of these the game
 // can't run offline, so the install must FAIL (and the previous complete cache
@@ -20,6 +20,7 @@ const REQUIRED = [
   './js/rules.js',
   './js/engine.js',
   './js/render.js',
+  './js/render-rules.js',
   './js/combat.js',
   './js/market.js',
   './js/ui.js',

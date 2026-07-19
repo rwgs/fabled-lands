@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls && echo \"---python---\" && python --version 2>&1 && echo \"---chrome---\" && ls \"/c/Program Files/Google/Chrome/Application/chrome.exe\" 2>&1)",
+      "Read(//c/Program Files/Google/Chrome/Application/**)",
+      "Bash(python -m http.server 8848 --bind 127.0.0.1)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://127.0.0.1:8848/_test.html)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://127.0.0.1:8848/data/meta.json)",
+      "Bash(node --check web/js/app.js)",
+      "Bash(node --check web/js/state.js)",
+      "Bash(node --check web/js/engine.js)",
+      "Bash(grep -v '^\\\\s*[0-9]*:.*\\\\*/$')",
+      "Bash(sed -E 's/\\(name|shards|price\\)=\"[^\"]*\"/\\\\1=\"_\"/g')",
+      "Bash(sed -E 's/\\(name|cache|text|to|from\\)=\"[^\"]*\"/\\\\1=\"_\"/g')",
+      "Bash(sed -E 's/\\(name|text\\)=\"[^\"]*\"/\\\\1=\"_\"/g')",
+      "Bash(sed -E 's/\\(to|from|name\\)=\"[^\"]*\"/\\\\1=\"_\"/g')",
+      "Bash(sed -E 's/\\(name|cache\\)=\"[^\"]*\"/\\\\1=\"_\"/g')",
+      "PowerShell($node = \\(Get-Command node -ErrorAction SilentlyContinue\\); if \\($node\\) { $node.Source; node --version } else { \"no node\" }; \\(Get-Command python -ErrorAction SilentlyContinue\\).Source; \\(Get-Command chrome -ErrorAction SilentlyContinue\\).Source)",
+      "Bash(python -m http.server 8848)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:8848/_test.html)",
+      "Bash(curl -s -o /dev/null -w \"data.js %{http_code}\\\\n\" http://localhost:8848/js/data.js)",
+      "Bash(curl -s -o /dev/null -w \"meta %{http_code}\\\\n\" http://localhost:8848/data/meta.json)"
+    ]
+  },
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  }
+}

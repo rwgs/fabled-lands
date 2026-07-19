@@ -6,6 +6,7 @@ import * as eng from '../js/engine.js';
 import { fightRound, makeFight, groupFightRound, isDefeated, useWrathBlessing, useDefenceBlessing, rerollAttack } from '../js/combat.js';
 import { goodsFrom, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo, canUpgradeCrew, payChoiceCost } from '../js/market.js';
 import { Story, previewProse } from '../js/render.js';
+import * as rules from '../js/render-rules.js';
 import { Narrator } from '../js/tts.js';
 import { renderSheet } from '../js/ui.js';
 import { renderStatic } from '../js/app.js';
@@ -847,6 +848,41 @@ export async function run(ctx) {
       const pearMove = Array.from(cM.querySelectorAll('.item')).find((li) => /pear/.test(li.textContent)).querySelector('.item-move');
       pearMove.click();
       ok('task133: a sheet reorder invokes onSheetChange', changes === 1, `changes=${changes}`);
+    }
+
+    // --- task 119: DOM-free blessing planners extracted to render-rules.js ---------
+    {
+      const bsec = parse('<section name="tb"><outcome blessing="storm"/><outcome blessing="*"/><p>Storm! <lose blessing="storm">lose it</lose> and <goto section="9"/>.</p><p><lose blessing="storm" hidden="t"/></p></section>');
+      const ob = rules.computeOutcomeBlessings(bsec);
+      ok('task119: computeOutcomeBlessings collects guarded blessings, drops the "*" wildcard', ob.has('storm') && !ob.has('*') && ob.size === 1, JSON.stringify([...ob]));
+
+      const held = GameState.create({ name:'B119', gender:'m', profession:'Warrior', book:1, adv });
+      held.addBlessing('storm');
+      const unheld = GameState.create({ name:'B119n', gender:'m', profession:'Warrior', book:1, adv });
+
+      const outcomeStorm = Array.from(bsec.querySelectorAll('outcome')).find((o) => o.getAttribute('blessing') === 'storm');
+      const outcomeStar  = Array.from(bsec.querySelectorAll('outcome')).find((o) => o.getAttribute('blessing') === '*');
+      ok('task119: blessingVeto true when the blessing is held', rules.blessingVeto(held, outcomeStorm) === true);
+      ok('task119: blessingVeto false when not held', rules.blessingVeto(unheld, outcomeStorm) === false);
+      ok('task119: blessingVeto false for a wildcard outcome', rules.blessingVeto(held, outcomeStar) === false);
+
+      const loses = Array.from(bsec.querySelectorAll('lose[blessing]'));
+      const openLose = loses.find((l) => !l.hasAttribute('hidden'));
+      const hiddenLose = loses.find((l) => l.hasAttribute('hidden'));
+      ok('task119: isGuardedBlessingLoss true for the non-hidden guarded lose', rules.isGuardedBlessingLoss(openLose, ob) === true);
+      ok('task119: isGuardedBlessingLoss false for the hidden form', rules.isGuardedBlessingLoss(hiddenLose, ob) === false);
+
+      const gotoNode = bsec.querySelector('goto');
+      ok('task119: blessingSpendForGoto returns the held blessing preceding the goto', rules.blessingSpendForGoto(gotoNode, bsec, held, ob) === 'storm');
+      ok('task119: blessingSpendForGoto null once the blessing is gone', rules.blessingSpendForGoto(gotoNode, bsec, unheld, ob) === null);
+
+      ok('task119: blessingSpendForReroll finds the hidden keepblessing lose', rules.blessingSpendForReroll(bsec, held, ob) === 'storm');
+      ok('task119: blessingSpendForReroll null once the blessing is spent', rules.blessingSpendForReroll(bsec, unheld, ob) === null);
+
+      const solesec = parse('<section name="ts"><tick price="b" hidden="t"/><gain flag="b" blessing="storm"/></section>');
+      const costNode = solesec.querySelector('[price="b"]');
+      ok('task119: ownsSoleLinkedBlessing true when the sole linked blessing is held', rules.ownsSoleLinkedBlessing(costNode, 'b', solesec, held) === true);
+      ok('task119: ownsSoleLinkedBlessing false when not held', rules.ownsSoleLinkedBlessing(costNode, 'b', solesec, unheld) === false);
     }
 
     // --- task 113: <lose item="?" bonus="N"> enforces the bonus= filter ---
