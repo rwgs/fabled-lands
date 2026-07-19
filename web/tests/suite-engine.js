@@ -390,6 +390,62 @@ export async function run(ctx) {
     const s468 = await data.getSection(4,'468'); story20i.begin(s468,4,'468');
     ok('§468 renders an item-cache widget', !!c20i.querySelector('.item-cache'));
 
+    // --- task 131: cache max= semantics --------------------------------------
+    // §4.263 arena "Winnings" cache is max="0": deposits barred (withdraw-only). A stake
+    // locked at §4.127 can be doubled by the paired <adjustmoney ×2>, but no fresh coin
+    // may be paid in — closing the deposit-double-withdraw money exploit.
+    {
+      const g263 = GameState.create({ name:'W263', gender:'m', profession:'Warrior', book:4, adv });
+      g263.data.shards = 500;
+      g263.addCodeword('4.127.1');            // the player bet on the finman (who won)
+      g263.depositCacheMoney('4.127', 20);    // 20-Shard stake standing in the cache
+      const c263 = document.createElement('div');
+      const story263 = new Story(c263, g263, { navigate(){}, onDeath(){}, notify(){} });
+      const s263 = await data.getSection(4,'263'); story263.begin(s263,4,'263');
+      ok('§4.263 renders the Winnings money-cache', !!c263.querySelector('.money-cache'));
+      const dep263 = () => Array.from(c263.querySelectorAll('.money-cache button')).find((b)=>/Deposit/.test(b.textContent));
+      ok('§4.263 Deposit is barred (max="0")', !!dep263() && dep263().disabled === true, dep263() ? 'disabled='+dep263().disabled : 'none');
+      const purse0 = g263.data.shards;
+      c263.querySelector('.money-cache .cache-amount').value = '100';
+      dep263().click(); // disabled — a no-op; confirms no fresh coin can be paid in
+      ok('§4.263 no fresh coin can be paid in', g263.data.shards === purse0 && g263.cacheMoney('4.127') === 20, `purse=${g263.data.shards} stash=${g263.cacheMoney('4.127')}`);
+      // the force="f" ×2 payout still doubles the standing stake despite max="0"
+      const x2btn = Array.from(c263.querySelectorAll('button')).find((b)=>/add the amount you bet/i.test(b.textContent));
+      ok('§4.263 offers the ×2 winnings action', !!x2btn);
+      x2btn.click();
+      ok('§4.263 the ×2 doubles the §4.127 stake to 40', g263.cacheMoney('4.127') === 40, `stash=${g263.cacheMoney('4.127')}`);
+      c263.querySelector('.money-cache .cache-amount').value = '40';
+      const wd263 = Array.from(c263.querySelectorAll('.money-cache button')).find((b)=>/Withdraw/.test(b.textContent));
+      ok('§4.263 winnings can still be withdrawn', !!wd263 && !wd263.disabled);
+      wd263.click();
+      // purse: 500 start − 20 staked + 40 winnings = 520
+      ok('§4.263 withdrawing the winnings credits the purse', g263.data.shards === 520 && g263.cacheMoney('4.127') === 0, `purse=${g263.data.shards} stash=${g263.cacheMoney('4.127')}`);
+    }
+
+    // §6.512 lacquer cabinet: an <itemcache max="5000"> also stores Shards (up to 5000);
+    // items stay capped at itemlimit="6".
+    {
+      const g512 = GameState.create({ name:'B512', gender:'m', profession:'Warrior', book:6, adv });
+      g512.data.items = []; g512.data.shards = 6000;
+      const c512 = document.createElement('div');
+      const story512 = new Story(c512, g512, { navigate(){}, onDeath(){}, notify(){} });
+      const s512 = await data.getSection(6,'512'); story512.begin(s512,6,'512');
+      ok('§6.512 renders an item-cache widget', !!c512.querySelector('.item-cache'));
+      const dep512 = () => Array.from(c512.querySelectorAll('.item-cache button')).find((b)=>/Deposit/.test(b.textContent));
+      ok('§6.512 shows a Shards deposit control (max="5000")', !!dep512());
+      const amt512 = () => c512.querySelector('.item-cache .cache-amount');
+      amt512().value = '5000'; dep512().click();
+      ok('§6.512 deposits up to 5000 Shards', g512.cacheMoney('6.512') === 5000 && g512.data.shards === 1000, `stash=${g512.cacheMoney('6.512')} sh=${g512.data.shards}`);
+      amt512().value = '1'; dep512().click();
+      ok('§6.512 a 5001st Shard is refused (max cap)', g512.cacheMoney('6.512') === 5000 && g512.data.shards === 1000, `stash=${g512.cacheMoney('6.512')} sh=${g512.data.shards}`);
+      // items still capped at itemlimit="6": six stored + one carried offers no Store button
+      g512.data.items = [makeItem('item', 'spare rope')];
+      for (let i = 0; i < 6; i++) g512.cacheAddItem('6.512', makeItem('item', 'trinket' + i));
+      story512.begin(s512,6,'512');
+      const store512 = Array.from(c512.querySelectorAll('.item-cache button')).find((b)=>/^Store /.test(b.textContent));
+      ok('§6.512 items stay capped at six (no further Store offered)', !store512, store512 ? store512.textContent : 'none');
+    }
+
     // task 97: §2.617 (Molhern's smithy) is the only filtered item cache — it takes one
     // weapon or suit of armour, excluding already-Molherned or bonus-6+ equipment. The
     // <include>/<exclude> filters must gate which possessions the deposit UI offers.

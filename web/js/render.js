@@ -4072,7 +4072,9 @@ export class Story {
     const name = node.getAttribute('name');
     if (!name) return null;
     const text = node.getAttribute('text') || 'Money stashed';
-    const max = node.getAttribute('max') ? parseInt(node.getAttribute('max'), 10) : 0;
+    // max: absent ⇒ unlimited (JaFL CacheNode default −1); "0" ⇒ deposits barred
+    // ("Use '0' to bar money from this cache"); N>0 ⇒ cap the stash total at N. (task 131)
+    const max = node.hasAttribute('max') ? (parseInt(node.getAttribute('max'), 10) || 0) : -1;
     const mult = node.getAttribute('multiples') ? parseInt(node.getAttribute('multiples'), 10) : 1;
     const charge = node.getAttribute('withdrawCharge') ? parseFloat(node.getAttribute('withdrawCharge')) : 0;
 
@@ -4097,7 +4099,7 @@ export class Story {
     dep.textContent = 'Deposit';
     dep.addEventListener('click', () => {
       let amt = roundMult(Number(input.value) || 0);
-      if (max > 0) amt = Math.min(amt, max - this.state.cacheMoney(name)); // max caps the stash total
+      if (max >= 0) amt = Math.min(amt, max - this.state.cacheMoney(name)); // 0 bars deposits; N caps the total
       amt = Math.min(amt, this.state.data.shards);
       if (amt > 0) { this.state.depositCacheMoney(name, amt); this.rerender(); }
     });
@@ -4109,6 +4111,14 @@ export class Story {
       if (amt > 0 && this.state.cacheMoney(name) > 0) { this.state.withdrawCacheMoney(name, amt, charge); this.rerender(); }
     });
     controls.appendChild(dep); controls.appendChild(wd);
+    // A max="0" cache is withdraw-only (§4.263 arena "Winnings"): bar deposits so the
+    // paired <adjustmoney ×2> can only double the stake already locked at §4.127, not
+    // fresh coin — closing the deposit-double-withdraw money exploit. The input and
+    // Withdraw stay live so the doubled winnings can still be collected. (task 131)
+    if (max === 0) {
+      dep.disabled = true;
+      dep.title = 'You cannot pay into this cache.';
+    }
     // A gambling bet locks once rolled (task 38): disable the controls so it can't
     // be changed after the dice. Only caches whose lock is bundled with a roll are
     // gated this way — a stash cache stays freely editable.
@@ -4131,6 +4141,10 @@ export class Story {
     if (!name) return null;
     const text = node.getAttribute('text') || 'Stored here';
     const limit = node.getAttribute('itemlimit') ? parseInt(node.getAttribute('itemlimit'), 10) : 0;
+    // An <itemcache max="N"> also stores Shards up to N (§6.512's cabinet: "store up to
+    // 5000 Shards and six possessions"). Absent max= ⇒ item-only (the town-house caches);
+    // a positive max= caps the cached Shards. Reuses the shared cache purse keyed by name. (task 131)
+    const moneyMax = node.hasAttribute('max') ? (parseInt(node.getAttribute('max'), 10) || 0) : -1;
     const stored = this.state.cacheItems(name);
 
     const box = document.createElement('div');
@@ -4167,6 +4181,39 @@ export class Story {
       list.appendChild(row);
     });
     box.appendChild(list);
+
+    // Shards storage (only when max= opts the cache into money): a balance line plus
+    // Deposit/Withdraw capped at max=, mirroring the money cache. (task 131)
+    if (moneyMax > 0) {
+      const bal = document.createElement('div');
+      bal.className = 'cache-balance';
+      bal.innerHTML = `<span class="cache-label">Shards stored</span><span class="cache-sum">${this.state.cacheMoney(name)} Shards</span>`;
+      box.appendChild(bal);
+      const mc = document.createElement('div');
+      mc.className = 'cache-controls';
+      const input = document.createElement('input');
+      input.type = 'number'; input.min = '0'; input.step = '1'; input.value = '0';
+      input.className = 'cache-amount';
+      mc.appendChild(input);
+      const dep = document.createElement('button');
+      dep.className = 'btn-mini';
+      dep.textContent = 'Deposit';
+      dep.addEventListener('click', () => {
+        let amt = Math.max(0, Math.floor(Number(input.value) || 0));
+        amt = Math.min(amt, moneyMax - this.state.cacheMoney(name)); // cap the stash total at max
+        amt = Math.min(amt, this.state.data.shards);
+        if (amt > 0) { this.state.depositCacheMoney(name, amt); this.rerender(); }
+      });
+      const wd = document.createElement('button');
+      wd.className = 'btn-mini';
+      wd.textContent = 'Withdraw';
+      wd.addEventListener('click', () => {
+        const amt = Math.max(0, Math.floor(Number(input.value) || 0));
+        if (amt > 0 && this.state.cacheMoney(name) > 0) { this.state.withdrawCacheMoney(name, amt, 0); this.rerender(); }
+      });
+      mc.appendChild(dep); mc.appendChild(wd);
+      box.appendChild(mc);
+    }
 
     // Deposit a carried possession (unless the stash is at its item limit). The cache's
     // <include>/<exclude> filters (JaFL Node.modifyItemMatches) decide which possessions
