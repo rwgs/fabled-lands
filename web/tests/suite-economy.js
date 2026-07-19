@@ -87,6 +87,21 @@ export async function run(ctx) {
     mapSell().click();
     ok('§30 selling the map credits 150 and removes it', g30t.findItems('treasure map').length === 0 && g30t.data.shards === 450, `sh=${g30t.data.shards}`);
 
+    // --- task 130: an inline <buy> with no quantity= is unlimited-per-visit ---
+    // §1.342 alchemist: "buy as many as you can afford", each potion 50 Shards, no quantity=.
+    const g342 = GameState.create({ name:'B342', gender:'m', profession:'Warrior', book:1, adv });
+    g342.data.items = []; g342.data.shards = 500;
+    const c342 = document.createElement('div');
+    const story342 = new Story(c342, g342, { navigate(){}, onDeath(){}, notify(){} });
+    const s342 = await data.getSection(1,'342'); story342.begin(s342,1,'342');
+    const strBuy = () => Array.from(c342.querySelectorAll('button')).find((b)=>/potion of strength/i.test(b.textContent) && /Buy/i.test(b.textContent));
+    ok('§1.342 shows a potion-of-strength buy button, enabled', !!strBuy() && !strBuy().disabled);
+    strBuy().click();
+    ok('§1.342 first potion bought, 50 Shards charged', g342.findItems('potion of strength').length === 1 && g342.data.shards === 450, `n=${g342.findItems('potion of strength').length} sh=${g342.data.shards}`);
+    ok('§1.342 the same buy repeats in one visit (no quantity cap)', !!strBuy() && !strBuy().disabled, strBuy() ? 'disabled='+strBuy().disabled : 'none');
+    strBuy().click();
+    ok('§1.342 second identical potion bought same visit', g342.findItems('potion of strength').length === 2 && g342.data.shards === 400, `n=${g342.findItems('potion of strength').length} sh=${g342.data.shards}`);
+
     // --- task 30: gate <random flag="k"> rolls behind their payment ---
     window.__FL_INSTANT_DICE__ = true;                 // resolve dice animation instantly
     const settle = () => new Promise(r => setTimeout(r, 30));

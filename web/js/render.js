@@ -3897,7 +3897,11 @@ export class Story {
     // Canonicalise an abbreviated cargo (§5.447 "mineral") so the label, memo and stored
     // Unit all read the full commodity name. (task 127)
     const cargo = node.getAttribute('cargo') != null ? canonCargo(node.getAttribute('cargo')) : null;
-    const quantity = node.getAttribute('quantity') ? Math.max(1, parseInt(node.getAttribute('quantity'), 10) || 1) : 1;
+    // Absent quantity= means unlimited-per-visit (JaFL TradeNode default −1): §1.342/§5.639
+    // "buy as many as you can afford", §5.447 "for every such Cargo Unit". An explicit
+    // quantity= is the per-visit cap (§4.658's one-shot barque, quantity="1"). Unlimited
+    // buys are gated only by funds/capacity below, never by the buy memo. (task 130)
+    const quantity = node.getAttribute('quantity') ? Math.max(1, parseInt(node.getAttribute('quantity'), 10) || 1) : Infinity;
     const kind = shipType ? 'ship' : (cargo != null ? 'cargo' : (tool ? 'tool' : 'item'));
     const memo = 'buy@' + path;
     const bought = this.ctx.buys.get(memo) || 0;
@@ -3908,7 +3912,7 @@ export class Story {
     const directText = Array.from(node.childNodes).filter((c) => c.nodeType === Node.TEXT_NODE).map((c) => c.nodeValue).join(' ').replace(/\s+/g, ' ').trim();
     const thing = directText || titleCase(tool || item || cargo || shipType || 'it');
     let label = price > 0 ? `Buy ${thing} (${price} Shards)` : `Take ${thing}`;
-    if (quantity > 1) label += ` — ${Math.max(0, quantity - bought)} left`;
+    if (Number.isFinite(quantity) && quantity > 1) label += ` — ${Math.max(0, quantity - bought)} left`;
 
     const btn = document.createElement('button');
     btn.className = 'btn-mini' + (done ? ' done' : '');
