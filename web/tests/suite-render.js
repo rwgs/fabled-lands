@@ -354,6 +354,21 @@ export async function run(ctx) {
     give400.click();
     ok('§400 giving the gem consumes it (pay="t")', !g400.hasItem('green gem'), `has=${g400.hasItem('green gem')}`);
     ok('§400 giving the gem navigates to 288', nav400 && String(nav400.s) === '288', JSON.stringify(nav400));
+    // task 133 (Belt A): if the gem is dropped AFTER the choice renders, clicking the
+    // still-enabled (stale) button must refuse — payChoiceCost re-validates the cost, so
+    // there is no free crossing, and the refused click re-greys the choice on rerender.
+    const g400s = GameState.create({ name:'G400s', gender:'m', profession:'Warrior', book:2, adv });
+    g400s.addItem(makeItem('item', 'green gem'));
+    let nav400s = null;
+    const c400s = document.createElement('div');
+    const story400s = new Story(c400s, g400s, { navigate:(b,s)=>{nav400s={b,s};}, onDeath(){}, notify(){} });
+    story400s.begin(await data.getSection(2,'400'),2,'400');
+    const give400s = () => Array.from(c400s.querySelectorAll('.choice')).find((b) => /Give them a green gem/i.test(b.textContent));
+    ok('§400 stale test: gem choice starts enabled', !!give400s() && give400s().disabled === false);
+    g400s.removeItemById(g400s.findItems('green gem')[0].id); // dropped; the button is not yet re-rendered
+    give400s().click();
+    ok('§400 dropping the gem then clicking refuses (no navigation)', nav400s === null, JSON.stringify(nav400s));
+    ok('§400 the refused click re-greys the choice', !!give400s() && give400s().disabled === true, give400s() ? 'disabled='+give400s().disabled : 'none');
     // without the gem the same choice is a disabled gate (must have the item).
     const g400b = GameState.create({ name:'G400b', gender:'m', profession:'Warrior', book:2, adv });
     const c400b = document.createElement('div');

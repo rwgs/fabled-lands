@@ -546,7 +546,9 @@ function iconBtn(glyph, title, fn) { const b = el('button', 'icon-btn', glyph); 
 
 function refreshSheet() {
   const pane = $('#sheet-pane');
-  if (pane && state) renderSheet(state, pane, { onUse: onUseItem });
+  // onSheetChange rerenders the story after a drop/move/curse-lift so an item-/curse-gated
+  // choice re-evaluates its eligibility instead of staying live on screen (task 133).
+  if (pane && state) renderSheet(state, pane, { onUse: onUseItem, onSheetChange: () => { if (story) story.rerender(); } });
 }
 
 // Use/Drink/Consult a usable item effect from the Adventure Sheet (task 41). Applies

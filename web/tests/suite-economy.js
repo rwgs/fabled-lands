@@ -789,6 +789,14 @@ export async function run(ctx) {
       gp.adjustCurrency('Mithral', 10);
       payChoiceCost(gp, { pay: true, cost: 4, currency: 'Mithral', foreignCoin: true });
       ok('task34: payChoiceCost deducts a foreign currency, not Shards', gp.currencyBalance('Mithral') === 6 && gp.data.shards === 70, `mith=${gp.currencyBalance('Mithral')} sh=${gp.data.shards}`);
+      // task 133: payChoiceCost re-validates against the live sheet and returns { ok }.
+      ok('task133: payChoiceCost returns ok when paid', payChoiceCost(gp, { pay: true, cost: 10 }).ok === true && gp.data.shards === 60);
+      const refuseItem = payChoiceCost(gp, { pay: true, cost: 0, item: 'green gem' });
+      ok('task133: a required item that is gone refuses (ok:false), takes nothing', refuseItem.ok === false && gp.data.shards === 60);
+      const refuseCash = payChoiceCost(gp, { pay: true, cost: 500 });
+      ok('task133: an unaffordable cost refuses (ok:false), spends nothing', refuseCash.ok === false && gp.data.shards === 60);
+      const refuseCoin = payChoiceCost(gp, { pay: true, cost: 99, currency: 'Mithral', foreignCoin: true });
+      ok('task133: an unaffordable foreign cost refuses, spends nothing', refuseCoin.ok === false && gp.currencyBalance('Mithral') === 6);
     }
 
     // --- task 35: PNG apple-touch-icon + manifest PNG icons -----------------

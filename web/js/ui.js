@@ -79,6 +79,10 @@ export function modal({ title, body, buttons = [{ label: 'OK', value: true }], d
 export function renderSheet(state, container, opts = {}) {
   const d = state.data;
   const onUse = opts.onUse || null; // (item, effect) => void — fires a usable item effect (task 41)
+  // Fired after a sheet-initiated mutation (drop/move/lift) so the caller can rerender the
+  // story pane — otherwise an item-/curse-gated choice stays live after its gate is gone
+  // (state.onChange only refreshes THIS sheet, never the story). (task 133)
+  const onSheetChange = typeof opts.onSheetChange === 'function' ? opts.onSheetChange : () => {};
   container.innerHTML = '';
 
   const head = el('div', 'sheet-head');
@@ -155,16 +159,16 @@ export function renderSheet(state, container, opts = {}) {
     const up = el('button', 'item-move', '▲');
     up.title = 'Move up (taken first if robbed)';
     up.disabled = idx === 0;
-    up.addEventListener('click', () => state.moveItem(it.id, -1));
+    up.addEventListener('click', () => { state.moveItem(it.id, -1); onSheetChange(); });
     const down = el('button', 'item-move', '▼');
     down.title = 'Move down';
     down.disabled = idx === d.items.length - 1;
-    down.addEventListener('click', () => state.moveItem(it.id, 1));
+    down.addEventListener('click', () => { state.moveItem(it.id, 1); onSheetChange(); });
     const drop = el('button', 'item-drop', '✕');
     drop.title = 'Drop';
     drop.addEventListener('click', async () => {
       const ok = await modal({ title: 'Drop item?', body: `Drop <b>${escapeHtml(it.name)}</b>?`, buttons: [{ label: 'Cancel', value: false }, { label: 'Drop', value: true, primary: true }] });
-      if (ok) state.removeItemById(it.id);
+      if (ok) { state.removeItemById(it.id); onSheetChange(); }
     });
     controls.appendChild(up);
     controls.appendChild(down);
@@ -192,7 +196,7 @@ export function renderSheet(state, container, opts = {}) {
   // Afflictions chip by their own name (fall back to the type), and diseases/poisons
   // get their own sections — a hidden penalty must be visible on the sheet (task 57).
   const afflictionNames = (list) => list.map((a) => (a && (a.name || a.type)) || '').filter(Boolean);
-  if (d.curses.length) { container.appendChild(sectionTitle('Curses')); container.appendChild(curseChips(d.curses, state)); }
+  if (d.curses.length) { container.appendChild(sectionTitle('Curses')); container.appendChild(curseChips(d.curses, state, onSheetChange)); }
   if (d.diseases.length) { container.appendChild(sectionTitle('Diseases')); container.appendChild(chipList(afflictionNames(d.diseases))); }
   if (d.poisons.length) { container.appendChild(sectionTitle('Poisons')); container.appendChild(chipList(afflictionNames(d.poisons))); }
   if (d.gods.length) { container.appendChild(sectionTitle('Gods')); container.appendChild(chipList(d.gods)); }
@@ -237,7 +241,7 @@ function chipList(arr) { const w = el('div', 'chips'); arr.forEach((x) => w.appe
 // city?") also gets a keyboard/touch-accessible "Lift…" action: it shows the exact
 // stored question, and an honest "Yes" removes that one curse (its ability effect
 // falls away, restoring the score). A curse without lift= stays inert text. (task 112)
-function curseChips(curses, state) {
+function curseChips(curses, state, onSheetChange = () => {}) {
   const w = el('div', 'chips');
   curses.forEach((c) => {
     const name = (c && (c.name || c.type)) || '';
@@ -254,7 +258,7 @@ function curseChips(curses, state) {
           title: `Lift ${name}?`,
           body: `<p>${escapeHtml(c.lift)}</p>`,
           buttons: [{ label: 'Yes', value: true, primary: true }, { label: 'No', value: null }],
-        }).then((yes) => { if (yes) state.removeCurse(c.name || c.type); });
+        }).then((yes) => { if (yes) { state.removeCurse(c.name || c.type); onSheetChange(); } });
       });
       chip.appendChild(btn);
     }

@@ -197,11 +197,18 @@ export function canUpgradeCrew(state, crew) {
 /** Apply the cost of taking a paid <choice>: deduct its Shards (or foreign
  *  currency) and consume the required item, but only when the choice actually
  *  `pay`s (pay="t", or a bare shards= cost). The view reads the attributes; the
- *  transaction lives here (task 34). */
-export function payChoiceCost(state, { pay, cost = 0, currency = null, foreignCoin = false, item = null }) {
-  if (!pay) return;
+ *  transaction lives here (task 34). Returns { ok }: the cost is re-validated
+ *  against the LIVE sheet before anything is taken, so a possession dropped (or
+ *  funds spent) after the choice rendered can't cross for free — the caller
+ *  blocks navigation and refreshes on { ok:false }. (task 133) */
+export function payChoiceCost(state, { pay, cost = 0, currency = null, foreignCoin = false, item = null, itemTags = null }) {
+  if (!pay) return { ok: true };
+  const have = cost ? (foreignCoin ? state.currencyBalance(currency) : state.data.shards) : 0;
+  if (cost && have < cost) return { ok: false };
+  if (item != null && !state.hasItemMatch(item, itemTags)) return { ok: false };
   if (cost) { if (foreignCoin) state.adjustCurrency(currency, -cost); else state.adjustMoney(-cost); }
-  if (item) { const it = state.findItems(item)[0]; if (it) state.removeItemById(it.id); }
+  if (item != null) { const it = state.findItems(item)[0]; if (it) state.removeItemById(it.id); }
+  return { ok: true };
 }
 
 /** Sell one carried item by name for `gain` Shards. Returns { ok }. */

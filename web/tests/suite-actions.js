@@ -815,6 +815,40 @@ export async function run(ctx) {
       ok('task112: a curse without lift= stays inert (no Lift… action)', !cInert.querySelector('.chip-action') && gInert.hasCurse('Champion Curse'));
     }
 
+    // --- task 133: sheet mutations rerender the story so gated content updates ------
+    {
+      const settle133 = () => new Promise((r) => setTimeout(r, 0));
+      // A section whose "Proceed" choice is gated behind NOT being cursed: the <else> of
+      // an <if curse="X"> block, so the choice is live only once the curse is gone.
+      const gated = '<section name="t133"><if curse="Bogwater">You are cursed.</if><else><choices><choice section="9">Proceed</choice></choices></else></section>';
+
+      // Belt B end-to-end: lifting the curse from the sheet rerenders the story pane, so the
+      // curse-gated choice turns live without re-entering the section.
+      const gC = GameState.create({ name:'C133', gender:'m', profession:'Warrior', book:1, adv });
+      eng.applyEffect(parse('<curse name="Bogwater" lift="Are you free of the swamp?"><effect ability="combat" bonus="-1"/></curse>'), gC, {});
+      const cStory = document.createElement('div');
+      const storyC = new Story(cStory, gC, { navigate(){}, onDeath(){}, notify(){} });
+      storyC.begin(parse(gated), 1, 't133');
+      const proceed = () => Array.from(cStory.querySelectorAll('.choice')).find((b) => /Proceed/.test(b.textContent));
+      ok('task133: curse-gated choice starts disabled while cursed', !!proceed() && proceed().disabled === true, proceed() ? 'disabled=' + proceed().disabled : 'none');
+      const cSheet133 = document.createElement('div');
+      renderSheet(gC, cSheet133, { onSheetChange: () => storyC.rerender() });
+      cSheet133.querySelector('.chip-action').click(); // open the Lift… modal
+      Array.from(document.querySelectorAll('.modal-overlay .modal-buttons .btn')).find((b) => b.textContent === 'Yes').click();
+      await settle133();
+      ok('task133: lifting the curse rerenders the story — choice now live', !gC.hasCurse('Bogwater') && !!proceed() && proceed().disabled === false, proceed() ? 'disabled=' + proceed().disabled : 'none');
+
+      // Belt B unit: an immediate mutation (reorder) invokes onSheetChange.
+      const gM = GameState.create({ name:'M133', gender:'m', profession:'Warrior', book:1, adv });
+      gM.data.items = []; gM.addItem(makeItem('item', 'apple')); gM.addItem(makeItem('item', 'pear'));
+      let changes = 0;
+      const cM = document.createElement('div');
+      renderSheet(gM, cM, { onSheetChange: () => { changes++; } });
+      const pearMove = Array.from(cM.querySelectorAll('.item')).find((li) => /pear/.test(li.textContent)).querySelector('.item-move');
+      pearMove.click();
+      ok('task133: a sheet reorder invokes onSheetChange', changes === 1, `changes=${changes}`);
+    }
+
     // --- task 113: <lose item="?" bonus="N"> enforces the bonus= filter ---
     // §4.456's Tambu offering routes its +2/+3 gifts through <lose item="?" bonus=…
     // price=…>; the bonus filter must be honoured so only a genuinely +2/+3 item can be

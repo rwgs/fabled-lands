@@ -2558,7 +2558,11 @@ export class Story {
           if (this.sectionFight) this.sectionFight.outcome = 'fled';
           if (this.state.isDead()) { this.rerender(); return; }
         }
-        payChoiceCost(this.state, { pay, cost, currency, foreignCoin, item: itemReq }); // transaction lives in market.js (task 34)
+        // The cost is re-validated against the live sheet (task 133): if the required
+        // possession was dropped (or funds spent) since this button rendered, refuse and
+        // refresh so the now-ineligible choice greys out instead of crossing for free.
+        const paid = payChoiceCost(this.state, { pay, cost, currency, foreignCoin, item: itemReq, itemTags }); // transaction lives in market.js (task 34)
+        if (!paid.ok) { this.rerender(); return; }
         if (section == null) return; // a cost-only choice: pays and stays, not a source action
         this._pendingSourceNode = node; // record the source action for a possible <return> (task 110)
         // Sail exit: same chooser/action as a sail goto (task 89).
