@@ -1020,6 +1020,47 @@ export async function run(ctx) {
       ok('task94: the one-off ship row is then sold out (no repeat purchase)', buy655().disabled && /sold out/i.test(buy655().textContent), buy655() && buy655().textContent);
     }
 
+    // --- task 126: a collapsed <group> executes its <buy> children ---------------
+    { // block-scoped
+      // §5.192: claim the derelict Wrath of God — one group bundles "buy the brig for
+      // 50 Shards" with "cross off the deed". Clicking must add the ship (docked here in
+      // Kunrir, crew poor from initialCrew="none"), charge 50, and take the deed.
+      const g192 = GameState.create({ name:'T192', gender:'m', profession:'Warrior', book:5, adv });
+      g192.data.shards = 100; g192.data.ships = [];
+      g192.addItem(makeItem('item', 'deed to the Wrath of God'));
+      const c192 = document.createElement('div');
+      const st192 = new Story(c192, g192, { navigate(){}, onDeath(){}, notify(){} });
+      st192.begin(await data.getSection(5, '192'), 5, '192');
+      const grp192 = Array.from(c192.querySelectorAll('.group-action')).find((x) => /50 shards/i.test(x.textContent));
+      ok('task126: §192 shows the "50 Shards" claim group', !!grp192);
+      ok('task126: §192 does not buy the ship on entry', g192.data.ships.length === 0 && g192.data.shards === 100);
+      grp192.click();
+      ok('task126: §192 claiming adds the brigantine, docked in Kunrir, crew poor', g192.data.ships.length === 1 && g192.data.ships[0].type === 'brigantine' && g192.data.ships[0].docked === 'Kunrir' && g192.data.ships[0].crew === 'poor', JSON.stringify(g192.data.ships));
+      ok('task126: §192 claiming charges 50 Shards and crosses off the deed', g192.data.shards === 50 && g192.findItems('deed to the Wrath of God').length === 0, `sh=${g192.data.shards} deed=${g192.findItems('deed to the Wrath of God').length}`);
+
+      // §4.622: salvage free cargo from a wreck — each commodity is a group bundling a
+      // free <buy cargo> with a hidden-codeword tick. Clicking loads the cargo aboard a
+      // ship here AND ticks the codeword, so the option can't be taken twice.
+      const g622 = GameState.create({ name:'T622', gender:'m', profession:'Warrior', book:4, adv });
+      g622.data.ships = [];
+      g622.addShip({ type:'brigantine', name:'Hold', crew:'poor', cargo:[], docked:null }); // capacity 2; berths at Tigre Bay on entry
+      const c622 = document.createElement('div');
+      const st622 = new Story(c622, g622, { navigate(){}, onDeath(){}, notify(){} });
+      st622.begin(await data.getSection(4, '622'), 4, '622');
+      const metals622 = () => Array.from(c622.querySelectorAll('.group-action')).find((x) => /metals/i.test(x.textContent));
+      ok('task126: §622 shows the three salvage groups', c622.querySelectorAll('.group-action').length === 3);
+      ok('task126: §622 loads no cargo on entry', (g622.currentShip().cargo || []).length === 0 && !g622.hasCodeword('4.622.1'));
+      metals622().click();
+      ok('task126: §622 taking Metals loads the cargo aboard and ticks its codeword', (g622.currentShip().cargo || []).includes('metals') && g622.hasCodeword('4.622.1'), `cargo=${JSON.stringify(g622.currentShip().cargo)} cw=${g622.hasCodeword('4.622.1')}`);
+      // Re-entry: its codeword now held, the Metals <if> branch renders grayed and
+      // disabled (JaFL shows an untaken branch, doesn't hide it), so it can't be taken
+      // twice; Minerals/Timber (codewords unheld) stay live.
+      st622.begin(await data.getSection(4, '622'), 4, '622');
+      const grpBtn622 = (re) => Array.from(c622.querySelectorAll('.group-action')).find((x) => re.test(x.textContent));
+      ok('task126: §622 re-entry disables the already-taken Metals salvage', !!grpBtn622(/metals/i) && grpBtn622(/metals/i).disabled, `metals=${grpBtn622(/metals/i) && grpBtn622(/metals/i).disabled}`);
+      ok('task126: §622 re-entry keeps the untaken Minerals salvage live', !!grpBtn622(/minerals/i) && !grpBtn622(/minerals/i).disabled);
+    }
+
     // --- task 95: replace= transforms a possession in place (no duplicate) ------
     { // block-scoped
       // §5.118: three replaces on the §5.238 tomb haul — empty replace="" upgrades the

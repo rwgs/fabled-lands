@@ -1122,6 +1122,13 @@ export class Story {
     // so the award can't render its own Take button — grant it headlessly on the
     // click via the normal award transaction (capacity-checked). (task 96)
     const itemNodes = Array.from(node.querySelectorAll('item, weapon, armour, tool'));
+    // A bundled <buy> (ship/cargo/tool/item/crew): §5.192 claims the Wrath of God for
+    // 50 Shards and the deed; §4.622 salvages a free Cargo Unit and ticks its codeword.
+    // A collapsed group renders only its label, so without executing the trade the ship/
+    // cargo was never added — permanently unobtainable. Run each through the standalone
+    // market transaction on the group click (price charged here, ship-here/cargo-space
+    // checks enforced, quantity= honoured). No collapsed group carries a <sell>. (task 126)
+    const buyNodes = Array.from(node.querySelectorAll('buy'));
     // Item/weapon/... rewards linked by flag= to a price this group pays but rendered
     // OUTSIDE the group — §1.342/§4.111's potion of restoration sits after the group,
     // inside an affordability <if shards><if item> that flips false the moment the group
@@ -1154,7 +1161,7 @@ export class Story {
     // the player erased but stranded. (task 98)
     const resNode = node.querySelector('resurrection');
     const isRevival = !!resNode && !resNode.getAttribute('section');
-    if (!label || (!effects.length && !itemNodes.length && !restNodes.length && !gotoNode && !returnNode && !isRevival)) {
+    if (!label || (!effects.length && !itemNodes.length && !buyNodes.length && !restNodes.length && !gotoNode && !returnNode && !isRevival)) {
       // no visible action (or nothing to apply) — plain inline wrapper
       const span = document.createElement('span');
       this.appendChildren(span, node, path);
@@ -1170,6 +1177,7 @@ export class Story {
     if (!done) {
       btn.addEventListener('click', () => {
         effects.forEach((fx) => applyEffect(fx, this.state, {}));
+        buyNodes.forEach((b) => this.runBuyNode(b));
         itemNodes.forEach((n) => this.grantItemNode(n));
         linkedAwards.forEach((n) => { this.grantItemNode(n); const f = n.getAttribute('flag'); if (f) this.state.setFlag(f, false); });
         restNodes.forEach((r) => {
@@ -1273,6 +1281,27 @@ export class Story {
   // pickup. (tasks 96, 125)
   grantItemNode(node) {
     applyEffect(node, this.state, {});
+  }
+
+  // Execute a <buy>'s market transaction headlessly (no widget) — for a collapsed
+  // <group> that bundles a purchase with its other effects (§5.192 buy the Wrath of
+  // God, §4.622 salvage cargo). Routes ship/cargo/tool/item/crew through the same
+  // applyInlineBuy transaction as a standalone row and honours quantity=; a buy that
+  // can't proceed (no Shards, no ship here for cargo) simply doesn't apply — matching
+  // JaFL's GroupNode, which runs its children in sequence without gating on them. (task 126)
+  runBuyNode(node) {
+    const price = node.getAttribute('shards') != null ? resolveValue(this.state, node.getAttribute('shards')) : 0;
+    const quantity = node.getAttribute('quantity') ? Math.max(1, parseInt(node.getAttribute('quantity'), 10) || 1) : 1;
+    const opts = {
+      price, crew: node.getAttribute('crew'),
+      ship: node.getAttribute('ship'), shipName: node.getAttribute('name'), initialCrew: node.getAttribute('initialCrew'),
+      tool: node.getAttribute('tool'), item: node.getAttribute('item'), cargo: node.getAttribute('cargo'),
+      bonus: node.getAttribute('bonus') ? parseInt(node.getAttribute('bonus'), 10) : 0,
+      ability: node.getAttribute('ability'),
+      tags: parseTags(node.getAttribute('buytags') || node.getAttribute('tags')),
+      effects: readItemEffects(node),
+    };
+    for (let k = 0; k < quantity; k++) { if (!applyInlineBuy(this.state, opts).ok) break; }
   }
 
   // ---- passive effects -----------------------------------------------------
