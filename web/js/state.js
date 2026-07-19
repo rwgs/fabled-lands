@@ -1,7 +1,7 @@
 // state.js — the Adventure Sheet: the full mutable character/game state,
 // derived stats, and localStorage persistence with multiple save slots.
 
-import { ABILITIES, MAX_ITEMS, clampAbility, rankTitle } from './rules.js';
+import { ABILITIES, MAX_ITEMS, clampAbility, rankTitle, canonCargo } from './rules.js';
 
 const SAVE_PREFIX = 'fl_save_';
 const META_KEY = 'fl_meta';
@@ -1029,7 +1029,7 @@ function sanitizeShip(s) {
     type,
     name: asStr(o.name, 'Ship') || 'Ship',
     crew: asStr(o.crew, 'average') || 'average',
-    cargo: asArr(o.cargo).filter((c) => typeof c === 'string'),
+    cargo: asArr(o.cargo).filter((c) => typeof c === 'string').map(canonCargo), // fold abbreviated units to canonical (task 127)
     docked: o.docked == null ? null : asStr(o.docked),
   };
 }

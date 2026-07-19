@@ -73,6 +73,20 @@ export function canonShipType(t) {
 export const CREW_LEVELS = ['poor', 'average', 'good', 'excellent'];
 export const CREW_LABEL = { poor: 'Poor', average: 'Average', good: 'Good', excellent: 'Excellent' };
 
+// The eight tradable commodities (JaFL's Cargo enum). Markets and the Ship's Manifest
+// store the canonical name; several ports abbreviate their trade rows (§4.252, §5.145/
+// §5.225 use "grai"/"meta"/"mine"/"spic"/"text"/"timb"/"slav"; §5.447 sells "mineral"),
+// and JaFL's Ship.getCargo matches by prefix — so canonCargo folds any prefix to the full
+// name at every buy/sell/match/manifest point, keeping the buy-low/sell-high loop between
+// ports alive. Unambiguous in this corpus: no two commodities share a 4-letter prefix. (task 127)
+export const CARGO_TYPES = ['grain', 'furs', 'metals', 'minerals', 'spices', 'textiles', 'timber', 'slaves'];
+export function canonCargo(name) {
+  const n = String(name || '').trim().toLowerCase();
+  if (n === '' || n === '?' || n === '*') return n; // wildcards / "any cargo" pass through
+  if (CARGO_TYPES.includes(n)) return n;
+  return CARGO_TYPES.find((c) => c.startsWith(n)) || n; // unknown: leave as-is
+}
+
 export const MAX_ITEMS = 12;
 
 export function clampAbility(v) {

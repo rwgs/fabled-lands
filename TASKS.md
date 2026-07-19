@@ -16,7 +16,7 @@ the tasks were filed, not work order).
 - [x] 118. Choice/equipment losses can remove `keep`-tagged possessions *(immediately after 117 — same shared loss matcher)*
 - [x] 125. Flag-linked item rewards outside choose-one menus are free, and paying can never grant them
 - [x] 126. A collapsed `<group>` action never executes its `<buy>` children — §5.192's ship and §4.622's cargo are unobtainable
-- [ ] 127. Abbreviated cargo names (`grai`, `meta`, …) are never canonicalised — the trans-book trading economy is broken
+- [x] 127. Abbreviated cargo names (`grai`, `meta`, …) are never canonicalised — the trans-book trading economy is broken
 - [ ] 128. A bare `ability=` disjunct on `<if>` is always true — §5.680 gives away the ring of ultimate power
 
 **MEDIUM**

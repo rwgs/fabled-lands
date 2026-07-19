@@ -1061,6 +1061,43 @@ export async function run(ctx) {
       ok('task126: §622 re-entry keeps the untaken Minerals salvage live', !!grpBtn622(/minerals/i) && !grpBtn622(/minerals/i).disabled);
     }
 
+    // --- task 127: abbreviated cargo names canonicalise (JaFL prefix match) ------
+    { // block-scoped
+      // §4.252 Silk Market sells an abbreviated "meta" Unit; it must display and store as
+      // the canonical "metals" so a full-name port can buy it back.
+      const g252 = GameState.create({ name:'T252', gender:'m', profession:'Warrior', book:4, adv });
+      g252.data.shards = 2000; g252.data.ships = [];
+      g252.addShip({ type:'brigantine', name:'Trader', crew:'poor', cargo:[], docked:null }); // berths at Yarimura on entry
+      const c252 = document.createElement('div');
+      const st252 = new Story(c252, g252, { navigate(){}, onDeath(){}, notify(){} });
+      st252.begin(await data.getSection(4, '252'), 4, '252');
+      const metaRow = Array.from(c252.querySelectorAll('.trade')).find((r) => /metals/i.test(r.textContent));
+      ok('task127: §252 shows the abbreviated "meta" row as canonical "Metals"', !!metaRow && /Metals/.test(metaRow.textContent), metaRow && metaRow.textContent);
+      metaRow.querySelector('button').click();
+      ok('task127: buying "meta" stores the canonical "metals" on the manifest', (g252.currentShip().cargo || []).includes('metals'), JSON.stringify(g252.currentShip().cargo));
+      // The stored canonical Unit sells at a full-name port (sellTrade against a full-name row).
+      const sh0252 = g252.data.shards;
+      const soldOk = sellTrade(g252, goodsFrom(parse('<trade cargo="metals" sell="560"/>'), 'cargo', 'metals', 0), 560).ok;
+      ok('task127: the "metals" Unit then sells at a full-name port', soldOk && (g252.currentShip().cargo || []).length === 0 && g252.data.shards === sh0252 + 560, `ok=${soldOk} cargo=${JSON.stringify(g252.currentShip().cargo)} sh=${g252.data.shards}`);
+
+      // §5.447 sells "mineral" (vs "minerals" everywhere else) — <if cargo="minerals"> must see it.
+      const g447 = GameState.create({ name:'T447', gender:'m', profession:'Warrior', book:5, adv });
+      g447.data.shards = 1000; g447.data.ships = [];
+      g447.addShip({ type:'brigantine', name:'Ore', crew:'poor', cargo:[], docked:null });
+      const c447 = document.createElement('div');
+      const st447 = new Story(c447, g447, { navigate(){}, onDeath(){}, notify(){} });
+      st447.begin(await data.getSection(5, '447'), 5, '447');
+      const buyMineral = Array.from(c447.querySelectorAll('.btn-mini')).find((b) => /mineral/i.test(b.textContent) && !b.disabled);
+      ok('task127: §447 offers the "mineral" Cargo Unit', !!buyMineral);
+      buyMineral.click();
+      ok('task127: §447 stores it as canonical "minerals"', (g447.currentShip().cargo || []).includes('minerals'), JSON.stringify(g447.currentShip().cargo));
+      ok('task127: <if cargo="minerals"> matches the loaded §5.447 Unit', eng.evaluateCondition(parse('<if cargo="minerals"/>'), g447) === true);
+
+      // A save still holding abbreviated Units is canonicalised on load.
+      const dirty = sanitizeData({ ships: [{ type:'barque', name:'Old', crew:'poor', cargo:['grai','meta','slav'], docked:null }] });
+      ok('task127: sanitize folds stored "grai"/"meta"/"slav" to canonical names', dirty.ships[0].cargo.join(',') === 'grain,metals,slaves', JSON.stringify(dirty.ships[0].cargo));
+    }
+
     // --- task 95: replace= transforms a possession in place (no duplicate) ------
     { // block-scoped
       // §5.118: three replaces on the §5.238 tomb haul — empty replace="" upgrades the

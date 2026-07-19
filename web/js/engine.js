@@ -1,7 +1,7 @@
 // engine.js — the rules engine: dice, condition evaluation, and passive effects.
 // Reads attributes off the parsed XML elements and applies them to a GameState.
 
-import { ABILITIES, canonShipType, CREW_LEVELS, SHIP_TYPES } from './rules.js';
+import { ABILITIES, canonShipType, CREW_LEVELS, SHIP_TYPES, canonCargo } from './rules.js';
 import { makeItem, normalize, matchItems, matchItemQuery, isShardsCurrency, currencyAward, splitItemName, parseTags } from './state.js';
 import { availableBooks } from './data.js';
 
@@ -379,7 +379,10 @@ function matchCargo(ship, spec) {
   const list = ship.cargo || [];
   const c = String(spec ?? '').trim();
   if (c === '' || c === '?' || c === '*') return list.length > 0;
-  return list.some((x) => normalize(x) === normalize(c));
+  // Prefix-canonicalise both sides so an abbreviated market unit ("meta") matches a
+  // full-name query ("metals") and vice versa (JaFL Ship.getCargo prefix match). (task 127)
+  const want = canonCargo(c);
+  return list.some((x) => canonCargo(x) === want);
 }
 
 function matchCodewords(state, spec) {
@@ -713,7 +716,8 @@ function loseCargoCandidates(el, state) {
   const cargo = ship.cargo || [];
   const c = el.getAttribute('cargo');
   if (c === '*' || c === '?') return cargo.slice();
-  return cargo.filter((x) => x === c);
+  const want = canonCargo(c);
+  return cargo.filter((x) => canonCargo(x) === want);
 }
 
 /** The possession/cargo/ship a priced or forced <lose> demands as payment, and whether
@@ -773,7 +777,7 @@ function applyShipLose(el, state, opts = {}) {
         const idx = (pick && pick.length) ? cargo.indexOf(pick[0]) : 0;
         cargo.splice(idx >= 0 ? idx : 0, 1); took = true;
       }
-    } else { const i = cargo.indexOf(c); if (i >= 0) { cargo.splice(i, 1); took = true; } }
+    } else { const want = canonCargo(c); const i = cargo.findIndex((x) => canonCargo(x) === want); if (i >= 0) { cargo.splice(i, 1); took = true; } }
   }
   if (el.getAttribute('ship') != null) { const i = state.data.ships.indexOf(ship); if (i >= 0) { state.data.ships.splice(i, 1); took = true; } }
   state.changed();
@@ -840,7 +844,7 @@ function applyTick(el, state, opts) {
       const cap = SHIP_TYPES[canonShipType(s.type)]?.capacity || 1;
       s.cargo ||= [];
       let loaded = 0;
-      for (let k = 0; k < qty && s.cargo.length < cap; k++) { s.cargo.push(get('cargo')); loaded++; }
+      for (let k = 0; k < qty && s.cargo.length < cap; k++) { s.cargo.push(canonCargo(get('cargo'))); loaded++; }
       if (loaded) state.changed();
     }
     did = true;

@@ -15,7 +15,7 @@ import {
 import { makeFight, fightRound, groupFightRound, isDefeated, useWrathBlessing, useDefenceBlessing, rerollAttack } from './combat.js';
 import { shopKind, goodsFrom, ownsGoods, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo, canUpgradeCrew, payChoiceCost } from './market.js';
 import { GameState, normalize, makeItem, parseTags, currencyAward, splitItemName, isShardsCurrency } from './state.js';
-import { ABILITY_LABEL } from './rules.js';
+import { ABILITY_LABEL, canonCargo } from './rules.js';
 import { bookTitle, availableBooks, loadBook, getSection } from './data.js';
 import { animateDice, modal } from './ui.js';
 
@@ -3744,7 +3744,9 @@ export class Story {
 
   renderShopRow(node, path, currency = null, marketSolds = []) {
     const kind = shopKind(node);
-    const name = node.getAttribute('name') || node.getAttribute(kind) || node.getAttribute('item') || (kind === 'weapon' ? 'weapon' : kind);
+    const rawName = node.getAttribute('name') || node.getAttribute(kind) || node.getAttribute('item') || (kind === 'weapon' ? 'weapon' : kind);
+    // An abbreviated cargo row (§4.252 "meta") shows and stores the canonical name. (task 127)
+    const name = kind === 'cargo' ? canonCargo(rawName) : rawName;
     const bonus = node.getAttribute('bonus') ? parseInt(node.getAttribute('bonus'), 10) : 0;
     const ability = node.getAttribute('ability');
     const buy = node.getAttribute('buy');
@@ -3892,7 +3894,9 @@ export class Story {
     const shipType = node.getAttribute('ship');
     const tool = node.getAttribute('tool');
     const item = node.getAttribute('item');
-    const cargo = node.getAttribute('cargo');
+    // Canonicalise an abbreviated cargo (§5.447 "mineral") so the label, memo and stored
+    // Unit all read the full commodity name. (task 127)
+    const cargo = node.getAttribute('cargo') != null ? canonCargo(node.getAttribute('cargo')) : null;
     const quantity = node.getAttribute('quantity') ? Math.max(1, parseInt(node.getAttribute('quantity'), 10) || 1) : 1;
     const kind = shipType ? 'ship' : (cargo != null ? 'cargo' : (tool ? 'tool' : 'item'));
     const memo = 'buy@' + path;

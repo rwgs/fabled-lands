@@ -5,7 +5,7 @@
 // (if anything) to toast. No DOM — unit-testable headlessly.
 
 import { makeItem, parseTags, splitItemName, isShardsCurrency } from './state.js';
-import { SHIP_TYPES, CREW_LEVELS, canonShipType } from './rules.js';
+import { SHIP_TYPES, CREW_LEVELS, canonShipType, canonCargo } from './rules.js';
 import { resolveValue } from './engine.js';
 
 const shipCap = (type) => SHIP_TYPES[canonShipType(type)]?.capacity || 1;
@@ -59,7 +59,9 @@ export function goodsFrom(node, kind, name, bonus) {
     ability: node.getAttribute('ability') || null,
     tags: parseTags(node.getAttribute('buytags') || node.getAttribute('tags')),
     shipType: node.getAttribute('ship') || null,
-    cargoName: node.getAttribute('cargo') || null,
+    // Fold an abbreviated market row (§4.252 "meta", §5.447 "mineral") to the canonical
+    // commodity so the manifest, the buy label and cross-port sales all agree. (task 127)
+    cargoName: node.getAttribute('cargo') != null ? canonCargo(node.getAttribute('cargo')) : null,
     initialCrew: node.getAttribute('initialCrew') || null,
   };
 }
@@ -70,7 +72,7 @@ export function goodsFrom(node, kind, name, bonus) {
 export function ownsGoods(state, goods) {
   const { kind, name, bonus, named, shipType, cargoName } = goods;
   if (kind === 'ship') return state.shipsHere().some((s) => canonShipType(s.type) === canonShipType(shipType));
-  if (kind === 'cargo') return state.shipsHere().some((s) => (s.cargo || []).includes(cargoName || name));
+  if (kind === 'cargo') { const want = canonCargo(cargoName || name); return state.shipsHere().some((s) => (s.cargo || []).some((c) => canonCargo(c) === want)); }
   // Armour is valued purely by its Defence bonus (its tier), so any owned armour of
   // that bonus can be sold at a named row's price — the starting "leather jerkin", a
   // "leather armour", and an armourer's "leather" are all the same bonus-1 leather.
@@ -98,7 +100,7 @@ export function buyTrade(state, goods, price, currency = null) {
     const ship = here.find((s) => (s.cargo || []).length < shipCap(s.type));
     if (!ship) return { ok: false, note: here.length ? 'No cargo space.' : 'You have no ship here.' };
     walletSpend(state, currency, price);
-    (ship.cargo ||= []).push(cargoName);
+    (ship.cargo ||= []).push(canonCargo(cargoName)); // store the canonical commodity (task 127)
     state.changed();
   } else {
     if (state.freeSlots() <= 0) return { ok: false, note: 'You can carry only 12 items.' };
@@ -123,9 +125,10 @@ export function sellTrade(state, goods, price, currency = null) {
     if (!ship) return { ok: false };
     state.ships.splice(state.ships.indexOf(ship), 1); walletEarn(state, currency, price); state.changed();
   } else if (kind === 'cargo') {
-    const ship = state.shipsHere().find((s) => (s.cargo || []).includes(cargoName));
+    const want = canonCargo(cargoName);
+    const ship = state.shipsHere().find((s) => (s.cargo || []).some((c) => canonCargo(c) === want));
     if (!ship) return { ok: false };
-    ship.cargo.splice(ship.cargo.indexOf(cargoName), 1); walletEarn(state, currency, price); state.changed();
+    ship.cargo.splice(ship.cargo.findIndex((c) => canonCargo(c) === want), 1); walletEarn(state, currency, price); state.changed();
   } else if (kind === 'armour' || (kind === 'weapon' && !named)) {
     // Armour (any name) and generic weapons are valued by bonus: sell one of that tier.
     const it = state.data.items.find((x) => x.kind === kind && (x.bonus || 0) === bonus);
@@ -214,9 +217,10 @@ export function sellInlineItem(state, name, gain) {
  *  must be present to trade from, task 89), optionally for `gain` Shards. The
  *  barter-reward side stays in the view. Returns { ok }. */
 export function sellCargo(state, cargoType, gain) {
-  const ship = state.shipsHere().find((s) => (s.cargo || []).includes(cargoType));
+  const want = canonCargo(cargoType);
+  const ship = state.shipsHere().find((s) => (s.cargo || []).some((c) => canonCargo(c) === want));
   if (!ship) return { ok: false };
-  ship.cargo.splice(ship.cargo.indexOf(cargoType), 1);
+  ship.cargo.splice(ship.cargo.findIndex((c) => canonCargo(c) === want), 1);
   if (gain) state.adjustMoney(gain);
   state.changed();
   return { ok: true };
