@@ -903,6 +903,42 @@ export async function run(ctx) {
     const s423 = await data.getSection(1, '423'); st42.begin(s423, 1, '423');
     ok('§1.42 the +3 attack bonus is cleared on entering the next section', g42.fightAttackBonus() === 0, `atk=${g42.fightAttackBonus()}`);
 
+    // --- task 156: a mid-fight reload restores the per-fight bonus via the visit record ---
+    // _fightBonus lives off `data` (task 49), so a save doesn't carry it; after task 116 a
+    // reload rebuilds ctx.applied (the granting tick is memoised and won't re-fire) with the
+    // bonus zeroed. serializeVisit now snapshots the bonus and resume() restores it — without
+    // re-applying the tick (which would double it).
+    {
+      const sec156 = parse('<section name="F156"><p><tick special="attack" bonus="3"/><fight name="Ogre" combat="6" defence="10" stamina="12"/></p></section>');
+      const g156 = GameState.create({ name:'T156', gender:'m', profession:'Warrior', book:1, adv });
+      const c156 = document.createElement('div');
+      const st156 = new Story(c156, g156, { navigate(){}, onDeath(){}, notify(){} });
+      g156.setVisitProvider(() => st156.serializeVisit());
+      g156.goTo(1, 'F156'); st156.begin(sec156, 1, 'F156');
+      ok('task156: the entry tick armed the +3 attack bonus', g156.fightAttackBonus() === 3, `atk=${g156.fightAttackBonus()}`);
+      const rec156 = st156.serializeVisit();
+      ok('task156: serializeVisit snapshots the per-fight bonus', !!rec156 && rec156.fightBonus && rec156.fightBonus.attack === 3, `fb=${JSON.stringify(rec156 && rec156.fightBonus)}`);
+
+      const g156b = new GameState(sanitizeData(JSON.parse(JSON.stringify({ ...g156.data, visit: rec156 }))));
+      ok('task156: a plain data round-trip still drops the transient bonus (task-49 invariant holds)', g156b.fightAttackBonus() === 0);
+      ok('task156: the sanitised visit record keeps the fightBonus', !!g156b.data.visit && g156b.data.visit.fightBonus && g156b.data.visit.fightBonus.attack === 3);
+      const st156b = new Story(document.createElement('div'), g156b, { navigate(){}, onDeath(){}, notify(){} });
+      st156b.resume(sec156, 1, 'F156', g156b.data.visit, null);
+      ok('task156: resume re-applies the +3 attack bonus, once (paid bonus survives, no double)', g156b.fightAttackBonus() === 3, `atk=${g156b.fightAttackBonus()}`);
+
+      // Exploitable direction: a hidden penalty must not be shed by reloading.
+      const secP = parse('<section name="P156"><p><tick special="attack" bonus="-2" hidden="t"/><fight name="Curse" combat="6" defence="10" stamina="12"/></p></section>');
+      const gp = GameState.create({ name:'T156p', gender:'m', profession:'Warrior', book:1, adv });
+      const stp = new Story(document.createElement('div'), gp, { navigate(){}, onDeath(){}, notify(){} });
+      gp.setVisitProvider(() => stp.serializeVisit());
+      gp.goTo(1, 'P156'); stp.begin(secP, 1, 'P156');
+      const recp = stp.serializeVisit();
+      const gpb = new GameState(sanitizeData(JSON.parse(JSON.stringify({ ...gp.data, visit: recp }))));
+      const stpb = new Story(document.createElement('div'), gpb, { navigate(){}, onDeath(){}, notify(){} });
+      stpb.resume(secP, 1, 'P156', gpb.data.visit, null);
+      ok('task156: a hidden attack penalty is not shed by reloading', gpb.fightAttackBonus() === -2, `atk=${gpb.fightAttackBonus()}`);
+    }
+
     // --- task 50: var-keyed success/failure branches wait for their roll (no entry fire) ---
     window.__FL_INSTANT_DICE__ = true;
     const settle50 = () => new Promise(r => setTimeout(r, 40));

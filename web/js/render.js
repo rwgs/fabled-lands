@@ -302,7 +302,16 @@ export class Story {
     this.render();
   }
 
-  rerender() { this.render(); }
+  // Re-draw the current visit after an interactive action, then persist it. An action's own
+  // state mutation autosaves, but from INSIDE the mutation — BEFORE the handler records the
+  // ctx memo that marks the action done (buy count, roll result, rest memo, consumed flag),
+  // and a bare ctx write never autosaves on its own. So the last persisted record said the
+  // action never happened while its state effect WAS saved: a reload replayed the rest/buy/
+  // roll with its effect already banked (or its penalty shed). rerender() is the shared tail
+  // of every interactive handler, so persisting once here — after the memo is in place —
+  // keeps the saved visit record in step with the state it guards (the interactive
+  // counterpart to the passive path, which already memoises before applying). (task 155)
+  rerender() { this.render(); this.state.save(); }
 
   // Use a usable Adventure-Sheet item effect (task 41) and route any section detour it
   // opens through the SAME navigation entry point as a choice/goto (task 115). Applying
@@ -338,6 +347,9 @@ export class Story {
       section: this.section,
       entryTicks: this.state.entryTickCount(),
       sectionTodock: this.sectionTodock,
+      // The transient per-fight attack/Defence bonus (task 49) is per-visit state a reload
+      // can't re-derive — its granting tick is already memoised — so it rides in the record. (task 156)
+      fightBonus: this.state.fightBonusSnapshot(),
       ctx: serializeCtx(this.ctx),
       frame: this._returnFrame ? serializeFrame(this._returnFrame) : null,
     };
@@ -373,6 +385,10 @@ export class Story {
     this.sectionTodock = (record && record.sectionTodock != null) ? record.sectionTodock : (sectionEl.getAttribute('todock') || null);
     this.deferredCleanups = new Map(); // re-detected as the section re-renders (task 88)
     this.state.setEntryTicks(record && record.entryTicks != null ? record.entryTicks : this.state.tickCount());
+    // Restore the transient per-fight bonus the record carried: render() won't re-run the
+    // granting <tick special=…> (its fx@ memo is in ctx.applied), so without this a mid-fight
+    // reload would resume with the paid bonus gone / the hidden penalty shed. (task 156)
+    this.state.restoreFightBonus(record && record.fightBonus);
     this._returnFrame = frame || null;
     this.render();
   }
@@ -396,6 +412,7 @@ export class Story {
     this.section = section;
     this.ctx = probe.ctx; // memoises every entry effect (nodes are the shared, static section tree)
     this.state.data.vars = { ...probeState.data.vars }; // deterministic entry-written vars
+    this.state.restoreFightBonus(probeState.fightBonusSnapshot()); // adopt the entry-derived per-fight bonus (task 156)
     this.sectionTodock = probe.sectionTodock;
     this.deferredCleanups = new Map();
     this.state.setEntryTicks(probeState.entryTickCount());

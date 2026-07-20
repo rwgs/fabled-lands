@@ -588,6 +588,88 @@ export async function run(ctx) {
       gD.save = origSaveD;
     }
 
+    // --- task 155: a one-shot action's memo lands in the PERSISTED record, not just the live
+    // ctx — so a reload can't replay the rest/buy/roll whose effect already banked ---
+    // Each handler's own state mutation autosaves from INSIDE itself, BEFORE the handler writes
+    // the ctx memo; rerender() now re-persists once the memo is in place. Drive each handler
+    // family with the provider installed, inspect what the autosave wrote to data.visit, then
+    // resume from that record on a fresh state.
+    {
+      window.__FL_INSTANT_DICE__ = true;
+      const settle155 = () => new Promise((r) => setTimeout(r, 30));
+      const rnd155 = Math.random;
+      const reload155 = (secEl, book, sec, src) => {
+        const g2 = new GameState(sanitizeData(JSON.parse(JSON.stringify({ ...src.data }))));
+        const cont2 = document.createElement('div');
+        const story2 = new Story(cont2, g2, { navigate(){}, onDeath(){}, notify(){} });
+        story2.resume(secEl, book, sec, g2.data.visit, null);
+        return { g2, cont2 };
+      };
+
+      // Rest (task 129 one-shot hospitality rest): the memo must persist so the heal can't repeat.
+      {
+        const secR = parse('<section name="R155"><p>Inn.</p><rest stamina="4"/></section>');
+        const g = GameState.create({ name:'T155r', gender:'m', profession:'Warrior', book:1, adv });
+        g.data.stamina = 5; g.data.staminaMax = 20;
+        const cont = document.createElement('div');
+        const story = new Story(cont, g, { navigate(){}, onDeath(){}, notify(){} });
+        g.setVisitProvider(() => story.serializeVisit());
+        g.goTo(1, 'R155'); story.begin(secR, 1, 'R155');
+        Array.from(cont.querySelectorAll('button')).find((b) => /Rest/.test(b.textContent)).click();
+        ok('task155: the persisted record marks the one-shot rest used',
+           !!g.data.visit && g.data.visit.ctx.applied.some((k) => k.startsWith('rest@')),
+           'applied=' + JSON.stringify(g.data.visit && g.data.visit.ctx.applied));
+        const { cont2 } = reload155(secR, 1, 'R155', g);
+        const rb2 = Array.from(cont2.querySelectorAll('button')).find((b) => /Rest/.test(b.textContent));
+        ok('task155: after reload the one-shot rest is already spent (no infinite heal)',
+           !!rb2 && rb2.disabled, 'disabled=' + (rb2 && rb2.disabled));
+      }
+
+      // Buy (§4.658-style quantity="1" one-shot): the buy count must persist so it can't repeat.
+      {
+        const secB = parse('<section name="B155"><buy quantity="1" tool="lantern" shards="2">a lantern</buy></section>');
+        const g = GameState.create({ name:'T155b', gender:'m', profession:'Warrior', book:1, adv });
+        g.data.items = []; g.data.shards = 100;
+        const cont = document.createElement('div');
+        const story = new Story(cont, g, { navigate(){}, onDeath(){}, notify(){} });
+        g.setVisitProvider(() => story.serializeVisit());
+        g.goTo(1, 'B155'); story.begin(secB, 1, 'B155');
+        Array.from(cont.querySelectorAll('button')).find((b) => /Buy|Take/.test(b.textContent)).click();
+        ok('task155: the persisted record records the quantity="1" buy count',
+           !!g.data.visit && g.data.visit.ctx.buys.some((e) => String(e[0]).startsWith('buy@') && e[1] >= 1),
+           'buys=' + JSON.stringify(g.data.visit && g.data.visit.ctx.buys));
+        const { cont2 } = reload155(secB, 1, 'B155', g);
+        const bb2 = Array.from(cont2.querySelectorAll('button')).find((b) => /lantern/i.test(b.textContent));
+        ok('task155: after reload the one-shot buy is already taken (no free second item)',
+           !!bb2 && bb2.disabled, 'disabled=' + (bb2 && bb2.disabled));
+      }
+
+      // Roll (a failed <difficulty> whose var write used to be the only save): the resolved roll
+      // must persist so a reload can't reroll for free.
+      {
+        const secD = parse('<section name="D155"><difficulty ability="COMBAT" level="12" var="m"/><success><p>WON</p></success><failure><p>LOST</p></failure></section>');
+        const g = GameState.create({ name:'T155d', gender:'m', profession:'Warrior', book:1, adv });
+        g.data.abilities.combat = 1;
+        const cont = document.createElement('div');
+        const story = new Story(cont, g, { navigate(){}, onDeath(){}, notify(){} });
+        g.setVisitProvider(() => story.serializeVisit());
+        g.goTo(1, 'D155'); story.begin(secD, 1, 'D155');
+        Math.random = () => 0; // low dice + COMBAT 1 vs level 12 → guaranteed failure
+        cont.querySelector('.btn-roll').click(); await settle155();
+        Math.random = rnd155;
+        ok('task155: the persisted record keeps the resolved roll + var write',
+           !!g.data.visit && g.data.visit.ctx.rolls.some((e) => String(e[0]).startsWith('roll@')) && g.data.visit.ctx.wroteVars.includes('m'),
+           'rolls=' + JSON.stringify(g.data.visit && g.data.visit.ctx.rolls));
+        const { cont2 } = reload155(secD, 1, 'D155', g);
+        ok('task155: after reload the roll stays resolved (outcome shown, no roll button)',
+           !cont2.querySelector('.btn-roll') && /WON|LOST/.test(cont2.textContent),
+           'hasBtn=' + !!cont2.querySelector('.btn-roll'));
+      }
+
+      window.__FL_INSTANT_DICE__ = false;
+      Math.random = rnd155;
+    }
+
     // --- task 117: priced equipment/cargo losses can't arm a reward without taking payment ---
     // §2.90 forfeits a weapon OR armour (price=x) to renounce Elnir; §3.569 trades a named
     // Cargo Unit (price=x) for two textiles. An ineligible forfeit button (no such
