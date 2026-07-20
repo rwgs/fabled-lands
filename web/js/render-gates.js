@@ -7,7 +7,17 @@
 // DECIDE. No DOM construction, no browser UI globals.
 
 import { boolAttr } from './engine.js';
-import { isRollGate } from './render-rules.js';
+
+// True when a die roll in this section is gated behind the payment keyed `k`: a
+// <random|rankcheck|difficulty flag="k"> paired with a [price="k"] cost — the "pay to
+// spin" idiom (book2/157, book3/314, book5/674, book6/171/587/50/628). (task 30)
+// Defined here (not render-rules.js, which re-exports it) so the dependency between the
+// two rule modules stays one-way: render-rules composes these gate deferrals in
+// classifyPassive, so it imports from this module — never the reverse.
+export function isRollGate(sectionEl, k) {
+  return !!(k != null && sectionEl &&
+    sectionEl.querySelector(`random[flag="${k}"], rankcheck[flag="${k}"], difficulty[flag="${k}"]`));
+}
 
 // DOM node type / position constants, spelled as literals so this module never reaches for
 // the browser `Node` global (matching render-rules.js).

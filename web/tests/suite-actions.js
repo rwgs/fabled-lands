@@ -1136,6 +1136,97 @@ export async function run(ctx) {
       ok('task119: serializeFrame flattens the frame and its ctx', fflat.book === 2 && fflat.section === '5' && fflat.usedSourcePath === 'r.0' && Array.isArray(fflat.ctx.applied));
     }
 
+    // --- task 119 (phase 3): classifyPassive — the renderPassive decision cascade ----
+    {
+      const g = GameState.create({ name:'CP119', gender:'m', profession:'Warrior', book:1, adv });
+      // The renderer's per-visit rule surface as a plain object (the Story satisfies it).
+      const view = (sec, over = {}) => ({
+        state: g, sectionEl: sec, inactive: false, hasDecline: false,
+        outcomeBlessings: rules.computeOutcomeBlessings(sec), escapeCodewords: new Set(),
+        sectionFights: [], fightGate: null, whileIterPendingVars: null, ctx: visit.newCtx(),
+        ...over,
+      });
+      const classify = (sec, sel, over) => rules.classifyPassive(sec.querySelector(sel), view(sec, over));
+
+      const plain = parse('<section><lose stamina="2">Lose 2 Stamina</lose></section>');
+      ok('task119: classifyPassive plain effect → apply, words shown',
+         (() => { const v = classify(plain, 'lose'); return v.mode === 'apply' && v.showWords === true; })());
+      ok('task119: classifyPassive inactive branch → inert', classify(plain, 'lose', { inactive: true }).mode === 'inert');
+
+      const storm = parse('<section><outcome blessing="storm"/><lose blessing="storm">lose it</lose></section>');
+      ok('task119: classifyPassive guarded blessing loss → inert with words',
+         (() => { const v = classify(storm, 'lose'); return v.mode === 'inert' && v.showWords === true; })());
+
+      const pend = parse('<section><lose multiple="x">some</lose><random var="x"/></section>');
+      ok('task119: pendingRollVar names the unrolled var a section roll will fill',
+         rules.pendingRollVar(pend.querySelector('lose'), g, pend) === 'x');
+      ok('task119: classifyPassive defers on a pending roll var', classify(pend, 'lose').mode === 'inert');
+
+      const esc = parse('<section><fight/><lose codeword="Flee1"/></section>');
+      ok('task119: classifyPassive deferred escape clear → inert',
+         classify(esc, 'lose', { escapeCodewords: new Set(['Flee1']), sectionFights: [{ outcome: null }] }).mode === 'inert');
+
+      ok('task119: classifyPassive hidden removetag tick → defer-cleanup',
+         classify(parse('<section><tick hidden="t" removetag="Tz"/></section>'), 'tick').mode === 'defer-cleanup');
+
+      const hp = parse('<section><tick price="k" hidden="t"/><gain flag="k" codeword="Chance"/></section>');
+      ok('task119: classifyPassive hidden price arms and fires the lone linked reward',
+         (() => { const v = classify(hp, 'tick'); return v.mode === 'arm-hidden-price' && v.fireReward === hp.querySelector('gain'); })());
+      const hpItem = parse('<section><tick price="k" hidden="t"/><item flag="k" name="wand"/></section>');
+      ok('task119: classifyPassive hidden price never fires an item-family reward (task 125)',
+         (() => { const v = classify(hpItem, 'tick'); return v.mode === 'arm-hidden-price' && v.fireReward === null; })());
+
+      const spin = parse('<section><lose shards="10" price="c">Pay</lose><random flag="c"/></section>');
+      ok('task119: classifyPassive pay-to-spin price → roll-payment',
+         (() => { const v = classify(spin, 'lose'); return v.mode === 'roll-payment' && v.key === 'c'; })());
+      const buy1 = parse('<section><lose shards="10" price="p">Pay</lose><gain flag="p" codeword="X"/></section>');
+      ok('task119: classifyPassive plain price → optional-pay', classify(buy1, 'lose').mode === 'optional-pay');
+
+      const menu = parse('<section><lose shards="10" price="m">Pay</lose><gain flag="m" blessing="storm"/><lose flag="m" curse="Bogwater"/></section>');
+      ok('task119: classifyPassive choose-one reward → choose-one-reward keyed on its flag',
+         (() => { const v = classify(menu, 'gain'); return v.mode === 'choose-one-reward' && v.key === 'm'; })());
+      ok('task119: classifyPassive single linked reward → inert (applies with the cost)',
+         classify(buy1, 'gain').mode === 'inert');
+
+      ok('task119: classifyPassive force="f" → forced-optional',
+         classify(parse('<section><tick codeword="Aid" force="f">help</tick></section>'), 'tick').mode === 'forced-optional');
+
+      const paySec = parse('<section><lose shards="10">give it</lose></section>');
+      ok('task119: classifyPassive economic loss + escape route → payment',
+         classify(paySec, 'lose', { hasDecline: true }).mode === 'payment');
+      ok('task119: classifyPassive economic loss without an escape route → apply',
+         classify(paySec, 'lose').mode === 'apply');
+
+      ok('task119: classifyPassive ability="?" → ability-choice',
+         classify(parse('<section><lose ability="?" amount="1">choose</lose></section>'), 'lose').mode === 'ability-choice');
+      ok('task119: classifyPassive profession tick → profession-choice',
+         classify(parse('<section><tick profession="mage|warrior">pick</tick></section>'), 'tick').mode === 'profession-choice');
+
+      const gEq = GameState.create({ name:'CPEQ', gender:'m', profession:'Warrior', book:1, adv });
+      gEq.data.items = [makeItem('weapon', 'sword'), makeItem('weapon', 'axe')];
+      const eqSec = parse('<section><tick weapon="?" addbonus="1">enchant</tick></section>');
+      ok('task119: classifyPassive open "?" enchant with 2 candidates → equipment-choice',
+         rules.classifyPassive(eqSec.querySelector('tick'), view(eqSec, { state: gEq })).mode === 'equipment-choice');
+      gEq.data.items = [makeItem('weapon', 'sword')];
+      ok('task119: classifyPassive a single candidate is deterministic → apply',
+         rules.classifyPassive(eqSec.querySelector('tick'), view(eqSec, { state: gEq })).mode === 'apply');
+
+      const fSec = parse('<section><fight/><gain shards="100">loot</gain></section>');
+      const fNode = fSec.querySelector('gain');
+      const fGate = { effectNodes: new Map([[fNode, 'win']]) };
+      ok('task119: classifyPassive fight-outcome effect held while unresolved',
+         classify(fSec, 'gain', { fightGate: fGate, sectionFights: [{ outcome: null }] }).mode === 'inert');
+      ok('task119: classifyPassive fight-outcome effect applies on a win',
+         classify(fSec, 'gain', { fightGate: fGate, sectionFights: [{ outcome: 'win' }] }).mode === 'apply');
+
+      const setSec = parse('<section><set var="y" value="7"/></section>');
+      ok('task119: classifyPassive absolute set → apply, rerunnable',
+         (() => { const v = classify(setSec, 'set'); return v.mode === 'apply' && v.rerunnable === true && v.setVarName === 'y'; })());
+      const ownedCtx = visit.newCtx(); ownedCtx.rolledVars.add('y');
+      ok('task119: classifyPassive a roll-owned set is frozen (task 61)',
+         (() => { const v = classify(setSec, 'set', { ctx: ownedCtx }); return v.mode === 'apply' && v.rollOwned === true && v.rerunnable === false; })());
+    }
+
     // --- task 113: <lose item="?" bonus="N"> enforces the bonus= filter ---
     // §4.456's Tambu offering routes its +2/+3 gifts through <lose item="?" bonus=…
     // price=…>; the bonus filter must be honoured so only a genuinely +2/+3 item can be

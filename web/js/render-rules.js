@@ -7,8 +7,14 @@
 // attributes / running querySelectorAll on it is fine (the same thing engine.js does);
 // only DOM *construction* belongs in the view. Unit-tested headlessly.
 
-import { boolAttr } from './engine.js';
+import { boolAttr, isDiceExpr } from './engine.js';
 import { normalize, currencyAward } from './state.js';
+import { isRollGate, isDeferredEscapeClear, isDeferredTagCleanup, aggregateFightOutcome } from './render-gates.js';
+
+// isRollGate moved to render-gates.js (one-way dependency: classifyPassive below composes
+// the gate deferrals, so this module imports from render-gates — never the reverse);
+// re-exported here so its callers (render.js, tests) keep one import site for pay rules.
+export { isRollGate } from './render-gates.js';
 
 // DOM Node.DOCUMENT_POSITION_FOLLOWING (0x04): set in the compareDocumentPosition mask
 // when the argument node comes AFTER the reference node in document order. Spelled as a
@@ -146,14 +152,6 @@ export function hasVisiblePay(sectionEl, key) {
   return Array.from(sectionEl.querySelectorAll(`[price="${key}"]`)).some((n) => !boolAttr(n.getAttribute('hidden')));
 }
 
-// True when a die roll in this section is gated behind the payment keyed `k`: a
-// <random|rankcheck|difficulty flag="k"> paired with a [price="k"] cost — the "pay to
-// spin" idiom (book2/157, book3/314, book5/674, book6/171/587/50/628). (task 30)
-export function isRollGate(sectionEl, k) {
-  return !!(k != null && sectionEl &&
-    sectionEl.querySelector(`random[flag="${k}"], rankcheck[flag="${k}"], difficulty[flag="${k}"]`));
-}
-
 // Why picking this reward would waste the payment (so the option is disabled): a blessing
 // you already hold, a resurrection deal you already have, an item with no free carry slot,
 // or a curse/disease/poison "lift" you aren't suffering. Returns the reason or null.
@@ -213,4 +211,195 @@ export function isEconomicPayment(node) {
   const hasShip = boolAttr(node.getAttribute('ship'));
   if (node.getAttribute('stamina') != null || node.getAttribute('ability') != null) return false;
   return hasShards || hasItem || hasCargo || hasShip;
+}
+
+// ---- the passive-effect execution model (task 119 phase 3) -------------------
+//
+// classifyPassive is JaFL's execution model for a passive effect node: the ORDER of these
+// checks decides whether an effect applies on entry, defers, or becomes an opt-in control.
+// It returns a verdict {mode, …} the view merely switches on. The `view` argument is the
+// renderer's per-visit rule surface — any object exposing { state, sectionEl, ctx,
+// inactive, outcomeBlessings, escapeCodewords, sectionFights, fightGate, hasDecline,
+// whileIterPendingVars } (the Story instance satisfies it; tests pass a plain object).
+
+// The name of a not-yet-set variable that this effect's magnitude depends on and that a
+// roll in this section will fill — or null. Only such vars defer (see classifyPassive): a
+// literal, a dice expression, or an already-set var applies now, and a var no roll here
+// fills is left to apply (harmlessly as 0) rather than hang.
+export function pendingRollVar(node, state, sectionEl, whileIterPendingVars = null) {
+  const QTY = ['multiple', 'shards', 'stamina', 'staminato', 'amount', 'count', 'itemAt', 'quantity'];
+  for (const a of QTY) {
+    const v = node.getAttribute(a);
+    if (v == null) continue;
+    const s = String(v).trim();
+    if (/^-?\d/.test(s) || isDiceExpr(s)) continue; // numeric literal or dice expr
+    const bare = s.replace(/^[+-]/, '');            // a signed var ref ("-hang") → "hang" (task 50)
+    // Inside a <while> pass, a var this iteration re-rolls is STALE until this
+    // pass's roll resolves — defer even though hasVar() is true from a prior pass
+    // (§6.700's per-iteration `<lose stamina="x">` must use this six, not the last). (task 100)
+    if (whileIterPendingVars && whileIterPendingVars.has(bare)) return bare;
+    if (state.hasVar(bare)) continue;               // already set (e.g. by an earlier <set>/roll)
+    if (sectionEl && sectionEl.querySelector(`random[var="${bare}"], rankcheck[var="${bare}"], difficulty[var="${bare}"]`)) return bare;
+  }
+  return null;
+}
+
+// Does this <gain>/<lose>/<tick> ask the player to choose which ability it
+// affects (ability="?" or "a|b")? effect= forms target one named ability, so
+// they never need a chooser.
+export function needsAbilityChoice(node) {
+  const tag = node.tagName.toLowerCase();
+  if (tag !== 'lose' && tag !== 'gain' && tag !== 'tick') return false;
+  if (node.getAttribute('effect') != null) return false;
+  const ab = node.getAttribute('ability');
+  if (ab == null) return false;
+  const s = ab.trim().toLowerCase();
+  return s === '?' || s.includes('|');
+}
+
+// Does a <tick …="?" addbonus|addtag|removetag> ask the player to choose WHICH
+// possession is enchanted? Only when the target is an open "?"/blank of a kind with
+// more than one candidate — a name/all, a tags=/using= narrowing, or a cache target
+// is deterministic and applies without a picker. (task 75)
+export function needsEquipmentChoice(node, state) {
+  if (node.tagName.toLowerCase() !== 'tick') return false;
+  if (node.getAttribute('addbonus') == null && node.getAttribute('addtag') == null && node.getAttribute('removetag') == null) return false;
+  const eqAttr = ['weapon', 'armour', 'tool', 'item'].find((k) => node.getAttribute(k) != null);
+  if (eqAttr == null) return false;
+  const pat = String(node.getAttribute(eqAttr) || '').trim();
+  if (pat !== '?' && pat !== '') return false;
+  if (boolAttr(node.getAttribute('using')) || node.getAttribute('tags') || node.getAttribute('cache')) return false;
+  const kind = eqAttr === 'item' ? null : eqAttr;
+  const candidates = kind ? state.data.items.filter((it) => it.kind === kind) : state.data.items;
+  return candidates.length > 1;
+}
+
+// A <tick profession="a|b|c"> asks the player to choose a new profession. (task 75)
+export function needsProfessionChoice(node) {
+  if (node.tagName.toLowerCase() !== 'tick') return false;
+  const p = node.getAttribute('profession');
+  return p != null && p.includes('|');
+}
+
+// The renderPassive decision cascade: classify a passive effect node into the ONE way it
+// executes this render. The check order below IS the rule — earlier gates win. Verdicts:
+//   { mode:'inert', showWords }            — render words only; no effect, no memo
+//   { mode:'defer-cleanup' }               — hold until the section is left (task 88)
+//   { mode:'arm-hidden-price', fireReward } — memoised silent arming; fireReward is the
+//                                            single linked reward to grant now, or null
+//   { mode:'roll-payment'|'optional-pay'|'choose-one-reward', key }
+//   { mode:'forced-optional'|'payment'|'ability-choice'|'equipment-choice'|'profession-choice' }
+//   { mode:'apply', showWords, setVarName, rollOwned, rerunnable } — the plain effect;
+//     rollOwned freezes a <set> whose var a roll owns (task 61), rerunnable re-evaluates
+//     an absolute <set value=…> every render.
+export function classifyPassive(node, view) {
+  const tag = node.tagName.toLowerCase();
+  const hidden = boolAttr(node.getAttribute('hidden'));
+
+  // Inside an untaken conditional branch: show the words (the wrapper grays
+  // them), but never apply the effect, gate a payment, or memoize — the branch
+  // isn't taken, and a later state change re-renders it live if it becomes active.
+  if (view.inactive) return { mode: 'inert', showWords: !hidden };
+
+  // A guarded storm-blessing loss (§200/250/60) is the deferred "spend to avoid
+  // the storm" step, not an on-entry loss: render its words, but let the safe goto
+  // spend the blessing on click (renderGoto/blessingSpendForGoto). (task 108)
+  if (tag === 'lose' && isGuardedBlessingLoss(node, view.outcomeBlessings)) {
+    return { mode: 'inert', showWords: true }; // never hidden — isGuardedBlessingLoss excludes hidden forms
+  }
+
+  // Defer an effect whose magnitude depends on a variable that a roll in this
+  // section has not filled yet (e.g. §521 "<lose multiple="x">" sitting above its
+  // "<random var="x">"). Applying now would use x=0 and then memoise that no-op;
+  // instead show the words and let the post-roll rerender apply the real count.
+  if (pendingRollVar(node, view.state, view.sectionEl, view.whileIterPendingVars)) {
+    return { mode: 'inert', showWords: !hidden };
+  }
+
+  // A fight-escape bracket's closing <lose codeword> (after the fight) is deferred
+  // until the fight is won, so the mid-fight surrender/flee box= choice stays live
+  // while the fight is unresolved or the player is fleeing (task 54).
+  if (isDeferredEscapeClear(node, view.escapeCodewords, view.sectionFights)) {
+    return { mode: 'inert', showWords: !hidden };
+  }
+
+  // A hidden <tick removetag="X"> is an end-of-section tag cleanup (§5.386's Targdaz
+  // enchant): applying it on entry would strip the selection tag before the roll and
+  // <outcomes> can target the weapon. Defer it to when the section is left. (task 88)
+  if (isDeferredTagCleanup(node)) return { mode: 'defer-cleanup' };
+
+  const price = node.getAttribute('price');
+  const flag = node.getAttribute('flag');
+
+  // A hidden price node arms its linked roll / choose-one / reward silently on entry —
+  // JaFL runs it once per visit with no widget (task 56). A lone linked reward is granted
+  // too, EXCEPT an item-family one — that grants through its own gated Take button
+  // (renderChoosableReward), so firing it now would double-grant (task 125). Roll gates
+  // and choose-one menus arm only, their rolls/picks doing the granting.
+  if (price != null && hidden) {
+    const rewards = linkedRewards(view.sectionEl, price);
+    const fireReward = !isRollGate(view.sectionEl, price)
+      && rewards.length === 1
+      && !ITEM_FAMILY_TAGS.has(rewards[0].tagName.toLowerCase()) ? rewards[0] : null;
+    return { mode: 'arm-hidden-price', fireReward };
+  }
+
+  // JaFL "price/flag" optional purchase: a node with price="k" is a click-to-pay cost.
+  // A payment that arms a die roll is the repeatable "pay to spin" idiom (book2/157,
+  // book3/314, book5/674…), not a one-shot reward purchase (task 30).
+  if (price != null) {
+    return { mode: isRollGate(view.sectionEl, price) ? 'roll-payment' : 'optional-pay', key: price };
+  }
+
+  // A flag="k" node is a reward linked to a [price="k"] cost: it must NOT auto-apply.
+  // A roll-gated reward instead applies when its outcome is revealed by the roll — fall
+  // through so it applies as a normal effect (it only renders once its outcome shows).
+  if (flag != null && view.sectionEl && view.sectionEl.querySelector(`[price="${flag}"]`)
+      && !isRollGate(view.sectionEl, flag)) {
+    // A "choose one" reward: a pick button, enabled only once the cost is paid, so a
+    // single payment grants exactly the ONE the player clicks (task 43).
+    if (isChooseOne(view.sectionEl, flag)) return { mode: 'choose-one-reward', key: flag };
+    // Single dependent reward: show its words; the effect applies with the linked cost.
+    return { mode: 'inert', showWords: !hidden };
+  }
+
+  // A force="f" action is OPTIONAL (JaFL ActionNode defaults force=true): the player
+  // opts in by clicking. Specialised gates above (price/flag/hidden) win, so only a
+  // plain optional effect reaches here. (task 74)
+  if (!hidden && isOptionalForce(node)) return { mode: 'forced-optional' };
+
+  // Economic payment (Shards/item/cargo/ship) in a section with an escape route:
+  // click-to-apply, blocking the rest of the section until resolved, so the optional
+  // exit shown before it costs nothing. Narrative losses fall through and auto-apply.
+  if (tag === 'lose' && !hidden && view.hasDecline && isEconomicPayment(node)) {
+    return { mode: 'payment' };
+  }
+
+  // Player-choice effects: which ability / possession / profession is affected is the
+  // player's pick, not the engine's default (tasks 74/75).
+  if (!hidden && needsAbilityChoice(node)) return { mode: 'ability-choice' };
+  if (!hidden && needsEquipmentChoice(node, view.state)) return { mode: 'equipment-choice' };
+  if (!hidden && needsProfessionChoice(node)) return { mode: 'profession-choice' };
+
+  // A bare <lose>/<gain> written after a <fight> in win/lose prose is a fight-OUTCOME
+  // effect (task 69): hold it until the fight resolves, then apply only on the branch
+  // actually taken (win / unconditional → on a win; lose → on a loss).
+  const fightRole = view.fightGate && view.fightGate.effectNodes.get(node);
+  if (fightRole) {
+    const outcome = aggregateFightOutcome(view.sectionFights);
+    const take = outcome === 'win' ? fightRole !== 'lose'
+               : outcome === 'lose' ? fightRole === 'lose'
+               : false; // unresolved or fled → hold (show the words, apply nothing)
+    if (!take) return { mode: 'inert', showWords: !hidden };
+  }
+
+  const setVarName = tag === 'set' ? node.getAttribute('var') : null;
+  // A roll this visit has taken ownership of this var: freeze the <set> so it can
+  // never clobber the die result (book6/628's "not yet rolled" sentinel). (task 61)
+  const rollOwned = setVarName != null && view.ctx.rolledVars.has(setVarName);
+  // An absolute <set value="…"> is a pure function of current state, so it is
+  // re-evaluated on every render — this keeps variables derived from a roll
+  // result correct after that roll resolves (rather than frozen at first render).
+  const rerunnable = tag === 'set' && node.hasAttribute('value') && !node.hasAttribute('modifier') && !rollOwned;
+  return { mode: 'apply', showWords: !hidden, setVarName, rollOwned, rerunnable };
 }

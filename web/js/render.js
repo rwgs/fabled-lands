@@ -7,7 +7,7 @@
 //   * revealed branches only appear (and only apply their effects) once resolved.
 
 import {
-  evaluateCondition, applyEffect, applyEffectBody, boolAttr, resolveValue, isDiceExpr,
+  evaluateCondition, applyEffect, applyEffectBody, boolAttr, resolveValue,
   rollDifficulty, rollRankCheck, rollTraining, rollDice, matchRange, childAdjustment,
   applyRest, buyResurrectionDeal, reviveWithResurrection, abilityChoiceOptions, readItemEffects,
   whileLoopDone, useItemEffect, losePaymentPlan,
@@ -20,18 +20,18 @@ import { ABILITY_LABEL } from './rules.js';
 import { bookTitle, availableBooks, loadBook, getSection } from './data.js';
 import { animateDice, modal } from './ui.js';
 import {
-  computeOutcomeBlessings, blessingVeto, isGuardedBlessingLoss,
+  computeOutcomeBlessings, blessingVeto,
   blessingSpendForGoto, blessingSpendForReroll, ownsSoleLinkedBlessing,
-  ITEM_FAMILY_TAGS,
+  ITEM_FAMILY_TAGS, classifyPassive,
   linkedRewards as linkedRewardsRule, isCounterReward as isCounterRewardRule,
   isChooseOne as isChooseOneRule, isPricedItemAward as isPricedItemAwardRule,
   hasVisiblePay as hasVisiblePayRule, isRollGate as isRollGateRule,
-  rewardWasteReason as rewardWasteReasonRule, isOptionalForce as isOptionalForceRule,
-  forcedChoiceGroup as forcedChoiceGroupRule, isEconomicPayment as isEconomicPaymentRule,
+  rewardWasteReason as rewardWasteReasonRule,
+  forcedChoiceGroup as forcedChoiceGroupRule,
+  pendingRollVar as pendingRollVarRule,
 } from './render-rules.js';
 import {
-  computeFightGate, computeEscapeCodewords, aggregateFightOutcome,
-  isDeferredEscapeClear, isDeferredTagCleanup, isDeferredDeadChain,
+  computeFightGate, computeEscapeCodewords, isDeferredDeadChain,
   computeRollGate, computeTransferGate,
 } from './render-gates.js';
 import {
@@ -1223,222 +1223,70 @@ export class Story {
   }
 
   // ---- passive effects -----------------------------------------------------
+  // The decision cascade lives in classifyPassive (render-rules.js — task 119): it
+  // returns the ONE way this effect node executes this render; the view merely
+  // switches on the verdict and builds the matching control.
   renderPassive(container, node, path) {
-    const tag = node.tagName.toLowerCase();
-    const hidden = boolAttr(node.getAttribute('hidden'));
-
-    // Inside an untaken conditional branch: show the words (the wrapper grays
-    // them), but never apply the effect, gate a payment, or memoize — the branch
-    // isn't taken, and a later state change re-renders it live if it becomes active.
-    if (this.inactive) {
-      if (!hidden) {
-        const span = document.createElement('span');
-        span.className = 'fx';
-        this.appendChildren(span, node, path);
-        if (span.textContent.trim()) container.appendChild(span);
+    const verdict = classifyPassive(node, this);
+    switch (verdict.mode) {
+      case 'inert': // words only — deferred/guarded/linked; the rule says why
+        if (verdict.showWords) this.appendFxWords(container, node, path);
+        return null;
+      case 'defer-cleanup': // applied on leaving the section (see the navigate wrapper)
+        this.deferredCleanups.set('cleanup@' + path, node);
+        return null;
+      case 'arm-hidden-price': { // memoised silent arming — no widget (task 56)
+        const memo = 'pay@' + path;
+        if (!this.ctx.applied.has(memo)) {
+          this.ctx.applied.add(memo);
+          applyEffect(node, this.state, {}); // set the flag (and apply any real cost)
+          if (verdict.fireReward) applyEffect(verdict.fireReward, this.state, {});
+        }
+        return null;
       }
-      return null;
-    }
-
-    // A guarded storm-blessing loss (§200/250/60) is the deferred "spend to avoid
-    // the storm" step, not an on-entry loss: render its words, but let the safe goto
-    // spend the blessing on click (renderGoto/blessingSpendForGoto). (task 108)
-    if (tag === 'lose' && isGuardedBlessingLoss(node, this.outcomeBlessings)) {
-      const span = document.createElement('span');
-      span.className = 'fx';
-      this.appendChildren(span, node, path);
-      if (span.textContent.trim()) container.appendChild(span);
-      return null;
-    }
-
-    // Defer an effect whose magnitude depends on a variable that a roll in this
-    // section has not filled yet (e.g. §521 "<lose multiple="x">" sitting above its
-    // "<random var="x">"). Applying now would use x=0 and then memoise that no-op;
-    // instead show the words and let the post-roll rerender apply the real count.
-    if (this.pendingRollVar(node)) {
-      if (!hidden) {
-        const span = document.createElement('span');
-        span.className = 'fx';
-        this.appendChildren(span, node, path);
-        if (span.textContent.trim()) container.appendChild(span);
-      }
-      return null;
-    }
-
-    // A fight-escape bracket's closing <lose codeword> (after the fight) is deferred
-    // until the fight is won, so the mid-fight surrender/flee box= choice stays live
-    // while the fight is unresolved or the player is fleeing (task 54).
-    if (isDeferredEscapeClear(node, this.escapeCodewords, this.sectionFights)) {
-      if (!hidden) {
-        const span = document.createElement('span');
-        span.className = 'fx';
-        this.appendChildren(span, node, path);
-        if (span.textContent.trim()) container.appendChild(span);
-      }
-      return null;
-    }
-
-    // A hidden <tick removetag="X"> is an end-of-section tag cleanup (§5.386's Targdaz
-    // enchant tags a weapon "Tz", routes its interactive roll/outcomes to that weapon,
-    // then strips the tag). Applying it on entry — as any hidden effect would — removes
-    // the selection tag before the roll and <outcomes> can target the weapon, so the
-    // raise/lower/destroy never lands; a stray tag would also leak onto the weapon for a
-    // later re-visit. Defer it to when the section is left (see the navigate wrapper) so
-    // the tag survives the whole visit for its own ticks and is stripped exactly once. (task 88)
-    if (isDeferredTagCleanup(node)) {
-      this.deferredCleanups.set('cleanup@' + path, node);
-      return null; // hidden bookkeeping: renders nothing; applied on leaving the section
-    }
-
-    const price = node.getAttribute('price');
-    const flag = node.getAttribute('flag');
-
-    // A hidden price node (<tick price="k" hidden="t"/> — book6/630, book2/122,
-    // book4/127, book5/365; a <success><tick price="x" hidden/> in book3/472) arms
-    // its linked roll / choose-one / reward silently on entry — JaFL runs it once per
-    // visit with no widget. Fire it once (memoised) and render nothing, instead of a
-    // phantom "Pay"/"Confirm" button the player must find (and could re-click to
-    // re-arm). A lone linked reward is granted too (book3/472's codeword Chance on a
-    // SCOUTING success); roll gates and choose-one menus arm only, their rolls/picks
-    // doing the granting. (task 56)
-    if (price != null && hidden) {
-      const memo = 'pay@' + path;
-      if (!this.ctx.applied.has(memo)) {
-        this.ctx.applied.add(memo);
-        applyEffect(node, this.state, {}); // set the flag (and apply any real cost)
-        const rewards = this.linkedRewards(price);
-        // Skip an item-family reward here — it grants through its own gated Take button
-        // (renderChoosableReward), so firing it now would double-grant. (task 125)
-        if (!this.isRollGate(price) && rewards.length === 1 && !ITEM_FAMILY_TAGS.has(rewards[0].tagName.toLowerCase())) applyEffect(rewards[0], this.state, {});
-      }
-      return null;
-    }
-
-    // JaFL "price/flag" optional purchase: a node with price="k" is a click-to-pay
-    // cost; nodes with flag="k" are its linked rewards. These must NOT auto-apply —
-    // the player opts in by clicking the cost, which also applies the linked rewards.
-    if (price != null) {
-      // A payment that arms a die roll (a <random flag="k"> gated on this cost) is
-      // the repeatable "pay to spin" idiom (book2/157, book3/314, book5/674…), not a
-      // one-shot reward purchase: route it to renderRollPayment so paying arms the
-      // roll instead of firing every outcome's effect at once (task 30).
-      if (this.isRollGate(price)) return this.renderRollPayment(container, node, path, price);
-      return this.renderOptionalPay(container, node, path, price);
-    }
-    if (flag != null && this.sectionEl && this.sectionEl.querySelector(`[price="${flag}"]`)) {
-      // A roll-gated reward (an <outcome> effect under a <random flag="k">) applies
-      // when its outcome is revealed by the roll — never on payment; fall through so
-      // it applies as a normal effect (it only renders once its outcome shows). Only
-      // a *non*-roll dependent reward is deferred to the linked cost click below.
-      if (!this.isRollGate(flag)) {
-        // A "choose one" reward (two or more effect rewards share this cost key):
-        // render it as a pick button, enabled only once the cost is paid, so a
-        // single payment grants exactly the ONE the player clicks — not the whole
-        // menu (book6/171 blessings, book5/152 curses, book6/690 blessings). (task 43)
-        if (this.isChooseOne(flag)) return this.renderChoosableReward(container, node, path, flag);
-        if (!hidden) { // single dependent reward: show its words; effect applies with the linked cost
+      case 'roll-payment':      return this.renderRollPayment(container, node, path, verdict.key);
+      case 'optional-pay':      return this.renderOptionalPay(container, node, path, verdict.key);
+      case 'choose-one-reward': return this.renderChoosableReward(container, node, path, verdict.key);
+      case 'forced-optional':   return this.renderForcedOptional(container, node, path);
+      case 'payment':           return this.renderPayment(container, node, path);
+      case 'ability-choice':    return this.renderAbilityChoice(container, node, path);
+      case 'equipment-choice':  return this.renderEquipmentChoice(container, node, path);
+      case 'profession-choice': return this.renderProfessionChoice(container, node, path);
+      default: { // 'apply' — the plain effect, memoised per-visit
+        const key = 'fx@' + path;
+        if (!verdict.rollOwned && (verdict.rerunnable || !this.ctx.applied.has(key))) {
+          if (!verdict.rerunnable) this.ctx.applied.add(key);
+          const note = applyEffect(node, this.state, { chooser: null });
+          // Record a <set var>'s write so a var-keyed <success>/<failure>/<outcome>
+          // knows the var holds a real value this visit — the set-sentinel idiom
+          // (book2/138 key holder, book3/43 Chill) resolves the branch with no roll,
+          // while an unwritten/stale var keeps the branch pending (task 50).
+          if (verdict.setVarName) this.ctx.wroteVars.add(verdict.setVarName);
+          if (note && verdict.showWords) this.notify(note);
+        }
+        // Render its descriptive text (the words the author wrote around the effect).
+        if (verdict.showWords) {
           const span = document.createElement('span');
           span.className = 'fx';
           this.appendChildren(span, node, path);
+          // A bare section-box <tick/> carries no words of its own, so the printed
+          // instruction "…, tick the box, and read on" would collapse to "…, , and
+          // read on"; supply the words so the sentence reads naturally (task 70).
+          if (!span.textContent.trim() && this.isBareBoxTick(node)) span.textContent = 'tick the box';
           if (span.textContent.trim()) container.appendChild(span);
         }
         return null;
       }
     }
+  }
 
-    // A force="f" action is OPTIONAL (JaFL ActionNode defaults force=true): the player
-    // opts in by clicking, rather than it applying on entry — so an optional mission
-    // codeword / Tyrnai initiation can be declined, and a "choose one" (a dock, or
-    // "cross off one of these") does not apply every option. Render it as a once-per-
-    // visit button; specialised gates above (price/flag/hidden/payment) still win, so
-    // only a plain optional effect reaches here. (task 74)
-    if (!hidden && this.isOptionalForce(node)) {
-      return this.renderForcedOptional(container, node, path);
-    }
-
-    // Economic payment (Shards/item/cargo/ship) in a section with an escape route:
-    // follows JaFL's forced-action model — click-to-apply, and blocks the rest of
-    // the section until resolved, so the optional exit shown before it (e.g. "turn
-    // back to 142") costs nothing. Narrative losses (Stamina, codewords, blessings…)
-    // and unavoidable payments fall through and auto-apply.
-    if (tag === 'lose' && !hidden && this.hasDecline && this.isEconomicPayment(node)) {
-      return this.renderPayment(container, node, path);
-    }
-
-    // "Lose/gain 1 point from any ability" (ability="?" or "a|b"): the player
-    // picks which ability rather than the engine defaulting — defer to a chooser
-    // instead of auto-applying on entry.
-    if (!hidden && this.needsAbilityChoice(node)) {
-      return this.renderAbilityChoice(container, node, path);
-    }
-
-    // A <tick weapon|item="?" addbonus|addtag|removetag> where more than one possession
-    // qualifies: let the player pick which is enchanted rather than defaulting. (task 75)
-    if (!hidden && this.needsEquipmentChoice(node)) {
-      return this.renderEquipmentChoice(container, node, path);
-    }
-    // A <tick profession="a|b|c"> — the former Priest chooses a new profession. (task 75)
-    if (!hidden && this.needsProfessionChoice(node)) {
-      return this.renderProfessionChoice(container, node, path);
-    }
-
-    // A bare <lose>/<gain> written after a <fight> in win/lose prose is a
-    // fight-OUTCOME effect (task 69). Applying it on entry (as a plain effect would)
-    // hands over the reward / exacts the penalty before a blow is struck — §570
-    // stripped every Shard and dropped you to 1 Stamina the instant you arrived.
-    // Hold it until the fight resolves, then apply only on the branch actually taken
-    // (win / unconditional → on a win; lose → on a loss). computeFightGate tagged it.
-    const fightRole = this.fightGate && this.fightGate.effectNodes.get(node);
-    if (fightRole && !this.inactive) {
-      const outcome = aggregateFightOutcome(this.sectionFights);
-      const take = outcome === 'win' ? fightRole !== 'lose'
-                 : outcome === 'lose' ? fightRole === 'lose'
-                 : false; // unresolved or fled → hold (show the words, apply nothing)
-      if (!take) {
-        if (!hidden) {
-          const span = document.createElement('span');
-          span.className = 'fx';
-          this.appendChildren(span, node, path);
-          if (span.textContent.trim()) container.appendChild(span);
-        }
-        return null;
-      }
-    }
-
-    const key = 'fx@' + path;
-    const setVarName = tag === 'set' ? node.getAttribute('var') : null;
-    // A roll this visit has taken ownership of this var: freeze the <set> so it can
-    // never clobber the die result. book6/628 uses <set var="y" value="7"/> as a
-    // "not yet rolled" sentinel above a pay-gated <random var="y">; without this the
-    // rerunnable set re-applies y=7 on the post-roll rerender, so the <if var="y">
-    // rest/dysentery branches never fire (the player pays daily but never heals). (task 61)
-    const rollOwned = setVarName != null && this.ctx.rolledVars.has(setVarName);
-    // An absolute <set value="…"> is a pure function of current state, so it is
-    // re-evaluated on every render — this keeps variables derived from a roll
-    // result correct after that roll resolves (rather than frozen at first render).
-    const rerunnable = tag === 'set' && node.hasAttribute('value') && !node.hasAttribute('modifier') && !rollOwned;
-    if (!rollOwned && (rerunnable || !this.ctx.applied.has(key))) {
-      if (!rerunnable) this.ctx.applied.add(key);
-      const note = applyEffect(node, this.state, { chooser: null });
-      // Record a <set var>'s write so a var-keyed <success>/<failure>/<outcome>
-      // knows the var holds a real value this visit — the set-sentinel idiom
-      // (book2/138 key holder, book3/43 Chill) resolves the branch with no roll,
-      // while an unwritten/stale var keeps the branch pending (task 50).
-      if (setVarName) this.ctx.wroteVars.add(setVarName);
-      if (note && !hidden) this.notify(note);
-    }
-    // Render its descriptive text (the words the author wrote around the effect).
-    if (!hidden) {
-      const span = document.createElement('span');
-      span.className = 'fx';
-      this.appendChildren(span, node, path);
-      // A bare section-box <tick/> carries no words of its own, so the printed
-      // instruction "…, tick the box, and read on" would collapse to "…, , and
-      // read on"; supply the words so the sentence reads naturally (task 70).
-      if (!span.textContent.trim() && this.isBareBoxTick(node)) span.textContent = 'tick the box';
-      if (span.textContent.trim()) container.appendChild(span);
-    }
-    return null;
+  // The shared "show the effect's words" span (class fx), appended only when non-empty.
+  appendFxWords(container, node, path) {
+    const span = document.createElement('span');
+    span.className = 'fx';
+    this.appendChildren(span, node, path);
+    if (span.textContent.trim()) container.appendChild(span);
+    return span;
   }
 
   // A plain visit-box <tick/> — no words of its own and no attribute that would
@@ -1448,19 +1296,6 @@ export class Story {
     if (node.tagName.toLowerCase() !== 'tick') return false;
     if (node.textContent.trim()) return false;
     return node.getAttributeNames().every((a) => a.toLowerCase() === 'count');
-  }
-
-  // Does this <gain>/<lose>/<tick> ask the player to choose which ability it
-  // affects (ability="?" or "a|b")? effect= forms target one named ability, so
-  // they never need a chooser.
-  needsAbilityChoice(node) {
-    const tag = node.tagName.toLowerCase();
-    if (tag !== 'lose' && tag !== 'gain' && tag !== 'tick') return false;
-    if (node.getAttribute('effect') != null) return false;
-    const ab = node.getAttribute('ability');
-    if (ab == null) return false;
-    const s = ab.trim().toLowerCase();
-    return s === '?' || s.includes('|');
   }
 
   // Render an ability-choice effect as a row of pick buttons; applying it only on
@@ -1482,23 +1317,6 @@ export class Story {
       this.rerender();
     }, isLoss ? '−' : '+');
     return null;
-  }
-
-  // Does a <tick …="?" addbonus|addtag|removetag> ask the player to choose WHICH
-  // possession is enchanted? Only when the target is an open "?"/blank of a kind with
-  // more than one candidate — a name/all, a tags=/using= narrowing, or a cache target
-  // is deterministic and applies without a picker. (task 75)
-  needsEquipmentChoice(node) {
-    if (node.tagName.toLowerCase() !== 'tick') return false;
-    if (node.getAttribute('addbonus') == null && node.getAttribute('addtag') == null && node.getAttribute('removetag') == null) return false;
-    const eqAttr = ['weapon', 'armour', 'tool', 'item'].find((k) => node.getAttribute(k) != null);
-    if (eqAttr == null) return false;
-    const pat = String(node.getAttribute(eqAttr) || '').trim();
-    if (pat !== '?' && pat !== '') return false;
-    if (boolAttr(node.getAttribute('using')) || node.getAttribute('tags') || node.getAttribute('cache')) return false;
-    const kind = eqAttr === 'item' ? null : eqAttr;
-    const candidates = kind ? this.state.data.items.filter((it) => it.kind === kind) : this.state.data.items;
-    return candidates.length > 1;
   }
 
   renderEquipmentChoice(container, node, path) {
@@ -1525,13 +1343,6 @@ export class Story {
     });
     container.appendChild(box);
     return box;
-  }
-
-  // A <tick profession="a|b|c"> asks the player to choose a new profession. (task 75)
-  needsProfessionChoice(node) {
-    if (node.tagName.toLowerCase() !== 'tick') return false;
-    const p = node.getAttribute('profession');
-    return p != null && p.includes('|');
   }
 
   renderProfessionChoice(container, node, path) {
@@ -1573,30 +1384,8 @@ export class Story {
     return box;
   }
 
-  // The name of a not-yet-set variable that this effect's magnitude depends on and
-  // that a roll in this section will fill — or null. Only such vars defer (see
-  // renderPassive): a literal, a dice expression, or an already-set var applies now,
-  // and a var no roll here fills is left to apply (harmlessly as 0) rather than hang.
-  pendingRollVar(node) {
-    const QTY = ['multiple', 'shards', 'stamina', 'staminato', 'amount', 'count', 'itemAt', 'quantity'];
-    for (const a of QTY) {
-      const v = node.getAttribute(a);
-      if (v == null) continue;
-      const s = String(v).trim();
-      if (/^-?\d/.test(s) || isDiceExpr(s)) continue; // numeric literal or dice expr
-      const bare = s.replace(/^[+-]/, '');            // a signed var ref ("-hang") → "hang" (task 50)
-      // Inside a <while> pass, a var this iteration re-rolls is STALE until this
-      // pass's roll resolves — defer even though hasVar() is true from a prior pass
-      // (§6.700's per-iteration `<lose stamina="x">` must use this six, not the last). (task 100)
-      if (this.whileIterPendingVars && this.whileIterPendingVars.has(bare)) return bare;
-      if (this.state.hasVar(bare)) continue;          // already set (e.g. by an earlier <set>/roll)
-      if (this.sectionEl && this.sectionEl.querySelector(`random[var="${bare}"], rankcheck[var="${bare}"], difficulty[var="${bare}"]`)) return bare;
-    }
-    return null;
-  }
-
-  // Rule in render-rules.js (task 119).
-  isEconomicPayment(node) { return isEconomicPaymentRule(node); }
+  // Rule in render-rules.js (task 119). Still called by renderItemAward's quantity gate.
+  pendingRollVar(node) { return pendingRollVarRule(node, this.state, this.sectionEl, this.whileIterPendingVars); }
 
   // A forced economic payment: click-to-apply, and (until applied) blocks the rest
   // of the section. Once paid it renders as a quiet "done" note and no longer blocks.
@@ -1715,9 +1504,7 @@ export class Story {
     container.appendChild(box);
   }
 
-  // Rules in render-rules.js (task 119).
-  isOptionalForce(node) { return isOptionalForceRule(node); }
-
+  // Rule in render-rules.js (task 119).
   forcedChoiceGroup(node) { return forcedChoiceGroupRule(node); }
 
   // Render a force="f" optional effect as a once-per-visit opt-in button (task 74). When
