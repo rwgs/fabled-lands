@@ -389,14 +389,14 @@ view split via prototype mixins (each module exports a methods object mixed onto
 - `render-market.js` — the economy view (markets, buy/sell, rest, caches, transfer, resurrection).
 
 `render.js` is now ~2,900 lines (from ~4,450) and dropped the combat.js import +
-most of market.js. **NOTE — structure divergence:** these three used prototype
-mixins, but the fifth-review guidance below prefers *plain functions taking the
-story as first argument*. The remaining "actions" view split (rolls/branches,
-passive/payments/rewards/groups, choices/goto) is **not done** — and per that
-guidance should first extract the still-in-view rule-semantic pockets
-(`classifyPassive`, `grantChoosableReward`, `choiceGate`, branch resolution,
-`groupPlan`) as tested DOM-free planners before moving any DOM. Revisit whether
-to also restyle the combat/market mixins to the plain-function pattern.
+most of market.js. `render-combat.js` / `render-market.js` currently use prototype
+mixins (`Object.assign(Story.prototype, …)`); they are correct and fully tested.
+**Decided (2026-07-19):** the rest of task 119 follows the fifth-review guidance
+below — plain functions taking the story as first argument, rule pockets extracted
+to tested planners first — and the combat/market mixins get converted to that same
+style **as part of** that effort (a standalone mixin→function conversion is pure
+churn with no behaviour or boundary gain, so it is not done on its own). See the
+resume checklist after the guidance note.
 
 *Phase-3 guidance (2026-07-19, fifth review — renderer sweep):* the boundary
 claim is ~80% true: the extracted predicates are clean, but several
@@ -431,6 +431,37 @@ extend sw.js REQUIRED + the README table per file, as phases 1-2 did.
 Also: begin() re-implements visit-state's `rebuildVisitScaffold` inline
 (render.js:258-273 vs visit-state.js:65-78) — fold that into whichever slice
 touches begin() first, or take it with task 152.
+
+*Resume checklist (2026-07-19 — the accepted route for the remaining Phase 3;
+start fresh here).* One planner/module per commit; after EACH, `pwsh
+-ExecutionPolicy Bypass -File build/stamp-version.ps1` then the full every-section
+smoke = `RESULT ALL PASS` before committing. Line numbers above are pre-move and
+will drift — re-grep.
+1. **Extract the in-view rule pockets to DOM-free planners FIRST**, each unit-
+   tested (in `suite-actions`, beside the existing task-119 planner tests) before
+   its DOM is touched: `classifyPassive(node, view)`, `choiceGate(state, node,
+   view) → reasons[]`, and branch resolution (`branchSuccess`/`branchResolved`/
+   the `<outcomes>` matcher) → **render-rules.js**; `groupPlan(sectionEl, node)` →
+   render-rules.js; `grantChoosableReward` → **engine.js/market.js** behind a
+   chooser-style API (dedupe against what `grantItemNode` already delegates to).
+2. Fold begin()'s inline scaffold rebuild into `visit-state.rebuildVisitScaffold`.
+3. **Split the remaining view into plain-function modules** (`story` as first arg),
+   flat in `web/js/`, each added to `sw.js` REQUIRED + the README table:
+   `render-rolls.js` (rolls/branches, ~530 lines), `render-rewards.js`
+   (passive/payments/rewards/item-awards/groups), `render-choices.js`
+   (choices/goto/return/navigation). Convert `TAG_RENDERERS` string values to
+   imported function references so dispatch becomes `fn(this, container, node,
+   path)` — this makes the moves mechanical.
+4. **Convert `render-combat.js` / `render-market.js` from mixins to the same
+   plain-function style** and drop the `Object.assign` wiring, so the whole view
+   is one convention.
+5. Keep `render.js` as the facade: class decl + exports, lifecycle
+   (begin/render/rerender/resume/useItem/navigate/serializeVisit/deserializeFrame),
+   the core walk (appendChildren/renderElement/if-chain/text/image/table), and the
+   gate `tag*`/`apply*` DOM helpers.
+Success (unchanged): no behaviour change, no browser globals in the rule modules,
+the all-section suite green after each extraction, the `Story` API stable, and no
+single replacement file inheriting the god-object role.
 
 ---
 
