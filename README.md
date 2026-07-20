@@ -52,7 +52,8 @@ fabled-lands/
     ├── css/style.css
     ├── js/            app.js, data.js, state.js, rules.js, engine.js,
     │                  combat.js, market.js, render.js, render-rules.js, render-gates.js,
-    │                  visit-state.js, render-util.js, render-combat.js, ui.js, tts.js, version.js
+    │                  visit-state.js, render-util.js, render-combat.js, render-market.js,
+    │                  ui.js, tts.js, version.js
     ├── assets/        icon.svg, world-map.jpg
     └── data/          meta.json, book1.json … book6.json   (generated)
 ```
@@ -182,6 +183,7 @@ structure of the books is preserved exactly.
 | `visit-state.js` | DOM-free per-visit execution-context (ctx) + return-frame serialization (create/flatten/rebuild) so a save resumes the exact visit. No DOM. |
 | `render-util.js` | Small dependency-free display helpers (title-case, item labels, HTML-escape, market titles) shared by `render.js` and the view modules. No DOM. |
 | `render-combat.js` | The fight **view** — single/group battle widgets and per-round Attack/Flee/blessing controls — mixed onto `Story.prototype`. Combat rules stay in `combat.js`. |
+| `render-market.js` | The economy **view** — markets, inline buy/sell, rest, money/item caches, transfers, resurrection deals — mixed onto `Story.prototype`. Economy rules stay in `market.js`/`engine.js`. |
 | `ui.js` | Adventure-Sheet panel, dice animation, modals, toasts. |
 | `app.js` | Bootstrap, screens, routing, character creation, death/resurrection, saves. |
 
