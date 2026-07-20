@@ -186,8 +186,8 @@ structure of the books is preserved exactly.
 | `render-rolls.js` | The roll + branch **view** — dice widgets (`<difficulty>/<random>/<rankcheck>/<training>/<reroll>`) and the success/failure/outcomes reveal — plain functions taking the story first. Resolution rules stay in `render-rules.js`/`engine.js`. |
 | `render-rewards.js` | The passive-effect, payment, reward and item-award **view** — the `renderPassive` verdict switch, groups, chooser effects, forced/optional & pay-to-spin buttons, choose-one rewards, and item/replace awards — plain functions taking the story first. The execution model + eligibility rules stay in `render-rules.js`; award transactions in `engine.js`/`market.js`. |
 | `render-choices.js` | The choice + navigation **view** — the `<choices>` table, `<choice>` buttons, `<goto>`/`<return>` links and the sail-ship chooser — plain functions taking the story first. Eligibility/payment rules stay in `render-rules.js`; the fight/roll/transfer nav tagging and `goBack()` stay on the Story (section lifecycle). |
-| `render-combat.js` | The fight **view** — single/group battle widgets and per-round Attack/Flee/blessing controls — mixed onto `Story.prototype`. Combat rules stay in `combat.js`. |
-| `render-market.js` | The economy **view** — markets, inline buy/sell, rest, money/item caches, transfers, resurrection deals — mixed onto `Story.prototype`. Economy rules stay in `market.js`/`engine.js`. |
+| `render-combat.js` | The fight **view** — single/group battle widgets and per-round Attack/Flee/blessing controls — plain functions taking the story first. Combat rules stay in `combat.js`. |
+| `render-market.js` | The economy **view** — markets, inline buy/sell, rest, money/item caches, transfers, resurrection deals — plain functions taking the story first. Economy rules stay in `market.js`/`engine.js`. |
 | `ui.js` | Adventure-Sheet panel, dice animation, modals, toasts. |
 | `app.js` | Bootstrap, screens, routing, character creation, death/resurrection, saves. |
 

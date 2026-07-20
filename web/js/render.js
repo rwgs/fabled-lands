@@ -36,8 +36,11 @@ import {
 import {
   renderChoices, renderChoiceElement, renderGoto, renderReturn,
 } from './render-choices.js';
-import { combatView } from './render-combat.js';
-import { marketView } from './render-market.js';
+import { renderFight } from './render-combat.js';
+import {
+  renderMarket, renderInlineBuy, renderInlineSell, renderRest,
+  renderMoneyCache, renderItemCache, renderTransfer, renderResurrection,
+} from './render-market.js';
 
 const INLINE_STYLE = { b: 'strong', i: 'em', u: 'u', caps: 'span' };
 const BRANCH_TAGS = new Set(['success', 'failure', 'outcomes']);
@@ -81,20 +84,20 @@ const TAG_RENDERERS = {
   random:          renderRandom,
   rankcheck:       renderRankcheck,
   training:        renderTraining,
-  fight:           (s, c, n, p) => s.renderFight(c, n, p),
+  fight:           renderFight,
   // <flee>/<fightdamage> describe a consequence that fires on an EVENT (the player
   // fleeing, or the enemy landing a blow), never on render. Show their prose but
   // render them inert — combat.js / the Flee button apply the effects.
   flee:            (s, c, n, p) => s.renderInert(c, n, p),
   fightdamage:     (s, c, n, p) => s.renderInert(c, n, p),
-  market:          (s, c, n, p) => s.renderMarket(c, n, p),
-  buy:             (s, c, n, p) => s.renderInlineBuy(c, n, p),
-  sell:            (s, c, n, p) => s.renderInlineSell(c, n, p),
-  rest:            (s, c, n, p) => s.renderRest(c, n, p),
-  moneycache:      (s, c, n, p) => s.renderMoneyCache(c, n, p),
-  itemcache:       (s, c, n, p) => s.renderItemCache(c, n, p),
-  transfer:        (s, c, n, p) => s.renderTransfer(c, n, p),
-  resurrection:    (s, c, n, p) => s.renderResurrection(c, n, p),
+  market:          renderMarket,
+  buy:             renderInlineBuy,
+  sell:            renderInlineSell,
+  rest:            renderRest,
+  moneycache:      renderMoneyCache,
+  itemcache:       renderItemCache,
+  transfer:        renderTransfer,
+  resurrection:    renderResurrection,
   reroll:          renderReroll,
   image:           (s, c, n, p) => s.renderImage(c, n, p),
   table:           (s, c, n, p) => s.renderTable(c, n, p),
@@ -191,7 +194,7 @@ export class Story {
     // (crossed off) unless it carries revisit="t". (task 110)
     this._pendingSourceNode = null;
   }
-
+f
   // Snapshot the current visit so a later <return> can restore it (task 110). Null
   // before the first section is entered (nothing to return to). Keeps references to
   // the live ctx/sectionEl (neither is mutated once we leave — begin() builds fresh
@@ -1150,11 +1153,11 @@ export class Story {
   }
 }
 
-// Mix the responsibility-split view modules onto Story.prototype (task 119). Each module
-// exports a plain object of DOM-construction methods that use `this` (the Story instance);
-// they compose with the rest of the renderer exactly as if defined in the class body, and
-// keep the `Story` API unchanged. Rules live in the DOM-free modules these call.
-Object.assign(Story.prototype, combatView, marketView);
+// The whole view is now one convention (task 119): every split module (render-rolls,
+// render-rewards, render-choices, render-combat, render-market) exports plain functions
+// taking the story as first argument, dispatched from TAG_RENDERERS — no prototype
+// mixin. render.js keeps the section lifecycle, the core walk, conditionals and the
+// fight/roll/transfer nav tagging; the rules live in the DOM-free modules these call.
 
 // MARKET_TITLES / titleCase / diceWord / escapeHtml / itemLabel moved to render-util.js
 // (task 119) so the responsibility-split view modules can share them without importing

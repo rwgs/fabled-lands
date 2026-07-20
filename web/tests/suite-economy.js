@@ -8,6 +8,7 @@ import { goodsFrom, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCar
 import { Story, previewProse } from '../js/render.js';
 import { isRollGate } from '../js/render-rules.js';
 import { renderGoto } from '../js/render-choices.js';
+import { renderMarket, renderRest } from '../js/render-market.js';
 import { Narrator } from '../js/tts.js';
 import { renderSheet } from '../js/ui.js';
 import { renderStatic } from '../js/app.js';
@@ -40,7 +41,7 @@ export async function run(ctx) {
     // part 4: header1= supplies the market column heading.
     const stHd = new Story(document.createElement('div'), GameState.create({ name:'HD', gender:'m', profession:'Warrior', book:4, adv }), { navigate(){}, onDeath(){}, notify(){} });
     stHd.book = 4; stHd.sectionEl = parse('<section/>');
-    const mktBox = stHd.renderMarket(document.createElement('div'), parse('<market><header header1="Potions"/><item name="potion of strength" buy="100" sell="90"/></market>'), 'm');
+    const mktBox = renderMarket(stHd, document.createElement('div'), parse('<market><header header1="Potions"/><item name="potion of strength" buy="100" sell="90"/></market>'), 'm');
     ok('header1= supplies the market heading', /Potions/.test(mktBox.textContent), mktBox.textContent.slice(0, 40));
 
     // buy a tool: grants a bonus tool tied to an ability and charges the price
@@ -188,7 +189,7 @@ export async function run(ctx) {
     // render: a <rest stamina="2"> still labels a fixed +2; a bare <rest> labels "heal all".
     const stRl = new Story(document.createElement('div'), gR, { navigate(){}, onDeath(){}, notify(){} });
     stRl.sectionEl = parse('<section/>'); stRl.book = 1; stRl.ctx = stRl._newCtx(); gR.data.stamina = 1;
-    const restFixed = stRl.renderRest(document.createElement('div'), parse('<rest stamina="2">rest a bit</rest>'), 'rr');
+    const restFixed = renderRest(stRl, document.createElement('div'), parse('<rest stamina="2">rest a bit</rest>'), 'rr');
     ok('<rest stamina="2"> labels a fixed +2 Stamina', /\+2 Stamina/.test(restFixed.textContent), restFixed.textContent);
     // §1.114 safe house: a bare <rest> heals all lost Stamina on click.
     const g114 = GameState.create({ name:'R114', gender:'m', profession:'Warrior', book:1, adv });
