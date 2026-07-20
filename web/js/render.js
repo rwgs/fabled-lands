@@ -36,6 +36,7 @@ import {
 import {
   newCtx, resolveNodePath, serializeCtx, deserializeCtx, serializeFrame,
 } from './visit-state.js';
+import { MARKET_TITLES, titleCase, diceWord, escapeHtml, itemLabel } from './render-util.js';
 
 const INLINE_STYLE = { b: 'strong', i: 'em', u: 'u', caps: 'span' };
 const BRANCH_TAGS = new Set(['success', 'failure', 'outcomes']);
@@ -3977,18 +3978,6 @@ export class Story {
   }
 }
 
-const MARKET_TITLES = {
-  ship: 'Ships for sale', shipsale: 'Sell a ship', cargo: 'Cargo', armour: 'Armour',
-  weapon: 'Weapons', magic: 'Magical equipment', other: 'Goods for sale',
-};
-function titleCase(s) { return (s || '').replace(/\b\w/g, (c) => c.toUpperCase()); }
-function diceWord(n) { return n === 1 ? '1 die' : `${n} dice`; }
-function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
-// A short display label for a stored item (name + its bonus tier, like an award).
-function itemLabel(it) {
-  const name = titleCase(it.name || it.kind || 'item');
-  if (it.kind === 'weapon' && it.bonus) return `${name} (Combat +${it.bonus})`;
-  if (it.kind === 'armour' && it.bonus) return `${name} (Defence +${it.bonus})`;
-  if (it.kind === 'tool' && it.bonus && it.ability) return `${name} (${titleCase(it.ability)} +${it.bonus})`;
-  return it.bonus ? `${name} (+${it.bonus})` : name;
-}
+// MARKET_TITLES / titleCase / diceWord / escapeHtml / itemLabel moved to render-util.js
+// (task 119) so the responsibility-split view modules can share them without importing
+// render.js (which would be a cycle).
