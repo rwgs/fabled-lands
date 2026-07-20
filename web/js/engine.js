@@ -686,6 +686,34 @@ function applyItemAward(el, state) {
   return 'gained item';
 }
 
+/** Grant ONE picked reward of a "choose one" purchase and consume the payment (clear its
+ *  flag `key`) — the chooser-style award transaction behind the view's reward pick
+ *  buttons (tasks 43/63; moved from the view in task 119). Effect rewards (tick/lose/
+ *  gain) clear their own flag via applyEffect; an item/weapon/armour/tool award or a
+ *  resurrection deal is granted here and the flag cleared explicitly. A quantity= option
+ *  grants that many of the reward (§4.634's ink-sac barter option is two sacs), currency
+ *  stacking freely and possessions limited by the 12-item carry cap (task 94). `book` is
+ *  the current book — a resurrection deal's default. Returns the notify note. */
+export function grantChosenReward(state, node, key, book) {
+  const tag = node.tagName.toLowerCase();
+  if (tag === 'item' || tag === 'weapon' || tag === 'armour' || tag === 'tool') {
+    const quantity = node.getAttribute('quantity') != null ? Math.max(1, resolveValue(state, node.getAttribute('quantity'))) : 1;
+    for (let k = 0; k < quantity; k++) applyItemAward(node, state);
+    state.setFlag(key, false);
+    return '';
+  }
+  if (tag === 'resurrection') {
+    buyResurrectionDeal(state, {
+      book: node.getAttribute('book') ? Number(node.getAttribute('book')) : book,
+      section: node.getAttribute('section'), text: node.getAttribute('text') || (node.textContent || '').trim(),
+      god: node.getAttribute('god'), cost: 0, supplemental: boolAttr(node.getAttribute('supplemental')),
+    });
+    state.setFlag(key, false);
+    return 'Resurrection deal arranged.';
+  }
+  return applyEffect(node, state, {});
+}
+
 /** Candidate weapon/armour/tool a <lose kind=…> could take, after the bonus=/tags=/using=
  *  narrowing and keep-tag protection. Shared by the eligibility gate (losePaymentPlan),
  *  the forfeit chooser and the commit so the view and the engine agree on exactly what

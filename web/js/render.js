@@ -9,8 +9,8 @@
 import {
   evaluateCondition, applyEffect, applyEffectBody, boolAttr, resolveValue,
   rollDifficulty, rollRankCheck, rollTraining, rollDice, childAdjustment,
-  applyRest, buyResurrectionDeal, reviveWithResurrection, abilityChoiceOptions, readItemEffects,
-  whileLoopDone, useItemEffect, losePaymentPlan,
+  applyRest, reviveWithResurrection, abilityChoiceOptions, readItemEffects,
+  whileLoopDone, useItemEffect, losePaymentPlan, grantChosenReward,
 } from './engine.js';
 // combat.js → render-combat.js (fight view); most of market.js → render-market.js (economy
 // view). render.js keeps only what its remaining methods use directly. (task 119)
@@ -1546,7 +1546,7 @@ export class Story {
       btn.disabled = true; btn.title = held;
     } else {
       btn.addEventListener('click', () => {
-        const note = this.grantChoosableReward(node, key); // grant reward + clear flag key
+        const note = grantChosenReward(this.state, node, key, this.book); // grant reward + clear flag key (engine.js, task 119)
         if (note) this.notify(note);
         this.rerender();
       });
@@ -1557,44 +1557,6 @@ export class Story {
 
   // Rule in render-rules.js (task 119).
   hasVisiblePay(key) { return hasVisiblePayRule(this.sectionEl, key); }
-
-  // Grant one chosen reward and consume the payment (clear its flag). Effect rewards
-  // (tick/lose/gain) clear their own flag via applyEffect; an item/weapon/armour/tool
-  // award or a resurrection deal is granted here and the flag cleared explicitly. (task 63)
-  grantChoosableReward(node, key) {
-    const tag = node.tagName.toLowerCase();
-    if (ITEM_FAMILY_TAGS.has(tag)) {
-      const rawName = node.getAttribute('name') || tag;
-      const currency = tag === 'item' ? currencyAward(rawName) : null;
-      // A quantity= choose-one option grants that many of the reward (§4.634's ink-sac
-      // barter option is two sacs), currency stacking freely and possessions limited by
-      // the 12-item carry cap. (task 94)
-      const quantity = node.getAttribute('quantity') != null ? Math.max(1, resolveValue(this.state, node.getAttribute('quantity'))) : 1;
-      if (currency != null) {
-        for (let k = 0; k < quantity; k++) this.state.adjustMoney(currency);
-      } else {
-        const { name, alts } = splitItemName(rawName);
-        const bonus = node.getAttribute('bonus') ? parseInt(node.getAttribute('bonus'), 10) : 0;
-        const ability = node.getAttribute('ability') || null;
-        const tags = [...parseTags(node.getAttribute('tags')), ...alts];
-        const group = node.getAttribute('group');
-        const effects = readItemEffects(node);
-        for (let k = 0; k < quantity && this.state.freeSlots() > 0; k++) this.state.addItem(makeItem(tag, name, bonus, ability, tags, effects, group));
-      }
-      this.state.setFlag(key, false);
-      return '';
-    }
-    if (tag === 'resurrection') {
-      buyResurrectionDeal(this.state, {
-        book: node.getAttribute('book') ? Number(node.getAttribute('book')) : this.book,
-        section: node.getAttribute('section'), text: node.getAttribute('text') || (node.textContent || '').trim(),
-        god: node.getAttribute('god'), cost: 0, supplemental: boolAttr(node.getAttribute('supplemental')),
-      });
-      this.state.setFlag(key, false);
-      return 'Resurrection deal arranged.';
-    }
-    return applyEffect(node, this.state, {});
-  }
 
   // A short label for a "choose one" reward button: its own words, else the
   // blessing/curse/disease/poison it grants or lifts.

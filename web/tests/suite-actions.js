@@ -1337,6 +1337,39 @@ export async function run(ctx) {
       ok('task119: groupRollDefers a hidden cache lock still defers (task 38)', rules.groupRollDefers(parse('<tick special="lock" cache="bet" hidden="t"/>')) === true);
     }
 
+    // --- task 119 (phase 3): grantChosenReward — the choose-one award transaction -----
+    {
+      const g = GameState.create({ name:'GR119', gender:'m', profession:'Warrior', book:1, adv });
+      g.data.items = [];
+
+      g.setFlag('m', true);
+      const note1 = eng.grantChosenReward(g, parse('<gain flag="m" blessing="luck">Luck</gain>'), 'm', 1);
+      ok('task119: grantChosenReward effect reward applies and consumes its own flag',
+         g.hasBlessing('luck') && g.getFlag('m') === false, `note=${note1}`);
+
+      g.setFlag('m', true);
+      eng.grantChosenReward(g, parse('<item flag="m" name="ink sac" quantity="2"/>'), 'm', 4);
+      ok('task119: grantChosenReward quantity= grants that many (§4.634, task 94)',
+         g.findItems('ink sac').length === 2 && g.getFlag('m') === false);
+
+      g.setFlag('m', true);
+      const before = g.data.shards;
+      eng.grantChosenReward(g, parse('<item flag="m" name="500 Shards"/>'), 'm', 1);
+      ok('task119: grantChosenReward a currency award banks its value', g.data.shards === before + 500 && g.getFlag('m') === false);
+
+      g.setFlag('m', true);
+      const note2 = eng.grantChosenReward(g, parse('<resurrection flag="m" section="100" god="Elnir">deal</resurrection>'), 'm', 3);
+      ok('task119: grantChosenReward arranges a resurrection deal (book defaulted)',
+         g.hasResurrection() && g.data.resurrections[0].book === 3 && g.data.resurrections[0].section === '100' && g.getFlag('m') === false
+         && /resurrection deal arranged/i.test(note2));
+
+      // deduped through the engine applier: an affliction child now bites on pickup
+      g.setFlag('m', true);
+      eng.grantChosenReward(g, parse('<item flag="m" name="cursed idol"><curse name="Idol Curse" ability="charisma" amount="-1"/></item>'), 'm', 1);
+      ok('task119: grantChosenReward item award routes through applyItemAward (curse bites on pickup)',
+         g.findItems('cursed idol').length === 1 && g.hasCurse('Idol Curse'));
+    }
+
     // --- task 113: <lose item="?" bonus="N"> enforces the bonus= filter ---
     // §4.456's Tambu offering routes its +2/+3 gifts through <lose item="?" bonus=…
     // price=…>; the bonus filter must be honoured so only a genuinely +2/+3 item can be
