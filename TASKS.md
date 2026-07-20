@@ -30,7 +30,7 @@ the tasks were filed, not work order).
 - [x] 121. The documented `powershell` build command no longer parses `build-data.ps1` on Windows PowerShell 5.1
 - [x] 119. Re-establish the rules/view boundary and split the 4,060-line renderer by responsibility
 - [x] 146. A roll's dice animation leaves other controls live — the pending result lands on the wrong visit
-- [ ] 147. Navigation has no in-flight guard — a double-click double-runs leave hooks and entry effects
+- [x] 147. Navigation has no in-flight guard — a double-click double-runs leave hooks and entry effects
 - [x] 155. One-shot memos are written after the state mutation they guard — a reload repeats rests, buys, and failed rolls
 - [x] 156. A mid-visit reload silently drops armed `<tick special="attack|defence">` bonuses and penalties
 - [ ] 157. Item-name glob patterns never match — §4.482/§6.201 unreachable, §6.144's trophy head never taken

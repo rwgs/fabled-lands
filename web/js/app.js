@@ -588,6 +588,7 @@ async function navigate(book, section) {
   const sectionEl = await data.getSection(book, section);
   if (!sectionEl) {
     toast(`Section ${section} not found in Book ${book}.`, 'warn');
+    if (story) story._navInFlight = false; // begin() won't run to release the guard (task 147)
     return;
   }
   state.goTo(book, section);

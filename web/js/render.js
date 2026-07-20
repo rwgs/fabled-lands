@@ -158,6 +158,14 @@ export class Story {
     // (gone ashore) exempts nothing, so every at-large ship docks and the voyage ends. (task 81)
     const rawNavigate = opts.navigate;
     this.navigate = (book, section) => {
+      // In-flight guard (task 147): rawNavigate (app.navigate) awaits a possibly-slow
+      // cross-book section fetch before begin() completes. Without this, a second click
+      // in that window would run the leave hooks again (the first pass consumes
+      // _sailExempt, so the second re-docks the ship just sailed), double-count the turn
+      // in state.goTo, and re-apply the destination's on-entry effects. Ignore re-entrant
+      // navigations until begin() (or a failed fetch) releases the flag.
+      if (this._navInFlight) return;
+      this._navInFlight = true;
       // Snapshot the section being LEFT as the one-level return frame BEFORE the leave
       // hooks / rawNavigate mutate anything — so a <return> in the destination restores
       // this exact visit (position, section-local vars, render memo) rather than
@@ -193,6 +201,9 @@ export class Story {
     // into the return frame so, on <return>, that one source action is marked spent
     // (crossed off) unless it carries revisit="t". (task 110)
     this._pendingSourceNode = null;
+    // Set by navigate() for the duration of a transition and released by begin() (or a
+    // failed fetch); blocks a re-entrant (double-click) navigation. (task 147)
+    this._navInFlight = false;
   }
 f
   // Snapshot the current visit so a later <return> can restore it (task 110). Null
@@ -235,6 +246,7 @@ f
 
   /** Begin a fresh visit of a section element. */
   begin(sectionEl, book, section) {
+    this._navInFlight = false; // the transition has arrived — release the navigate guard (task 147)
     this.sectionEl = sectionEl;
     this.book = book;
     this.section = section;

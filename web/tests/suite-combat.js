@@ -72,6 +72,30 @@ export async function run(ctx) {
     Array.from(c176b.querySelectorAll('.goto')).find((g) => /\b85\b/.test(g.textContent)).click();
     ok('§1.176 sailing on keeps the ship at large and goes to 85', sh176b.docked === null && nav176b && String(nav176b.sec) === '85');
 
+    // --- task 147: a double-clicked goto must not re-run the leave hooks ---------------
+    // navigate() runs the leave hooks (applyTodock) synchronously, then app.navigate awaits
+    // a possibly-slow fetch before begin() completes. A second click in that window would
+    // run the hooks again — the first pass consumes _sailExempt, so the second re-docks the
+    // ship just sailed. The in-flight guard ignores the re-entrant call until begin() clears
+    // it. Stub navigate here never begins (mimicking a fetch still in flight).
+    {
+      const gdc = GameState.create({ name:'DBL', gender:'m', profession:'Warrior', book:1, adv });
+      const owndc = gdc.addShip({ type:'barque', crew:'average', cargo:[], docked:null });
+      gdc.sailShip(owndc.id);
+      const cdc = document.createElement('div');
+      let rawCalls = 0;
+      const storyDc = new Story(cdc, gdc, { navigate(){ rawCalls++; }, onDeath(){}, notify(){} });
+      storyDc.begin(await data.getSection(1, '176'), 1, '176'); // sets sectionTodock=Yellowport
+      storyDc._sailExempt = owndc.id;   // as the sail click would: keep this ship at large
+      storyDc.navigate(1, '85');         // leave once — hooks run with the exemption held
+      storyDc.navigate(1, '85');         // double-click while in flight — must be ignored
+      ok('§147 a double-clicked goto runs the leave hooks once (sailed ship stays at large)',
+         rawCalls === 1 && owndc.docked === null, `rawCalls=${rawCalls} docked=${owndc.docked}`);
+      storyDc.begin(await data.getSection(1, '85'), 1, '85'); // arriving releases the guard
+      storyDc.navigate(1, '90');         // now allowed again
+      ok('§147 begin() releases the guard so the next navigation runs', rawCalls === 2, `rawCalls=${rawCalls}`);
+    }
+
     // --- task 89: ONE current-vessel rule (dock / voyage / none) -----------------------
     { // block-scoped (task 82): local consts cannot collide with the rest of run()
       // Two ships at different docks: conditions and trade see only the LOCAL vessel.
