@@ -1480,14 +1480,19 @@ export function buyResurrectionDeal(state, { book, section, text, god, cost = 0,
   state.addResurrection({ book, section, text, god: god || null, supplemental: !!supplemental });
 }
 
-/** Cash in the earliest resurrection deal on death: consume it and revive at half
- *  the character's maximum Stamina (min 1). Returns the deal's { book, section }
- *  to send the player to, or null if there was none. The revive rule lives here,
- *  not in the app layer (task 34). */
-export function reviveWithResurrection(state) {
-  const res = state.data.resurrections.shift();
-  if (!res) return null;
-  state.data.stamina = Math.max(1, Math.floor(state.data.staminaMax / 2));
+/** Cash in a resurrection deal on death: consume the chosen deal (default the earliest)
+ *  and revive at FULL Stamina. JaFL's Resurrection.activate() "heals the player entirely"
+ *  and §1.640 says "your Stamina is back to its normal score", so restore to the EFFECTIVE
+ *  max (incl. any aura headroom — task 158), not half. `dealIndex` selects which held deal
+ *  to spend when several coexist (a standard deal plus a supplemental boon — tasks 98, 159);
+ *  JaFL lets the player choose. Returns the deal's { book, section }, or null if none. The
+ *  revive rule lives here, not in the app layer (task 34). */
+export function reviveWithResurrection(state, dealIndex = 0) {
+  const list = state.data.resurrections;
+  if (!list || !list.length) return null;
+  const i = Number.isInteger(dealIndex) && dealIndex >= 0 && dealIndex < list.length ? dealIndex : 0;
+  const [res] = list.splice(i, 1);
+  state.data.stamina = state.effectiveStaminaMax();
   state.changed();
   return { book: res.book, section: res.section };
 }

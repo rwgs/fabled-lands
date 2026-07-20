@@ -35,7 +35,7 @@ the tasks were filed, not work order).
 - [x] 156. A mid-visit reload silently drops armed `<tick special="attack|defence">` bonuses and penalties
 - [x] 157. Item-name glob patterns never match — §4.482/§6.201 unreachable, §6.144's trophy head never taken
 - [x] 158. Two written-max Stamina clamps still strip aura headroom (task 124's remaining siblings)
-- [ ] 159. Resurrection revives at half Stamina — the book and JaFL both say full
+- [x] 159. Resurrection revives at half Stamina — the book and JaFL both say full
 
 **LOW**
 

@@ -586,12 +586,34 @@ export async function run(ctx) {
     const gr = GameState.create({ name:'R', gender:'f', profession:'Priest', book:1, adv }); gr.data.shards=100;
     eng.buyResurrectionDeal(gr, { book:2, section:'50', text:'a deal', god:'Elnir', cost:30 });
     ok('resurrection: charges cost + records deal', gr.data.shards===70 && gr.hasResurrection() && gr.data.resurrections[0].section==='50', `sh=${gr.data.shards}`);
-    // reviveWithResurrection (task 34): consume the deal, revive at half max Stamina, return target.
+    // reviveWithResurrection (tasks 34, 159): consume the deal, revive to FULL Stamina
+    // (JaFL heals entirely; §1.640 "your Stamina is back to its normal score"), return target.
     gr.data.staminaMax = 20; gr.data.stamina = 0;
     const revTarget = eng.reviveWithResurrection(gr);
-    ok('task34: revive consumes the deal + heals to half max + returns target',
-       revTarget && revTarget.book===2 && revTarget.section==='50' && gr.data.stamina===10 && !gr.hasResurrection(),
+    ok('task159: revive consumes the deal + heals to FULL max + returns target',
+       revTarget && revTarget.book===2 && revTarget.section==='50' && gr.data.stamina===20 && !gr.hasResurrection(),
        `t=${JSON.stringify(revTarget)} st=${gr.data.stamina} has=${gr.hasResurrection()}`);
-    ok('task34: revive with no deal returns null and leaves Stamina', eng.reviveWithResurrection(gr) === null && gr.data.stamina === 10);
+    ok('task159: revive with no deal returns null and leaves Stamina', eng.reviveWithResurrection(gr) === null && gr.data.stamina === 20);
+
+    // task 159: revive heals to the EFFECTIVE max (aura holder returns to the full raised
+    // total, not the written max/half), and the player may CHOOSE which of several deals to
+    // spend (a standard deal + a supplemental boon coexist — task 98).
+    {
+      const ring159 = { id:'ring159', kind:'item', name:'ring of ultimate power', bonus:0, ability:null, tags:[], effects:[{ type:'aura', ability:'Stamina', bonus:10, text:'+10 Stamina' }], group:null, wielded:false, worn:false };
+      const gAura = new GameState(sanitizeData(JSON.parse(JSON.stringify({ schema:3, abilities:{ combat:5 }, staminaMax:20, stamina:0, items:[ring159], resurrections:[{ book:1, section:'640', god:null }], book:5, section:'564' }))));
+      eng.reviveWithResurrection(gAura);
+      ok('task159: revive heals an aura holder to the effective max (30, not 20 or 15)', gAura.data.stamina === 30, `st=${gAura.data.stamina}`);
+
+      const gChoose = GameState.create({ name:'C', gender:'m', profession:'Warrior', book:1, adv });
+      gChoose.data.staminaMax = 12; gChoose.data.stamina = 0;
+      gChoose.addResurrection({ book:6, section:'355', god:null, supplemental:true }); // supplemental, bought first
+      gChoose.addResurrection({ book:2, section:'50', god:'Elnir' });                  // standard, added on top
+      ok('task159 setup: both deals coexist with the supplemental at index 0',
+         gChoose.data.resurrections.length === 2 && gChoose.data.resurrections[0].supplemental === true);
+      const chosen = eng.reviveWithResurrection(gChoose, 1); // spend the standard deal, keep the supplemental
+      ok('task159: the chosen deal is consumed and the others are kept',
+         chosen && chosen.section === '50' && gChoose.data.resurrections.length === 1 && gChoose.data.resurrections[0].section === '355',
+         `chosen=${JSON.stringify(chosen)} left=${JSON.stringify(gChoose.data.resurrections)}`);
+    }
 
 }

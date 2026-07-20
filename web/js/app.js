@@ -669,7 +669,21 @@ async function handleDeath() {
   const choice = await modal({ title: 'You have died', body, buttons, dismissable: false });
   deathShown = false;
   if (choice === 'res' && res) {
-    const target = reviveWithResurrection(state); // revive rule lives in engine.js (task 34)
+    // With more than one deal arranged (a standard deal + a supplemental boon), JaFL lets
+    // the player CHOOSE which to call upon; the others remain for later (task 159).
+    let dealIndex = 0;
+    const deals = state.data.resurrections;
+    if (deals.length > 1) {
+      const dealLabel = (r) => r.god ? `Pact with ${escapeHtml(r.god)}` : `Deal (Book ${r.book} §${escapeHtml(String(r.section))})`;
+      const pick = await modal({
+        title: 'Call upon which resurrection?',
+        body: 'You have more than one resurrection arranged. Which do you call upon? The others remain for later.',
+        buttons: deals.map((r, i) => ({ label: dealLabel(r), value: i, primary: i === 0 })),
+        dismissable: false,
+      });
+      dealIndex = typeof pick === 'number' ? pick : 0;
+    }
+    const target = reviveWithResurrection(state, dealIndex); // revive rule lives in engine.js (tasks 34, 159)
     // Route through Story's single navigation entry point so the leave hooks run and no
     // stale return frame lingers for the resurrection section's <return> (task 115).
     if (target) { if (story) story.navigate(target.book, target.section); else navigate(target.book, target.section); }

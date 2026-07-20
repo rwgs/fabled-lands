@@ -1307,7 +1307,7 @@ export async function run(ctx) {
       ok('task98: re-entering §351 keeps exactly one deal (standard replacement)', g351.data.resurrections.length === 1, `res=${g351.data.resurrections.length}`);
 
       // §3.123 death-revival group: erase possessions/money/ship, consume the deal,
-      // revive at half max Stamina and turn to the deal's own section.
+      // revive to FULL Stamina (task 159) and turn to the deal's own section.
       const g123 = GameState.create({ name:'T123', gender:'m', profession:'Warrior', book:3, adv });
       g123.data.items = []; g123.addItem(makeItem('item','loot1')); g123.addItem(makeItem('item','loot2'));
       g123.data.shards = 500; g123.data.staminaMax = 20; g123.data.stamina = 1;
@@ -1321,7 +1321,7 @@ export async function run(ctx) {
       ok('task98: §123 revival group renders when a deal exists', !!grp123, `groups=${c123.querySelectorAll('.group-action').length}`);
       grp123.click();
       ok('task98: §123 revival erases possessions, money and ship', g123.itemCount() === 0 && g123.data.shards === 0 && g123.data.ships.length === 0, `items=${g123.itemCount()} sh=${g123.data.shards} ships=${g123.data.ships.length}`);
-      ok('task98: §123 revival consumes the deal and revives at half max Stamina', g123.data.resurrections.length === 0 && g123.data.stamina === 10, `res=${g123.data.resurrections.length} stam=${g123.data.stamina}`);
+      ok('task98: §123 revival consumes the deal and revives to full Stamina (task 159)', g123.data.resurrections.length === 0 && g123.data.stamina === 20, `res=${g123.data.resurrections.length} stam=${g123.data.stamina}`);
       ok('task98: §123 revival turns to the deal section (3/351)', nav123 && nav123.b === 3 && String(nav123.s) === '351', JSON.stringify(nav123));
     }
 
