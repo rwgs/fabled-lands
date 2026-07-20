@@ -1263,6 +1263,53 @@ export async function run(ctx) {
          (() => { const v = gate('<choice section="9" shards="5" currency="Mithral">x</choice>'); return v.coinLabel === 'Mithral' && v.payment.foreignCoin === true && v.reasons.join() === 'needs 5 Mithral'; })());
     }
 
+    // --- task 119 (phase 3): branchPlan — success/failure/outcomes resolution --------
+    {
+      const g = GameState.create({ name:'BP119', gender:'m', profession:'Warrior', book:1, adv });
+      const ctx = visit.newCtx();
+      const plan = (xml, roll, c = ctx) => rules.branchPlan(g, c, parse(xml), roll);
+
+      ok('task119: branchPlan success waits for its roll', plan('<success section="9"/>', null).kind === 'skip');
+      ok('task119: branchPlan success reveals on a successful roll', plan('<success section="9"/>', { success: true }).kind === 'reveal');
+      ok('task119: branchPlan failure reveals on a failed roll', plan('<failure section="9"/>', { success: false }).kind === 'reveal');
+      ok('task119: branchPlan ability= filters the chosen ability (task 109)',
+         plan('<success ability="sanctity" section="9"/>', { success: true, ability: 'magic' }).kind === 'skip'
+         && plan('<success ability="magic" section="9"/>', { success: true, ability: 'magic' }).kind === 'reveal');
+
+      // var-keyed branches wait for a WRITE this visit, never a stale global (task 50)
+      g.setVar('s', 3);
+      ok('task119: branchPlan var branch pends until the var is written this visit',
+         plan('<success var="s" section="9"/>', null).kind === 'skip');
+      const wrote = visit.newCtx(); wrote.wroteVars.add('s');
+      ok('task119: branchPlan var branch resolves on sign once written',
+         plan('<success var="s" section="9"/>', null, wrote).kind === 'reveal'
+         && plan('<failure var="s" section="9"/>', null, wrote).kind === 'skip');
+
+      ok('task119: branchPlan lone outcome flag= needs no roll (book4/456)',
+         (() => { g.setFlag('of', true); return plan('<outcome flag="of" section="9"/>', null).kind === 'reveal'; })());
+      ok('task119: branchPlan lone outcome range= waits for the roll then matches',
+         plan('<outcome range="1-6" section="9"/>', null).kind === 'skip'
+         && plan('<outcome range="1-6" section="9"/>', { total: 4 }).kind === 'reveal'
+         && plan('<outcome range="1-6" section="9"/>', { total: 9 }).kind === 'skip');
+      ok('task119: branchPlan a held blessing vetoes a guarded outcome (task 108)',
+         (() => { g.addBlessing('storm'); return plan('<outcome range="1-6" blessing="storm" section="9"/>', { total: 4 }).kind === 'skip'; })());
+
+      const table = parse('<outcomes><outcome range="1-2" section="5"/><outcome range="3-6" section="7"/></outcomes>');
+      ok('task119: branchPlan outcomes table pends without the roll',
+         (() => { const v = rules.branchPlan(g, ctx, table, null); return v.kind === 'table' && v.reveal === null; })());
+      ok('task119: branchPlan outcomes table reveals the single matching row',
+         (() => { const v = rules.branchPlan(g, ctx, table, { total: 4 }); return v.kind === 'table' && v.reveal === table.children[1] && v.index === 1; })());
+
+      // codeword-dispatch table: resolves with no roll; its bare default is the catch-all (task 122)
+      const cwTable = parse('<outcomes><outcome codeword="Zealot" section="5"/><outcome section="7"/></outcomes>');
+      ok('task119: branchPlan codeword-dispatch default resolves roll-lessly (task 122)',
+         (() => { const v = rules.branchPlan(g, ctx, cwTable, null); return v.kind === 'table' && v.reveal === cwTable.children[1]; })());
+      ok('task119: branchPlan codeword row wins when held',
+         (() => { g.addCodeword('Zealot'); const v = rules.branchPlan(g, ctx, cwTable, null); return v.reveal === cwTable.children[0]; })());
+
+      ok('task119: branchPlan non-branch element → prose', plan('<p>words</p>', null).kind === 'prose');
+    }
+
     // --- task 113: <lose item="?" bonus="N"> enforces the bonus= filter ---
     // §4.456's Tambu offering routes its +2/+3 gifts through <lose item="?" bonus=…
     // price=…>; the bonus filter must be honoured so only a genuinely +2/+3 item can be

@@ -8,7 +8,7 @@
 
 import {
   evaluateCondition, applyEffect, applyEffectBody, boolAttr, resolveValue,
-  rollDifficulty, rollRankCheck, rollTraining, rollDice, matchRange, childAdjustment,
+  rollDifficulty, rollRankCheck, rollTraining, rollDice, childAdjustment,
   applyRest, buyResurrectionDeal, reviveWithResurrection, abilityChoiceOptions, readItemEffects,
   whileLoopDone, useItemEffect, losePaymentPlan,
 } from './engine.js';
@@ -20,9 +20,9 @@ import { ABILITY_LABEL } from './rules.js';
 import { bookTitle, availableBooks, loadBook, getSection } from './data.js';
 import { animateDice, modal } from './ui.js';
 import {
-  computeOutcomeBlessings, blessingVeto,
+  computeOutcomeBlessings,
   blessingSpendForGoto, blessingSpendForReroll, ownsSoleLinkedBlessing,
-  ITEM_FAMILY_TAGS, classifyPassive, choiceGate,
+  ITEM_FAMILY_TAGS, classifyPassive, choiceGate, branchPlan,
   flagGate as flagGateRule, isSpentSource as isSpentSourceRule,
   linkedRewards as linkedRewardsRule, isCounterReward as isCounterRewardRule,
   isChooseOne as isChooseOneRule, isPricedItemAward as isPricedItemAwardRule,
@@ -2392,133 +2392,29 @@ export class Story {
   }
 
   // ---- branches (success/failure/outcomes) ---------------------------------
-  // A branch "succeeds" either from the roll's success flag, or — when it
-  // carries its own `var` — from that variable's sign (>0 = success), which is
-  // how the books express computed outcomes (e.g. rank checks via a `<set>`).
-  branchSuccess(node, roll) {
-    if (node.hasAttribute('var')) return this.state.getVar(node.getAttribute('var')) > 0;
-    return roll ? !!roll.success : false;
-  }
-
-  // Is a branch ready to activate? A var-keyed branch waits until that var has been
-  // WRITTEN this visit — by a roll or an active <set> (ctx.wroteVars) — never on a
-  // stale/unset global (task 50). A plain (roll-fed) branch waits for its roll. This
-  // stops a `<failure var="s">` firing on entry with s=0 (or a leftover s>0).
-  branchResolved(node, roll) {
-    if (node.hasAttribute('var')) return this.ctx.wroteVars.has(node.getAttribute('var'));
-    return !!roll;
-  }
-
-  // Does a success/failure branch's ability= match the feeding roll's chosen
-  // ability? (task 109) §2.37 offers "SANCTITY or MAGIC (your choice)" then routes a
-  // SANCTITY success →60 and a MAGIC success →129, so the success boolean alone is
-  // ambiguous. A node with no ability= is unconstrained (single-ability rolls and
-  // var-keyed branches are unaffected); when the feeding roll carries no chosen
-  // ability, don't over-filter.
-  branchAbilityMatches(node, roll) {
-    const ab = node.getAttribute('ability');
-    if (ab == null || ab === '') return true;
-    if (!roll || !roll.ability) return true;
-    const want = String(roll.ability).toLowerCase();
-    return ab.split('|').map((a) => a.trim().toLowerCase()).includes(want);
-  }
-
+  // Resolution — which branch is pending, matching, or blessing-vetoed — lives in
+  // branchPlan (render-rules.js, task 119); the view reveals what the plan says.
   renderBranch(container, node, path, activeRoll) {
-    const tag = node.tagName.toLowerCase();
     const roll = activeRoll ? this.ctx.rolls.get('roll@' + activeRoll.path) : null;
-
-    if (tag === 'success' || tag === 'failure') {
-      if (!this.branchResolved(node, roll)) return; // wait until the feeding roll / var write
-      const want = tag === 'success';
-      if (this.branchSuccess(node, roll) === want && this.branchAbilityMatches(node, roll)) this.revealBranch(container, node, path);
-      return;
-    }
-
-    // A lone <outcome> (e.g. inside a <choices> table): reveal it when its
-    // flag/range/var/codeword condition matches. flag= needs no roll (it's set by
-    // a paid offering — book4/456); range/var need the roll (or var write) first.
-    if (tag === 'outcome') {
-      const flag = node.getAttribute('flag');
-      let match;
-      if (flag != null) match = this.state.getFlag(flag);
-      // A codeword= outcome is a roll-less dispatch — "which codeword do you have?"
-      // (§4.457's Initiate row) — so match it against live codewords before the roll
-      // gate, like flag= (task 122). A same-visit hidden tick has already applied
-      // (it renders above the table), so an initiate ticked this visit counts.
-      else if (node.getAttribute('codeword') != null) match = node.getAttribute('codeword').split(/[|,]/).some((w) => this.state.hasCodeword(w.trim()));
-      else if (!this.branchResolved(node, roll)) return; // wait for the roll / var write
-      else if (node.getAttribute('range') != null) match = matchRange(node.getAttribute('range'), node.getAttribute('var') ? this.state.getVar(node.getAttribute('var')) : roll.total);
-      else if (node.hasAttribute('var')) match = this.branchSuccess(node, roll);
-      else match = true;
-      // A held blessing vetoes a blessing-guarded outcome (task 108): the range
-      // matched, but Safety from Storms carries the traveller past the storm, so the
-      // dangerous redirect is not offered. The blessing is spent on the section's
-      // sibling branch, not here, so nothing is consumed.
-      if (match && blessingVeto(this.state, node)) return;
-      if (match) this.revealBranch(container, node, path);
-      return;
-    }
-
-    if (tag === 'outcomes') {
-      const kids = Array.from(node.children);
-      const branches = kids.filter((c) => /^(outcome|success|failure)$/.test(c.tagName.toLowerCase()));
-      const choiceKids = kids.filter((c) => c.tagName.toLowerCase() === 'choice');
-
-      // A roll-less codeword-dispatch table — "which of these codewords do you
-      // have?" (§4.2/§4.184/§2.301) — carries no <random>, so activeRoll stays null
-      // and the branches must resolve against live state instead of waiting forever
-      // (task 122). It qualifies when every keyed (non-default) branch is codeword=.
-      // A bare default row then resolves too, as the catch-all; any range/success/
-      // failure/var branch marks the table roll-fed, so its default keeps waiting.
-      const isDefaultOutcome = (c) => c.tagName.toLowerCase() === 'outcome'
-        && c.getAttribute('codeword') == null && c.getAttribute('range') == null
-        && c.getAttribute('flag') == null && !c.hasAttribute('var');
-      const keyed = branches.filter((c) => !isDefaultOutcome(c));
-      const codewordDispatch = keyed.length > 0 && keyed.every((c) => c.getAttribute('codeword') != null);
-
-      // Reveal the single matching branch once it is resolved — a roll for plain/
-      // range branches, or a written var (roll OR active <set>) for var-keyed ones,
-      // so a set-sentinel outcome (book3/43 Chill → success) resolves with no roll
-      // while an unwritten var stays pending (task 50). Codeword branches (and a
-      // default in a codeword-dispatch table) resolve with no roll (task 122).
-      for (let i = 0; i < branches.length; i++) {
-        const c = branches[i];
-        const resolved = c.getAttribute('codeword') != null
-          || (isDefaultOutcome(c) && codewordDispatch)
-          || this.branchResolved(c, roll);
-        if (!resolved) continue;
-        const ctag = c.tagName.toLowerCase();
-        let match = false;
-        if (ctag === 'success') match = this.branchSuccess(c, roll) === true && this.branchAbilityMatches(c, roll);
-        else if (ctag === 'failure') match = this.branchSuccess(c, roll) === false && this.branchAbilityMatches(c, roll);
-        else {
-          const range = c.getAttribute('range');
-          const cw = c.getAttribute('codeword');
-          const val = c.getAttribute('var') ? this.state.getVar(c.getAttribute('var')) : (roll ? roll.total : 0);
-          if (range != null) match = matchRange(range, val);
-          else if (cw) match = cw.split(/[|,]/).some((w) => this.state.hasCodeword(w.trim()));
-          else match = true; // default
-        }
-        // A held blessing vetoes this branch (task 108): skip it so neither the
-        // dangerous redirect is revealed nor the roll gate's matchedOutcome is set —
-        // the section's sibling <lose blessing>/reroll path then resolves. Ranges are
-        // exclusive, so no other branch fills in (the traveller is protected).
-        if (match && blessingVeto(this.state, c)) continue;
-        if (match) {
+    const plan = branchPlan(this.state, this.ctx, node, roll);
+    switch (plan.kind) {
+      case 'skip': return;
+      case 'reveal': this.revealBranch(container, node, path); return;
+      case 'table': {
+        if (plan.reveal) {
           // Record the matched outcome for the roll gate: if it carries its own
           // redirect (a "get lost" <goto>), applyRollGate keeps the onward choices
           // suppressed so only that redirect is offered (§1.278 → 82). (task 104)
-          if (this.rollGate && node === this.rollGate.outcomesNode) this.rollGate.matchedOutcome = c;
-          this.revealBranch(container, c, path + '.o' + i);
-          break;
+          if (this.rollGate && node === this.rollGate.outcomesNode) this.rollGate.matchedOutcome = plan.reveal;
+          this.revealBranch(container, plan.reveal, path + '.o' + plan.index);
         }
+        // Always-available alternatives inside the table (e.g. "or don't try").
+        const choiceKids = Array.from(node.children).filter((c) => c.tagName.toLowerCase() === 'choice');
+        if (choiceKids.length) this.renderChoices(container, node, path, null, choiceKids);
+        return;
       }
-      // Always-available alternatives inside the table (e.g. "or don't try").
-      if (choiceKids.length) this.renderChoices(container, node, path, null, choiceKids);
-      return;
+      default: if (!roll) this.appendChildren(container, node, path);
     }
-
-    if (!roll) this.appendChildren(container, node, path);
   }
 
   revealBranch(container, node, path) {

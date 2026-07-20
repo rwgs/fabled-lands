@@ -7,7 +7,7 @@
 // attributes / running querySelectorAll on it is fine (the same thing engine.js does);
 // only DOM *construction* belongs in the view. Unit-tested headlessly.
 
-import { boolAttr, isDiceExpr, resolveValue } from './engine.js';
+import { boolAttr, isDiceExpr, resolveValue, matchRange } from './engine.js';
 import { normalize, currencyAward, isShardsCurrency } from './state.js';
 import { availableBooks } from './data.js';
 import { isRollGate, isDeferredEscapeClear, isDeferredTagCleanup, aggregateFightOutcome } from './render-gates.js';
@@ -291,6 +291,131 @@ export function choiceGate(state, node, view) {
   if (isSpentSource(view.ctx, node)) reasons.push('already taken');
 
   return { reasons, isSail, cost, coinLabel, payment: { pay, cost, currency, foreignCoin, item: itemReq, itemTags } };
+}
+
+// ---- branch resolution (success/failure/outcomes — tasks 50/104/108/109/122) --
+
+// A branch "succeeds" either from the roll's success flag, or — when it
+// carries its own `var` — from that variable's sign (>0 = success), which is
+// how the books express computed outcomes (e.g. rank checks via a `<set>`).
+export function branchSuccess(state, node, roll) {
+  if (node.hasAttribute('var')) return state.getVar(node.getAttribute('var')) > 0;
+  return roll ? !!roll.success : false;
+}
+
+// Is a branch ready to activate? A var-keyed branch waits until that var has been
+// WRITTEN this visit — by a roll or an active <set> (ctx.wroteVars) — never on a
+// stale/unset global (task 50). A plain (roll-fed) branch waits for its roll. This
+// stops a `<failure var="s">` firing on entry with s=0 (or a leftover s>0).
+export function branchResolved(ctx, node, roll) {
+  if (node.hasAttribute('var')) return ctx.wroteVars.has(node.getAttribute('var'));
+  return !!roll;
+}
+
+// Does a success/failure branch's ability= match the feeding roll's chosen
+// ability? (task 109) §2.37 offers "SANCTITY or MAGIC (your choice)" then routes a
+// SANCTITY success →60 and a MAGIC success →129, so the success boolean alone is
+// ambiguous. A node with no ability= is unconstrained (single-ability rolls and
+// var-keyed branches are unaffected); when the feeding roll carries no chosen
+// ability, don't over-filter.
+export function branchAbilityMatches(node, roll) {
+  const ab = node.getAttribute('ability');
+  if (ab == null || ab === '') return true;
+  if (!roll || !roll.ability) return true;
+  const want = String(roll.ability).toLowerCase();
+  return ab.split('|').map((a) => a.trim().toLowerCase()).includes(want);
+}
+
+// Resolve a branch element against the feeding roll and live state: the ONE thing the
+// view should do with it this render. `roll` is the resolved roll record (or null).
+//   { kind:'skip' }                 — pending, non-matching, or blessing-vetoed
+//   { kind:'reveal' }               — a success/failure/outcome to reveal
+//   { kind:'table', reveal, index } — an <outcomes> table; reveal is the single
+//                                     matching child (null = none yet), index its position
+//   { kind:'prose' }                — not a branch element (the view renders its words)
+export function branchPlan(state, ctx, node, roll) {
+  const tag = node.tagName.toLowerCase();
+
+  if (tag === 'success' || tag === 'failure') {
+    if (!branchResolved(ctx, node, roll)) return { kind: 'skip' }; // wait until the feeding roll / var write
+    const want = tag === 'success';
+    return branchSuccess(state, node, roll) === want && branchAbilityMatches(node, roll)
+      ? { kind: 'reveal' } : { kind: 'skip' };
+  }
+
+  // A lone <outcome> (e.g. inside a <choices> table): reveal it when its
+  // flag/range/var/codeword condition matches. flag= needs no roll (it's set by
+  // a paid offering — book4/456); range/var need the roll (or var write) first.
+  if (tag === 'outcome') {
+    const flag = node.getAttribute('flag');
+    let match;
+    if (flag != null) match = state.getFlag(flag);
+    // A codeword= outcome is a roll-less dispatch — "which codeword do you have?"
+    // (§4.457's Initiate row) — so match it against live codewords before the roll
+    // gate, like flag= (task 122). A same-visit hidden tick has already applied
+    // (it renders above the table), so an initiate ticked this visit counts.
+    else if (node.getAttribute('codeword') != null) match = node.getAttribute('codeword').split(/[|,]/).some((w) => state.hasCodeword(w.trim()));
+    else if (!branchResolved(ctx, node, roll)) return { kind: 'skip' }; // wait for the roll / var write
+    else if (node.getAttribute('range') != null) match = matchRange(node.getAttribute('range'), node.getAttribute('var') ? state.getVar(node.getAttribute('var')) : roll.total);
+    else if (node.hasAttribute('var')) match = branchSuccess(state, node, roll);
+    else match = true;
+    // A held blessing vetoes a blessing-guarded outcome (task 108): the range
+    // matched, but Safety from Storms carries the traveller past the storm, so the
+    // dangerous redirect is not offered. The blessing is spent on the section's
+    // sibling branch, not here, so nothing is consumed.
+    if (match && blessingVeto(state, node)) return { kind: 'skip' };
+    return match ? { kind: 'reveal' } : { kind: 'skip' };
+  }
+
+  if (tag === 'outcomes') {
+    const branches = Array.from(node.children).filter((c) => /^(outcome|success|failure)$/.test(c.tagName.toLowerCase()));
+
+    // A roll-less codeword-dispatch table — "which of these codewords do you
+    // have?" (§4.2/§4.184/§2.301) — carries no <random>, so the feeding roll stays
+    // null and the branches must resolve against live state instead of waiting forever
+    // (task 122). It qualifies when every keyed (non-default) branch is codeword=.
+    // A bare default row then resolves too, as the catch-all; any range/success/
+    // failure/var branch marks the table roll-fed, so its default keeps waiting.
+    const isDefaultOutcome = (c) => c.tagName.toLowerCase() === 'outcome'
+      && c.getAttribute('codeword') == null && c.getAttribute('range') == null
+      && c.getAttribute('flag') == null && !c.hasAttribute('var');
+    const keyed = branches.filter((c) => !isDefaultOutcome(c));
+    const codewordDispatch = keyed.length > 0 && keyed.every((c) => c.getAttribute('codeword') != null);
+
+    // Reveal the single matching branch once it is resolved — a roll for plain/
+    // range branches, or a written var (roll OR active <set>) for var-keyed ones,
+    // so a set-sentinel outcome (book3/43 Chill → success) resolves with no roll
+    // while an unwritten var stays pending (task 50). Codeword branches (and a
+    // default in a codeword-dispatch table) resolve with no roll (task 122).
+    for (let i = 0; i < branches.length; i++) {
+      const c = branches[i];
+      const resolved = c.getAttribute('codeword') != null
+        || (isDefaultOutcome(c) && codewordDispatch)
+        || branchResolved(ctx, c, roll);
+      if (!resolved) continue;
+      const ctag = c.tagName.toLowerCase();
+      let match = false;
+      if (ctag === 'success') match = branchSuccess(state, c, roll) === true && branchAbilityMatches(c, roll);
+      else if (ctag === 'failure') match = branchSuccess(state, c, roll) === false && branchAbilityMatches(c, roll);
+      else {
+        const range = c.getAttribute('range');
+        const cw = c.getAttribute('codeword');
+        const val = c.getAttribute('var') ? state.getVar(c.getAttribute('var')) : (roll ? roll.total : 0);
+        if (range != null) match = matchRange(range, val);
+        else if (cw) match = cw.split(/[|,]/).some((w) => state.hasCodeword(w.trim()));
+        else match = true; // default
+      }
+      // A held blessing vetoes this branch (task 108): skip it so neither the
+      // dangerous redirect is revealed nor the roll gate's matchedOutcome is set —
+      // the section's sibling <lose blessing>/reroll path then resolves. Ranges are
+      // exclusive, so no other branch fills in (the traveller is protected).
+      if (match && blessingVeto(state, c)) continue;
+      if (match) return { kind: 'table', reveal: c, index: i };
+    }
+    return { kind: 'table', reveal: null, index: -1 };
+  }
+
+  return { kind: 'prose' };
 }
 
 // ---- the passive-effect execution model (task 119 phase 3) -------------------
