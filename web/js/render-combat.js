@@ -9,7 +9,7 @@
 import { makeFight, fightRound, groupFightRound, isDefeated, useWrathBlessing, useDefenceBlessing, rerollAttack } from './combat.js';
 import { applyEffectBody } from './engine.js';
 import { aggregateFightOutcome } from './render-gates.js';
-import { animateDice } from './ui.js';
+import { animateDice, freezeButtons } from './ui.js';
 
 export function renderFight(story, container, node, path) {
   // group="G": all <fight> in the section sharing the id are one simultaneous
@@ -148,8 +148,13 @@ function drawGroupFight(story, box, fights, dmgNode, group, fleeNode = null) {
     attack.className = 'btn-roll';
     attack.textContent = living.length > 1 ? `Attack ${target.name}` : 'Attack';
     attack.addEventListener('click', async () => {
-      controls.querySelectorAll('button').forEach((b) => (b.disabled = true));
+      // Freeze the whole pane and remember the visit: a still-live control clicked
+      // during the ~0.5s animation must not let groupFightRound mutate state after the
+      // player has left this section, nor land it on the next visit's ctx (task 146).
+      const ctxAtClick = story.ctx;
+      freezeButtons(story.root);
       await animateDice(box, true);
+      if (story.ctx !== ctxAtClick) return; // navigated away mid-animation — drop the strike
       groupFightRound(story.state, fights, dmgNode, target);
       // A <fightdamage> body's <goto> (a wound redirect) ends the combat by
       // navigation, exactly as in a single fight. (task 99)
@@ -301,8 +306,13 @@ function drawFight(story, box, fight, node, dmgNode, fleeNode, key, locked = fal
   attack.className = 'btn-roll';
   attack.textContent = 'Attack';
   attack.addEventListener('click', async () => {
-    controls.querySelectorAll('button').forEach((b) => (b.disabled = true));
+    // Freeze the whole pane and remember the visit (task 146): a still-live control
+    // clicked during the ~0.5s animation must not let fightRound mutate state after the
+    // player has left this section, nor land the strike on the next visit's ctx.
+    const ctxAtClick = story.ctx;
+    freezeButtons(story.root);
     await animateDice(box, true);
+    if (story.ctx !== ctxAtClick) return; // navigated away mid-animation — drop the strike
     fightRound(story.state, fight, dmgNode, roundNode);
     // A <fightround>/<fightdamage> body can end the fight by navigation — §5.689
     // "dragged you under" (→7), §4.238 "if you get wounded" (→184). (task 99)

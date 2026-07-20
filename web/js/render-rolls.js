@@ -11,18 +11,29 @@ import {
 } from './engine.js';
 import { branchPlan, blessingSpendForReroll, isRollGate } from './render-rules.js';
 import { renderChoices } from './render-choices.js';
-import { animateDice } from './ui.js';
+import { animateDice, freezeButtons } from './ui.js';
 import { diceWord } from './render-util.js';
 
 // ---- shared widgets --------------------------------------------------------
 
-export function rollButton(label, widget, onRoll) {
+// Every interactive roll (difficulty/random/rankcheck/training) is armed here. The click
+// disables the button, plays the ~0.5s dice animation, then runs onRoll — which reads the
+// visit's ctx (rolls memo, vars). Two guards keep a slow animation from landing the result
+// on the wrong visit (task 146): the pane's controls are frozen so a still-live nav/choice
+// can't be clicked mid-animation (belt), and — should navigation happen anyway via a path
+// the freeze can't reach (a leave hook, app chrome, an Adventure-Sheet detour) — the ctx is
+// captured at click time and, if begin() has since swapped in a new one, onRoll is skipped
+// so the stale result is dropped instead of written into the new section's memo.
+export function rollButton(story, label, widget, onRoll) {
   const btn = document.createElement('button');
   btn.className = 'btn-roll';
   btn.textContent = label;
   btn.addEventListener('click', async () => {
+    const ctxAtClick = story.ctx;
     btn.disabled = true;
+    freezeButtons(story.root);
     await animateDice(widget);
+    if (story.ctx !== ctxAtClick) return; // navigated away mid-animation — drop the stale result
     onRoll();
   });
   return btn;
@@ -164,7 +175,7 @@ export function renderDifficulty(story, container, node, path) {
   // Under the Three Fortunes' difficultyCurse an ability roll uses one die (task 36).
   const diceLabel = diceWord(story.state.data.oneDieRolls ? 1 : 2);
   if (gated && !armed) {
-    const btn = rollButton(`Roll ${diceLabel} + ${spec.split('|')[0].toUpperCase()}`, widget, () => {});
+    const btn = rollButton(story, `Roll ${diceLabel} + ${spec.split('|')[0].toUpperCase()}`, widget, () => {});
     btn.disabled = true; btn.title = 'Pay first to make this roll.';
     widget.appendChild(btn);
     return widget;
@@ -177,7 +188,7 @@ export function renderDifficulty(story, container, node, path) {
     return widget;
   }
   const abLabel = (ability || '').split('|')[0].toUpperCase();
-  const btn = rollButton(`Roll ${diceLabel} + ${abLabel}`, widget, () => {
+  const btn = rollButton(story, `Roll ${diceLabel} + ${abLabel}`, widget, () => {
     if (gated) story.state.setFlag(flag, false); // consume the payment — re-pay to re-attempt
     const res = rollDifficulty(story.state, ability, level, modifier + childAdjustment(node, story.state), mode);
     if (node.getAttribute('var')) { story.state.setVar(node.getAttribute('var'), res.margin); story.ctx.wroteVars.add(node.getAttribute('var')); story.ctx.rolledVars.add(node.getAttribute('var')); }
@@ -237,11 +248,11 @@ export function renderRandom(story, container, node, path) {
       story.ctx.rolls.set(key, res);
     });
   } else if (gated && !armed) {
-    const btn = rollButton(`Roll ${diceWord(dice)}`, widget, () => {});
+    const btn = rollButton(story, `Roll ${diceWord(dice)}`, widget, () => {});
     btn.disabled = true; btn.title = 'Pay first to make this roll.';
     widget.appendChild(btn);
   } else {
-    widget.appendChild(rollButton(`Roll ${diceWord(dice)}`, widget, () => {
+    widget.appendChild(rollButton(story, `Roll ${diceWord(dice)}`, widget, () => {
       if (gated) story.state.setFlag(flag, false); // consume the payment — re-pay to spin again
       const r = rollDice(dice);
       const total = r.total + childAdjustment(node, story.state);
@@ -274,11 +285,11 @@ export function renderRankcheck(story, container, node, path) {
       story.ctx.rolls.set(key, res);
     });
   } else if (gated && !armed) {
-    const btn = rollButton(`Rank check (roll ${diceWord(dice)})`, widget, () => {});
+    const btn = rollButton(story, `Rank check (roll ${diceWord(dice)})`, widget, () => {});
     btn.disabled = true; btn.title = 'Pay first to make this roll.';
     widget.appendChild(btn);
   } else {
-    widget.appendChild(rollButton(`Rank check (roll ${diceWord(dice)})`, widget, () => {
+    widget.appendChild(rollButton(story, `Rank check (roll ${diceWord(dice)})`, widget, () => {
       if (gated) story.state.setFlag(flag, false); // consume the payment
       const res = rollRankCheck(story.state, dice, add, childAdjustment(node, story.state));
       if (node.getAttribute('var')) { story.state.setVar(node.getAttribute('var'), res.margin); story.ctx.wroteVars.add(node.getAttribute('var')); story.ctx.rolledVars.add(node.getAttribute('var')); }
@@ -317,7 +328,7 @@ export function renderTraining(story, container, node, path) {
     story.appendAbilityPicker(widget, abilityChoiceOptions(spec, story.state, false), (ab) => { story.ctx.rolls.set(pickKey, ab); story.rerender(); });
     return widget;
   }
-  widget.appendChild(rollButton(`Train ${ability.toUpperCase()} (roll ${diceWord(dice)})`, widget, () => {
+  widget.appendChild(rollButton(story, `Train ${ability.toUpperCase()} (roll ${diceWord(dice)})`, widget, () => {
     story.ctx.rolls.set(key, rollTraining(story.state, ability, dice, add));
     story.rerender();
   }));

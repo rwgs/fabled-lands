@@ -4,7 +4,13 @@ import { ABILITIES, ABILITY_LABEL, rankTitle, ordinal, SHIP_TYPES, canonShipType
 
 // ---- dice animation --------------------------------------------------------
 export function animateDice(container, small = false) {
-  if (typeof window !== 'undefined' && window.__FL_INSTANT_DICE__) return Promise.resolve();
+  if (typeof window !== 'undefined') {
+    if (window.__FL_INSTANT_DICE__) return Promise.resolve();
+    // Test seam (task 146): a hook returning a promise the test controls, so it can
+    // hold the animation open, swap the visit out, then release — proving a pending
+    // roll/attack result is dropped rather than landing on the new section.
+    if (typeof window.__FL_DICE_GATE__ === 'function') return window.__FL_DICE_GATE__();
+  }
   return new Promise((resolve) => {
     const anim = document.createElement('div');
     anim.className = 'dice-anim' + (small ? ' small' : '');
@@ -26,6 +32,16 @@ export function animateDice(container, small = false) {
       }
     }, 70);
   });
+}
+
+// Disable every button under `container` for the duration of a dice animation (task 146).
+// A roll/attack awaits the ~0.5s animation before it runs; without this a still-live
+// nav/choice elsewhere in the pane could be clicked in that window, swapping the visit
+// out from under the pending result. The next render rebuilds the pane, re-enabling
+// whatever should be live, so this needs no explicit undo.
+export function freezeButtons(container) {
+  if (!container) return;
+  container.querySelectorAll('button').forEach((b) => { b.disabled = true; });
 }
 
 // ---- toasts ----------------------------------------------------------------

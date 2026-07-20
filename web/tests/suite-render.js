@@ -218,6 +218,63 @@ export async function run(ctx) {
        'log='+cFight.querySelectorAll('.fight-log div').length);
     window.__FL_INSTANT_DICE__ = false; // restore for the following tests (re-enabled later where needed)
 
+    // --- task 146: a slow dice animation must not land its result on the wrong visit ---
+    // A roll/attack awaits the ~0.5s dice animation before it runs; if the player leaves
+    // the section in that window, begin() swaps story.ctx and the pending result would be
+    // written into the NEW visit (or mutate state after the player has gone). Hold the
+    // animation open with a controllable gate (INSTANT collapses the window, so tests need
+    // the seam), swap the ctx as navigation does, then release: the result must be dropped.
+    {
+      window.__FL_INSTANT_DICE__ = false;
+      let releaseDice = null;
+      window.__FL_DICE_GATE__ = () => new Promise((res) => { releaseDice = res; });
+      const settle = () => new Promise(r => setTimeout(r, 20));
+
+      // control: released without navigating, the roll still lands normally (proves the
+      // gate seam resolves onRoll — so the negative cases below aren't passing trivially).
+      const gCtl = GameState.create({ name:'RC', gender:'m', profession:'Warrior', book:6, adv });
+      gCtl.data.stamina = 999; gCtl.data.staminaMax = 999;
+      const cCtl = document.createElement('div');
+      const storyCtl = new Story(cCtl, gCtl, { navigate(){}, onDeath(){}, notify(){} });
+      storyCtl.begin(await data.getSection(6,'700'), 6, '700');
+      cCtl.querySelector('.btn-roll').click();            // handler suspends on the gate
+      releaseDice();                                       // finish the animation, no nav
+      await settle();
+      ok('§6.700 roll released in place still lands its result', storyCtl.ctx.rolls.size >= 1,
+         'rolls=' + storyCtl.ctx.rolls.size);
+
+      // roll: navigate away mid-animation → the pending result lands on NO visit.
+      const gRoll = GameState.create({ name:'RS', gender:'m', profession:'Warrior', book:6, adv });
+      gRoll.data.stamina = 999; gRoll.data.staminaMax = 999;
+      const cRoll = document.createElement('div');
+      const storyRoll = new Story(cRoll, gRoll, { navigate(){}, onDeath(){}, notify(){} });
+      storyRoll.begin(await data.getSection(6,'700'), 6, '700');
+      cRoll.querySelector('.btn-roll').click();            // handler suspends on the gate
+      storyRoll.begin(await data.getSection(1,'1'), 1, '1'); // navigation swaps story.ctx
+      const rollCtxAfter = storyRoll.ctx;
+      releaseDice();
+      await settle();
+      ok('a roll resolved after navigating away is dropped, not written to the new visit',
+         rollCtxAfter.rolls.size === 0, 'rolls=' + rollCtxAfter.rolls.size);
+
+      // fight: navigate away mid-animation → the strike is dropped (no log line appended).
+      const gFib = GameState.create({ name:'FB', gender:'m', profession:'Warrior', book:1, adv });
+      gFib.data.stamina = 99; gFib.data.staminaMax = 99;
+      const cFib = document.createElement('div');
+      const storyFib = new Story(cFib, gFib, { navigate(){}, onDeath(){}, notify(){} });
+      storyFib.begin(await data.getSection(1,'105'), 1, '105');
+      const fibFight = [...storyFib.ctx.fights.values()][0];
+      const logBefore = fibFight.log.length;
+      cFib.querySelector('.fight .btn-roll').click();      // Attack — handler suspends on the gate
+      storyFib.begin(await data.getSection(1,'1'), 1, '1'); // navigation swaps story.ctx
+      releaseDice();
+      await settle();
+      ok('an attack resolved after navigating away strikes nothing (no log line)',
+         fibFight.log.length === logBefore, `log=${fibFight.log.length} was=${logBefore}`);
+
+      delete window.__FL_DICE_GATE__;
+    }
+
     // combat terminates
     const fgEl = await data.getSection(1,'105');
     story.begin(fgEl,1,'105');
