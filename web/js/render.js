@@ -21,6 +21,12 @@ import { animateDice, modal } from './ui.js';
 import {
   computeOutcomeBlessings, blessingVeto, isGuardedBlessingLoss,
   blessingSpendForGoto, blessingSpendForReroll, ownsSoleLinkedBlessing,
+  ITEM_FAMILY_TAGS,
+  linkedRewards as linkedRewardsRule, isCounterReward as isCounterRewardRule,
+  isChooseOne as isChooseOneRule, isPricedItemAward as isPricedItemAwardRule,
+  hasVisiblePay as hasVisiblePayRule, isRollGate as isRollGateRule,
+  rewardWasteReason as rewardWasteReasonRule, isOptionalForce as isOptionalForceRule,
+  forcedChoiceGroup as forcedChoiceGroupRule, isEconomicPayment as isEconomicPaymentRule,
 } from './render-rules.js';
 
 const INLINE_STYLE = { b: 'strong', i: 'em', u: 'u', caps: 'span' };
@@ -40,10 +46,8 @@ const TRANSFER_GROUP_WRAP = new Set(['group']);
 // childAdjustment) — never a passive effect. Auto-applying it on view would
 // silently upgrade the crew ("<adjust crew='good'>") or bump codeword counters.
 const PASSIVE_TAGS = new Set(['lose', 'tick', 'gain', 'set', 'curse', 'disease', 'poison', 'adjustmoney']);
-// Reward nodes a "choose one" purchase can offer (task 43 effect rewards + task 63
-// item/resurrection rewards); the item-family subset is what makes a pure barter.
-const ITEM_FAMILY_TAGS = new Set(['item', 'weapon', 'armour', 'tool']);
-const CHOOSE_ONE_TAGS = new Set(['lose', 'tick', 'gain', 'item', 'weapon', 'armour', 'tool', 'resurrection']);
+// ITEM_FAMILY_TAGS / CHOOSE_ONE_TAGS moved to render-rules.js (task 119); ITEM_FAMILY_TAGS
+// is imported back for the award/label views, CHOOSE_ONE_TAGS is used only by isChooseOne.
 
 // Tag-dispatch table for renderElement (task 9): tag → Story method name. Every
 // method has the signature (container, node, path); tags that share a handler are
@@ -1665,21 +1669,8 @@ export class Story {
     return null;
   }
 
-  // Is this <lose> a "spend" the player commits to (Shards/item/cargo/ship), as
-  // opposed to a narrative penalty (Stamina, codeword, blessing…)? Forced only —
-  // an explicit force="f" loss, or a "*" catastrophe (lose all), is not gated.
-  isEconomicPayment(node) {
-    if (node.getAttribute('force') != null && !boolAttr(node.getAttribute('force'), true)) return false;
-    const shards = node.getAttribute('shards');
-    const item = node.getAttribute('item');
-    const hasShards = shards != null && shards !== '*';
-    const hasItem = item != null && item !== '*';
-    const hasCargo = node.getAttribute('cargo') != null && node.getAttribute('cargo') !== '*';
-    const hasShip = boolAttr(node.getAttribute('ship'));
-    // Mixed with a narrative penalty (rare) → let it auto-apply, don't gate.
-    if (node.getAttribute('stamina') != null || node.getAttribute('ability') != null) return false;
-    return hasShards || hasItem || hasCargo || hasShip;
-  }
+  // Rule in render-rules.js (task 119).
+  isEconomicPayment(node) { return isEconomicPaymentRule(node); }
 
   // A forced economic payment: click-to-apply, and (until applied) blocks the rest
   // of the section. Once paid it renders as a quiet "done" note and no longer blocks.
@@ -1798,27 +1789,10 @@ export class Story {
     container.appendChild(box);
   }
 
-  // force="f" marks an OPTIONAL action (JaFL ActionNode defaults force=true); "f"/false
-  // means the player may skip it (task 74).
-  isOptionalForce(node) {
-    const f = node.getAttribute('force');
-    return f != null && !boolAttr(f);
-  }
+  // Rules in render-rules.js (task 119).
+  isOptionalForce(node) { return isOptionalForceRule(node); }
 
-  // A stable "choose one" token for a force="f" node whose siblings are mutually
-  // exclusive, else null (an independent optional action). A ship docks at ONE place,
-  // so every force="f" <set dock=> in a section is one choice (book3/405); a "cross off
-  // one of the following" is two+ force="f" <lose> under a single parent (book6/160).
-  forcedChoiceGroup(node) {
-    const tag = node.tagName.toLowerCase();
-    if (tag === 'set' && node.getAttribute('dock') != null) return 'dock';
-    if (tag === 'lose' && node.parentElement) {
-      const kin = Array.from(node.parentElement.children)
-        .filter((c) => c.tagName.toLowerCase() === 'lose' && this.isOptionalForce(c));
-      if (kin.length >= 2) return node.parentElement; // key the group by its shared parent node
-    }
-    return null;
-  }
+  forcedChoiceGroup(node) { return forcedChoiceGroupRule(node); }
 
   // Render a force="f" optional effect as a once-per-visit opt-in button (task 74). When
   // it belongs to a choose-one group, taking any member locks the untaken ones so exactly
@@ -1851,50 +1825,15 @@ export class Story {
     return btn;
   }
 
-  // The reward nodes linked to a price/flag key: [flag="key"] elements in the
-  // section (the cost carries price="key" instead). Empty/roll-gate keys → none.
-  linkedRewards(key) {
-    if (!this.sectionEl || key == null || key === '') return [];
-    return Array.from(this.sectionEl.querySelectorAll(`[flag="${key}"]`));
-  }
+  // Rules in render-rules.js (task 119).
+  linkedRewards(key) { return linkedRewardsRule(this.sectionEl, key); }
 
-  // A repeatable "add one per payment" reward: a counter tick (<tick name="X"
-  // count|amount=…>). The book idiom "for every 50 Shards you can add one" bumps a
-  // named bonus counter, so paying again should add again (book4/93, book6/117/731).
-  isCounterReward(node) {
-    return node.tagName.toLowerCase() === 'tick'
-      && !!node.getAttribute('name')
-      && (node.getAttribute('count') != null || node.getAttribute('amount') != null);
-  }
+  isCounterReward(node) { return isCounterRewardRule(node); }
 
-  // A "choose one" purchase: a price="key" cost with two or more linked rewards, so
-  // one payment must grant only the picked one — never the whole list (book6/171,
-  // book5/152, book6/690). The rewards may be effect nodes (tick/lose/gain) and/or a
-  // heterogeneous mix that also includes an item/weapon/armour/tool award or a
-  // resurrection deal (book1/597: amber wand | 500 Shards | resurrection). A *pure*
-  // item-family set is left as a barter (book4/634 "give one, take one" — task 43
-  // deliberately excludes it), so a heterogeneous reward (at least one non-item-family
-  // node) is required before an item/resurrection award joins the choose-one path.
-  isChooseOne(key) {
-    const rewards = this.linkedRewards(key);
-    if (rewards.length < 2) return false;
-    if (!rewards.every((n) => CHOOSE_ONE_TAGS.has(n.tagName.toLowerCase()))) return false;
-    return rewards.some((n) => !ITEM_FAMILY_TAGS.has(n.tagName.toLowerCase()));
-  }
+  isChooseOne(key) { return isChooseOneRule(this.sectionEl, key); }
 
-  // A flag-linked item-family award (item/weapon/armour/tool) claimed by arm-then-take:
-  // a linked payment ([price=key] cost) arms the flag, then the award's own Take button
-  // grants it and consumes the flag. Covers the cases isChooseOne excludes — a *single*
-  // priced item reward (§3.346 medallion, §1.342/§4.111 potion of restoration) and a pure
-  // item-family barter (§4.634 "give one, take one") — which otherwise render a free Take
-  // button and grant nothing when paid. Requires a [price=key] cost, so an item that
-  // carries a flag but has no linked payment stays an ordinary always-live take. (task 125)
-  isPricedItemAward(key) {
-    if (key == null || key === '' || !this.sectionEl) return false;
-    if (!this.sectionEl.querySelector(`[price="${key}"]`)) return false;
-    const rewards = this.linkedRewards(key);
-    return rewards.length > 0 && rewards.every((n) => ITEM_FAMILY_TAGS.has(n.tagName.toLowerCase()));
-  }
+  // Rule in render-rules.js (task 119).
+  isPricedItemAward(key) { return isPricedItemAwardRule(this.sectionEl, key); }
 
   // The "choose one" cost button: paying only *arms* the choice (deducts the cost
   // and sets flag key) — the linked reward pick buttons then grant a single reward
@@ -1959,12 +1898,8 @@ export class Story {
     return btn;
   }
 
-  // Is there a player-facing (non-hidden) cost for this choose-one key? A hidden
-  // price arms the choice for free (an earned "choose your reward" — book1/597).
-  hasVisiblePay(key) {
-    if (!this.sectionEl || key == null || key === '') return false;
-    return Array.from(this.sectionEl.querySelectorAll(`[price="${key}"]`)).some((n) => !boolAttr(n.getAttribute('hidden')));
-  }
+  // Rule in render-rules.js (task 119).
+  hasVisiblePay(key) { return hasVisiblePayRule(this.sectionEl, key); }
 
   // Grant one chosen reward and consume the payment (clear its flag). Effect rewards
   // (tick/lose/gain) clear their own flag via applyEffect; an item/weapon/armour/tool
@@ -2034,39 +1969,11 @@ export class Story {
     return 'Choose';
   }
 
-  // Why picking this reward would waste the payment (so the option is disabled): a
-  // blessing you already hold, or a curse/disease/poison "lift" you aren't suffering.
-  rewardWasteReason(node) {
-    const tag = node.tagName.toLowerCase();
-    // A resurrection deal is wasted if one is already arranged (book1/597: "if you
-    // do not have one already"); an item award needs a free carry slot.
-    if (tag === 'resurrection' && this.state.hasResurrection()) return 'You already have a resurrection deal.';
-    if (ITEM_FAMILY_TAGS.has(tag)) {
-      const rawName = node.getAttribute('name') || tag;
-      const isCurrency = tag === 'item' && currencyAward(rawName) != null;
-      if (!isCurrency && this.state.freeSlots() <= 0) return 'No room (12-item carry limit).';
-    }
-    const bl = node.getAttribute('blessing');
-    if (bl && this.state.hasBlessing(bl)) return 'You already have this blessing.';
-    if (tag === 'lose') {
-      const c = node.getAttribute('curse');
-      if (c != null && !this.state.hasCurse(c)) return "You don't have that curse.";
-      const d = node.getAttribute('disease');
-      if (d != null && !this.state.hasDisease(d)) return "You don't have that affliction.";
-      const p = node.getAttribute('poison');
-      if (p != null && !this.state.hasPoison(p)) return "You don't have that affliction.";
-    }
-    return null;
-  }
+  // Rule in render-rules.js (task 119).
+  rewardWasteReason(node) { return rewardWasteReasonRule(this.state, node); }
 
-  // True when a die roll in this section is gated behind the payment keyed `k`:
-  // a <random|rankcheck|difficulty flag="k"> paired with a [price="k"] cost — the
-  // "pay to spin" idiom (book2/157 wheel, book3/314 tavern, book5/674 physician,
-  // book6/171/587 offerings, book6/50/628). (task 30)
-  isRollGate(k) {
-    return !!(k != null && this.sectionEl &&
-      this.sectionEl.querySelector(`random[flag="${k}"], rankcheck[flag="${k}"], difficulty[flag="${k}"]`));
-  }
+  // Rule in render-rules.js (task 119).
+  isRollGate(k) { return isRollGateRule(this.sectionEl, k); }
 
   // The "pay to spin" cost: paying arms the linked <random flag="k"> (sets flag k)
   // but does NOT fire the outcome effects — the roll reveals the single outcome that

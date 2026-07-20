@@ -176,7 +176,7 @@ structure of the books is preserved exactly.
 | `combat.js` | Headless combat resolution — building an enemy, attack rounds, initiative, damage, `<fightdamage>`. No DOM. |
 | `market.js` | Headless economy — buying/selling goods, weapons, armour, ships, cargo, and crew upgrades. No DOM. |
 | `render.js` | Turns a `<section>` tree into interactive DOM and wires all interactions, delegating the actual rules to `engine.js` / `combat.js` / `market.js` / `render-rules.js`. |
-| `render-rules.js` | DOM-free section-render decisions the renderer used to encode inline: blessing veto / spend / guarded-loss rules. No DOM. |
+| `render-rules.js` | DOM-free section-render decisions the renderer used to encode inline: blessing veto / spend / guarded-loss rules, and reward/payment eligibility (choose-one, priced item award, roll-gate, forced/optional actions, reward-waste). No DOM. |
 | `ui.js` | Adventure-Sheet panel, dice animation, modals, toasts. |
 | `app.js` | Bootstrap, screens, routing, character creation, death/resurrection, saves. |
 

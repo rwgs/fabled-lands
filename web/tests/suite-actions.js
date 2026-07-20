@@ -885,6 +885,43 @@ export async function run(ctx) {
       ok('task119: ownsSoleLinkedBlessing false when not held', rules.ownsSoleLinkedBlessing(costNode, 'b', solesec, unheld) === false);
     }
 
+    // --- task 119 (phase 1b): reward / payment eligibility planners ------------------
+    {
+      const sec = parse('<section name="tr"><tick price="k" hidden="t"/><gain flag="k" blessing="storm"/><gain flag="k" curse="Bogwater"/><random flag="r"/><lose shards="10" price="r"/></section>');
+      ok('task119: linkedRewards returns the flagged rewards', rules.linkedRewards(sec, 'k').length === 2);
+      ok('task119: linkedRewards empty for an unknown key', rules.linkedRewards(sec, 'zzz').length === 0);
+      ok('task119: isChooseOne true for 2+ heterogeneous rewards', rules.isChooseOne(sec, 'k') === true);
+
+      const pureItem = parse('<section><tick price="p"/><item flag="p" name="a"/><item flag="p" name="b"/></section>');
+      ok('task119: isChooseOne false for a pure item-family barter', rules.isChooseOne(pureItem, 'p') === false);
+      ok('task119: isPricedItemAward true for a priced pure item-family reward', rules.isPricedItemAward(pureItem, 'p') === true);
+
+      ok('task119: hasVisiblePay false for a hidden price', rules.hasVisiblePay(sec, 'k') === false);
+      ok('task119: hasVisiblePay true for a visible price', rules.hasVisiblePay(sec, 'r') === true);
+      ok('task119: isRollGate true for a flag-linked roll', rules.isRollGate(sec, 'r') === true);
+      ok('task119: isRollGate false for a plain reward key', rules.isRollGate(sec, 'k') === false);
+
+      ok('task119: isCounterReward true for a named counter tick', rules.isCounterReward(parse('<tick name="Bonus" count="1"/>')) === true);
+      ok('task119: isCounterReward false for a plain tick', rules.isCounterReward(parse('<tick codeword="X"/>')) === false);
+
+      ok('task119: isOptionalForce true for force="f"', rules.isOptionalForce(parse('<lose shards="5" force="f"/>')) === true);
+      ok('task119: isOptionalForce false for force="t"', rules.isOptionalForce(parse('<lose shards="5" force="t"/>')) === false);
+
+      ok('task119: forcedChoiceGroup returns "dock" for a force="f" set dock', rules.forcedChoiceGroup(parse('<set dock="Sokara" force="f"/>')) === 'dock');
+      const twoLose = parse('<p><lose item="a" force="f"/><lose item="b" force="f"/></p>');
+      const firstLose = twoLose.querySelector('lose');
+      ok('task119: forcedChoiceGroup groups 2+ sibling force="f" losses by parent', rules.forcedChoiceGroup(firstLose) === firstLose.parentElement);
+
+      ok('task119: isEconomicPayment true for a shards spend', rules.isEconomicPayment(parse('<lose shards="10"/>')) === true);
+      ok('task119: isEconomicPayment false for a stamina penalty', rules.isEconomicPayment(parse('<lose stamina="2"/>')) === false);
+      ok('task119: isEconomicPayment false for force="f"', rules.isEconomicPayment(parse('<lose shards="10" force="f"/>')) === false);
+
+      const wr = GameState.create({ name:'WR119', gender:'m', profession:'Warrior', book:1, adv });
+      wr.addBlessing('storm');
+      ok('task119: rewardWasteReason flags an already-held blessing', /already have this blessing/i.test(rules.rewardWasteReason(wr, parse('<gain blessing="storm"/>')) || ''));
+      ok('task119: rewardWasteReason null for a fresh blessing', rules.rewardWasteReason(wr, parse('<gain blessing="luck"/>')) === null);
+    }
+
     // --- task 113: <lose item="?" bonus="N"> enforces the bonus= filter ---
     // §4.456's Tambu offering routes its +2/+3 gifts through <lose item="?" bonus=…
     // price=…>; the bonus filter must be honoured so only a genuinely +2/+3 item can be
