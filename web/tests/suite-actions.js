@@ -8,6 +8,7 @@ import { goodsFrom, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCar
 import { Story, previewProse } from '../js/render.js';
 import * as rules from '../js/render-rules.js';
 import * as gates from '../js/render-gates.js';
+import * as visit from '../js/visit-state.js';
 import { Narrator } from '../js/tts.js';
 import { renderSheet } from '../js/ui.js';
 import { renderStatic } from '../js/app.js';
@@ -960,6 +961,35 @@ export async function run(ctx) {
       const tg = gates.computeTransferGate(parse('<section name="tt"><transfer to="x" shards="10"/><goto section="9"/></section>'));
       ok('task119: computeTransferGate gates navigation after a forced transfer', !!tg && tg.navNodes.size === 1, tg ? 'n=' + tg.navNodes.size : 'null');
       ok('task119: computeTransferGate null for a force="f" (optional) transfer', gates.computeTransferGate(parse('<section><transfer to="x" shards="10" force="f"/><goto section="9"/></section>')) === null);
+    }
+
+    // --- task 119 (phase 2): DOM-free visit-state serialization (visit-state.js) ------
+    {
+      const ctx = visit.newCtx();
+      ok('task119: newCtx has the ctx shape', ctx.applied instanceof Set && ctx.rolls instanceof Map && ctx.usedSource === null);
+
+      const sec = parse('<section name="tv"><p>Go <goto section="9"/>.</p><items group="g" limit="2"/><group><random/><tick special="lock" cache="bet"/></group></section>');
+      const pNode = visit.resolveNodePath('r.0', sec); // the <p> — a real node in the parsed tree
+      ok('task119: resolveNodePath resolves a positional path to its node', pNode != null && pNode === sec.childNodes[0]);
+      ok('task119: resolveNodePath null for a bad path', visit.resolveNodePath('r.9.9', sec) === null);
+
+      ctx.applied.add('pay@r.0');
+      ctx.rolls.set('roll@r.1', { total: 7 });
+      ctx.awardCounts.set('k', 3);
+      ctx.pathNodes.set('r.0', pNode);
+      ctx.usedSource = pNode;
+
+      const flat = visit.serializeCtx(ctx);
+      ok('task119: serializeCtx flattens Sets/Maps + records usedSource as a path', Array.isArray(flat.applied) && flat.applied.includes('pay@r.0') && flat.usedSourcePath === 'r.0');
+
+      const back = visit.deserializeCtx(flat, sec);
+      ok('task119: deserializeCtx restores the memo', back.applied.has('pay@r.0') && back.rolls.get('roll@r.1').total === 7 && back.awardCounts.get('k') === 3);
+      ok('task119: deserializeCtx re-resolves usedSource to the node', back.usedSource === pNode);
+      ok('task119: deserializeCtx rebuilds group caps + lock caches from the section', back.groupLimits.get('g') === 2 && back.rollLockCaches.has('bet'));
+
+      const frame = { book: 2, section: '5', sectionTodock: 'Dock', vars: { x: 1 }, location: 'Loc', entryTicks: 3, usedSource: pNode, ctx };
+      const fflat = visit.serializeFrame(frame);
+      ok('task119: serializeFrame flattens the frame and its ctx', fflat.book === 2 && fflat.section === '5' && fflat.usedSourcePath === 'r.0' && Array.isArray(fflat.ctx.applied));
     }
 
     // --- task 113: <lose item="?" bonus="N"> enforces the bonus= filter ---
