@@ -58,11 +58,19 @@ export function serializeCtx(ctx) {
   };
 }
 
-// Re-derive the section-scoped scaffolding a ctx needs that is NOT part of the saved memo:
-// the "choose up to N" group caps and the names of gambling-bet lock caches. Unlike begin(),
-// this does NOT reset any cache-lock flag on the state — those are persisted, and a resume
-// must keep a bet the player already locked. (mirrors begin(), tasks 5 + 38)
-export function rebuildVisitScaffold(ctx, sectionEl) {
+// Re-derive the section-scoped scaffolding a ctx needs that is NOT part of the saved memo
+// (tasks 5 + 38, shared by begin() and resume since task 119):
+//  - the "choose up to N" group caps (<items group="X" limit="N"/> — pre-scanned so the
+//    individual award rows know their cap no matter whether the controller sits before
+//    or after them in the section; both orders occur);
+//  - the names of gambling-bet lock caches: a <tick special="lock" cache="X"> bundled
+//    inside a roll <group> means "freeze the bet once you roll" (book1/91, book2/134) —
+//    as opposed to a top-level lock, which is stash bookkeeping and must NOT disable its
+//    widget. Only their widgets gate on the lock flag.
+// Pass `state` on a FRESH entry (begin) to reset each roll-lock cache to unlocked, so a
+// new visit lets you re-bet (the deferred lock, applied on the roll, re-locks it). A
+// resume omits it — those flags are persisted, and a bet already locked must stay locked.
+export function rebuildVisitScaffold(ctx, sectionEl, state = null) {
   Array.from(sectionEl.querySelectorAll('items[group]')).forEach((c) => {
     const g = c.getAttribute('group');
     const lim = parseInt(c.getAttribute('limit') || '0', 10);
@@ -72,7 +80,9 @@ export function rebuildVisitScaffold(ctx, sectionEl) {
     if (!g.querySelector('random, difficulty, rankcheck, training')) return;
     g.querySelectorAll('tick[special="lock"][cache]').forEach((t) => {
       const name = t.getAttribute('cache');
-      if (name) ctx.rollLockCaches.add(name);
+      if (!name) return;
+      ctx.rollLockCaches.add(name);
+      if (state && state.isCacheLocked(name)) state.lockCache(name, false);
     });
   });
 }

@@ -1131,6 +1131,21 @@ export async function run(ctx) {
       ok('task119: deserializeCtx re-resolves usedSource to the node', back.usedSource === pNode);
       ok('task119: deserializeCtx rebuilds group caps + lock caches from the section', back.groupLimits.get('g') === 2 && back.rollLockCaches.has('bet'));
 
+      // begin()'s fresh-entry scaffold shares rebuildVisitScaffold (task 119): passing
+      // state resets each roll-lock cache to unlocked (re-bet on a new visit); a resume
+      // omits it and keeps a bet the player already locked.
+      const gLock = GameState.create({ name:'VL119', gender:'m', profession:'Warrior', book:1, adv });
+      gLock.lockCache('bet', true);
+      const freshCtx = visit.newCtx();
+      visit.rebuildVisitScaffold(freshCtx, sec, gLock);
+      ok('task119: rebuildVisitScaffold with state (fresh entry) unlocks roll-lock caches',
+         gLock.isCacheLocked('bet') === false && freshCtx.rollLockCaches.has('bet'));
+      gLock.lockCache('bet', true);
+      const resumeCtx = visit.newCtx();
+      visit.rebuildVisitScaffold(resumeCtx, sec);
+      ok('task119: rebuildVisitScaffold without state (resume) keeps a locked bet',
+         gLock.isCacheLocked('bet') === true && resumeCtx.rollLockCaches.has('bet'));
+
       const frame = { book: 2, section: '5', sectionTodock: 'Dock', vars: { x: 1 }, location: 'Loc', entryTicks: 3, usedSource: pNode, ctx };
       const fflat = visit.serializeFrame(frame);
       ok('task119: serializeFrame flattens the frame and its ctx', fflat.book === 2 && fflat.section === '5' && fflat.usedSourcePath === 'r.0' && Array.isArray(fflat.ctx.applied));

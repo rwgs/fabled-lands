@@ -36,7 +36,7 @@ import {
   computeRollGate, computeTransferGate,
 } from './render-gates.js';
 import {
-  newCtx, resolveNodePath, serializeCtx, deserializeCtx, serializeFrame,
+  newCtx, resolveNodePath, serializeCtx, deserializeCtx, serializeFrame, rebuildVisitScaffold,
 } from './visit-state.js';
 import { MARKET_TITLES, titleCase, diceWord, escapeHtml, itemLabel } from './render-util.js';
 import { combatView } from './render-combat.js';
@@ -268,29 +268,11 @@ export class Story {
     // at-large ship here (it was sailed in); a section without dock= is inland/at sea,
     // so the location clears and no ship is "here" unless it is at large. (task 73)
     this.state.arriveAtDock(sectionEl.getAttribute('dock'));
-    // Gambling-bet lock (task 38): a <tick special="lock" cache="X"> bundled inside
-    // a roll <group> means "freeze the bet once you roll" (book1/91, book2/134) — as
-    // opposed to a top-level lock, which is stash bookkeeping and must NOT disable
-    // its widget. Record those caches so only their widget gates on the lock flag,
-    // and reset each to unlocked on entry so a fresh visit lets you re-bet (the
-    // deferred lock, applied on the roll in renderGroupWithRoll, re-locks it).
-    Array.from(sectionEl.querySelectorAll('group')).forEach((g) => {
-      if (!g.querySelector('random, difficulty, rankcheck, training')) return;
-      g.querySelectorAll('tick[special="lock"][cache]').forEach((t) => {
-        const name = t.getAttribute('cache');
-        if (!name) return;
-        this.ctx.rollLockCaches.add(name);
-        if (this.state.isCacheLocked(name)) this.state.lockCache(name, false);
-      });
-    });
-    // Pre-scan grouped-award controllers (<items group="X" limit="N"/>) so the
-    // individual award rows know their "choose up to N" cap no matter whether the
-    // controller sits before or after them in the section (both orders occur).
-    Array.from(sectionEl.querySelectorAll('items[group]')).forEach((c) => {
-      const g = c.getAttribute('group');
-      const lim = parseInt(c.getAttribute('limit') || '0', 10);
-      if (g && lim > 0) this.ctx.groupLimits.set(g, lim);
-    });
+    // Section-scoped scaffolding — "choose up to N" group caps and gambling-bet lock
+    // caches (tasks 5 + 38) — is re-derived by the same visit-state helper a resume
+    // uses (task 119); passing state marks this a FRESH entry, so each roll-lock cache
+    // resets to unlocked and a new visit lets you re-bet.
+    rebuildVisitScaffold(this.ctx, sectionEl, this.state);
     // Reset this section's coordination flags (price=/flag= keys). They gate the
     // "pay to spin" roll idiom (task 30) and the paid-offering outcomes (book4/456)
     // within a single visit; a flag left set by a previous incomplete visit must
