@@ -823,14 +823,19 @@ export class GameState {
   // every at-large ship berths (the single-ship common case + loaded saves). A null
   // dock (a land or sea section) clears the location and berths nothing. (tasks 73, 81)
   arriveAtDock(dock) {
+    const prev = this.data.location ?? null;
     this.data.location = dock == null || dock === '' ? null : String(dock);
-    if (this.data.location == null) return; // inland / still at sea — nothing docks
+    // The location itself is persistable state (shipsHere()/currentShip() read it): treat a
+    // change to it as reason enough to save, even when no ship berths and no voyage ends —
+    // otherwise a save-free visit's dock arrival (or clear) is lost on a mid-visit reload,
+    // restoring a stale location into the locality rules. (task 154)
+    let changed = this.data.location !== prev;
+    if (this.data.location == null) { if (changed) this.changed(); return; } // inland / still at sea — nothing docks
     const sid = this.data.sailingShipId;
     // A voyage pointer that no longer names an owned at-large ship (the sailed vessel
     // was wrecked/seized and replaced at sea — book4/658) berths ALL at-large ships,
     // like the no-pointer case, instead of stranding the replacement at sea. (task 89)
     const sailing = sid != null && this.data.ships.some((s) => s.id === sid && s.docked == null) ? sid : null;
-    let changed = false;
     for (const s of this.data.ships) if (s.docked == null && (sailing == null || s.id === sailing)) { s.docked = this.data.location; changed = true; }
     if (sid != null) { this.data.sailingShipId = null; changed = true; } // reached port — voyage over
     if (changed) this.changed();

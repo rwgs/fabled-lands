@@ -235,6 +235,24 @@ export class Story {
     this.sectionEl = sectionEl;
     this.book = book;
     this.section = section;
+    // Establish this visit's identity FIRST — the fresh ctx (per-visit memo), this
+    // section's todock= and the entry-tick baseline — BEFORE any of the state-clearing
+    // calls below. Each of those fires changed() → save() → serializeVisit; if the ctx /
+    // entryTicks / todock still belonged to the PREVIOUS section, that autosave would pair
+    // the NEW section with a FOREIGN visit record (positional memos aliasing onto the new
+    // section's nodes), and a mid-begin reload — a tab close, or the SW controllerchange
+    // reload — would resume corrupt. Setting them up front keeps every save fired during
+    // begin() atomic with the section it names. groupLimits/rollLockCaches are re-derived
+    // on resume (visit-state.js), so populating those further down is harmless. (task 154)
+    this.ctx = this._newCtx();
+    // Remember this section's todock= so the wrapped navigate applies it on leaving. (task 81)
+    this.sectionTodock = sectionEl.getAttribute('todock') || null;
+    // Snapshot the box-tick count as this section is ENTERED (before its <tick/> runs), so
+    // <if ticks="N"> reads the entry count and a tick applied this visit can't flip the
+    // guard on a mid-visit rerender (task 105). Position is already current here (navigate()
+    // calls goTo before begin), matching addTick's no-args box key.
+    this.state.setEntryTicks(this.state.tickCount());
+    this.deferredCleanups = new Map(); // fresh per visit (task 88)
     // A drunk-potion boost lasts only for the section it was used in (task 41):
     // clear it on entering a new section so it can't be carried forward.
     this.state.clearPotionBonuses();
@@ -245,14 +263,10 @@ export class Story {
     // so a `<while var>` loop starts undefined and a roll var can't be read stale from
     // an earlier section (§6.700's `<if var="x" equals="6">` gate, §5.218's free). (task 100)
     this.state.clearVars();
-    this.deferredCleanups = new Map(); // fresh per visit (task 88)
     // Record the player's location from the section's dock= attribute and berth any
     // at-large ship here (it was sailed in); a section without dock= is inland/at sea,
     // so the location clears and no ship is "here" unless it is at large. (task 73)
     this.state.arriveAtDock(sectionEl.getAttribute('dock'));
-    // Remember this section's todock= so the wrapped navigate applies it on leaving. (task 81)
-    this.sectionTodock = sectionEl.getAttribute('todock') || null;
-    this.ctx = this._newCtx();
     // Gambling-bet lock (task 38): a <tick special="lock" cache="X"> bundled inside
     // a roll <group> means "freeze the bet once you roll" (book1/91, book2/134) — as
     // opposed to a top-level lock, which is stash bookkeeping and must NOT disable
@@ -285,11 +299,6 @@ export class Story {
       const p = n.getAttribute('price'); if (p && this.state.getFlag(p)) this.state.setFlag(p, false);
       const f = n.getAttribute('flag'); if (f && this.state.getFlag(f)) this.state.setFlag(f, false);
     });
-    // Snapshot the box-tick count as this section is ENTERED (before its <tick/> runs),
-    // so <if ticks="N"> reads the entry count and a tick applied this visit can't flip
-    // the guard on a mid-visit rerender (task 105). Position is already current here
-    // (navigate() calls goTo before begin), matching addTick's no-args box key.
-    this.state.setEntryTicks(this.state.tickCount());
     this.render();
   }
 

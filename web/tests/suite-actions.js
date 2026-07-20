@@ -526,6 +526,68 @@ export async function run(ctx) {
       window.__FL_INSTANT_DICE__ = false;
     }
 
+    // --- task 154: begin()'s autosaves are atomic — no mid-begin save pairs the NEW
+    // section with the PREVIOUS visit's ctx/entry-tick baseline ---
+    // begin() clears vars/potion/fight bonuses and arrives at the dock BEFORE it used to
+    // swap in the fresh ctx + entry-tick snapshot; each of those clears fires
+    // changed()→save()→serializeVisit. The bug persisted {section: NEW, ctx: OLD} — a record
+    // that passes resumeOrBegin's section-match guard yet aliases the previous section's
+    // positional memos onto the new section. Capture every serializeVisit written during a
+    // begin() and prove none names the new section while carrying foreign memos.
+    {
+      const secA154 = parse('<section name="A154" boxes="1"><gain shards="3"/><tick/><p>A.</p></section>');
+      const secB154 = parse('<section name="B154" boxes="1"><p>B.</p></section>');
+      const g154 = GameState.create({ name:'T154', gender:'m', profession:'Warrior', book:1, adv });
+      g154.data.shards = 0;
+      const cont154 = document.createElement('div');
+      const story154 = new Story(cont154, g154, { navigate(){}, onDeath(){}, notify(){} });
+      g154.setVisitProvider(() => story154.serializeVisit());
+
+      // Enter A twice so its ctx carries applied memos AND its entry-tick snapshot is 1
+      // (the box is already ticked on the second entry) — two distinct discriminators that a
+      // begin(B) save must never leak into B's record.
+      g154.goTo(1, 'A154'); story154.begin(secA154, 1, 'A154');
+      g154.goTo(1, 'A154'); story154.begin(secA154, 1, 'A154');
+      ok('task154: §A154 entry populated its ctx memo + tick snapshot',
+         story154.ctx.applied.size >= 1 && g154.entryTickCount() === 1,
+         'applied=' + story154.ctx.applied.size + ' entryTicks=' + g154.entryTickCount());
+
+      // Give begin(B) real clearing work so the mid-begin saves actually fire.
+      g154.setVar('x', 5);
+      g154.data.potionBonus = { COMBAT: 2 };
+
+      // Capture the serializeVisit written at every save fired during begin(B).
+      const captured154 = [];
+      const origSave154 = g154.save.bind(g154);
+      g154.save = function () { captured154.push(story154.serializeVisit()); return origSave154(); };
+      g154.goTo(1, 'B154'); story154.begin(secB154, 1, 'B154');
+      g154.save = origSave154;
+
+      const bBaseline = g154.entryTickCount();
+      const foreign154 = captured154.filter((r) => r && r.section === 'B154'
+        && (r.ctx.applied.length > 0 || r.entryTicks !== bBaseline));
+      ok('task154: begin(B) fired its clearVars/clearPotionBonuses autosaves (window exercised)',
+         captured154.length >= 1, 'saves=' + captured154.length);
+      ok('task154: no mid-begin save pairs §B154 with §A154\'s ctx or entry-tick baseline',
+         foreign154.length === 0,
+         'foreign=' + foreign154.length + ' baseline=' + bBaseline);
+
+      // Sub-defect: arriveAtDock persists a bare location change even when no ship berths and
+      // no voyage ends — otherwise a save-free visit's dock arrival is lost on reload.
+      const gD = GameState.create({ name:'T154d', gender:'m', profession:'Warrior', book:1, adv });
+      gD.data.location = null; gD.data.ships = [];
+      let saves154 = 0; const origSaveD = gD.save.bind(gD); gD.save = function () { saves154++; return origSaveD(); };
+      gD.arriveAtDock('Marlock City');
+      ok('task154: a dock arrival with no ship still persists the location',
+         saves154 === 1 && gD.data.location === 'Marlock City', 'saves=' + saves154 + ' loc=' + gD.data.location);
+      gD.arriveAtDock('Marlock City'); // same dock → no change → no needless save
+      ok('task154: re-arriving the same dock triggers no needless save', saves154 === 1, 'saves=' + saves154);
+      gD.arriveAtDock(null); // inland / at sea → location clears → persist the clear
+      ok('task154: clearing the location (inland/at sea) persists too',
+         saves154 === 2 && gD.data.location === null, 'saves=' + saves154 + ' loc=' + gD.data.location);
+      gD.save = origSaveD;
+    }
+
     // --- task 117: priced equipment/cargo losses can't arm a reward without taking payment ---
     // §2.90 forfeits a weapon OR armour (price=x) to renounce Elnir; §3.569 trades a named
     // Cargo Unit (price=x) for two textiles. An ineligible forfeit button (no such
