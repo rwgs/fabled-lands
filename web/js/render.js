@@ -8,7 +8,6 @@
 
 import {
   evaluateCondition, applyEffect, applyEffectBody, boolAttr, resolveValue,
-  rollDifficulty, rollRankCheck, rollTraining, rollDice, childAdjustment,
   applyRest, reviveWithResurrection, abilityChoiceOptions, readItemEffects,
   whileLoopDone, useItemEffect, losePaymentPlan, grantChosenReward,
 } from './engine.js';
@@ -18,10 +17,10 @@ import { applyInlineBuy, payChoiceCost } from './market.js';
 import { GameState, makeItem, parseTags, currencyAward, splitItemName } from './state.js';
 import { ABILITY_LABEL } from './rules.js';
 import { bookTitle, availableBooks, loadBook, getSection } from './data.js';
-import { animateDice, modal } from './ui.js';
+import { modal } from './ui.js';
 import {
   computeOutcomeBlessings,
-  blessingSpendForGoto, blessingSpendForReroll, ownsSoleLinkedBlessing,
+  blessingSpendForGoto, ownsSoleLinkedBlessing,
   ITEM_FAMILY_TAGS, classifyPassive, choiceGate, branchPlan, groupPlan, groupRollDefers,
   flagGate as flagGateRule, isSpentSource as isSpentSourceRule,
   linkedRewards as linkedRewardsRule, isCounterReward as isCounterRewardRule,
@@ -38,7 +37,11 @@ import {
 import {
   newCtx, resolveNodePath, serializeCtx, deserializeCtx, serializeFrame, rebuildVisitScaffold,
 } from './visit-state.js';
-import { MARKET_TITLES, titleCase, diceWord, escapeHtml, itemLabel } from './render-util.js';
+import { MARKET_TITLES, titleCase, escapeHtml, itemLabel } from './render-util.js';
+import {
+  renderReroll, renderDifficulty, renderRandom, renderRankcheck, renderTraining,
+  renderBranch,
+} from './render-rolls.js';
 import { combatView } from './render-combat.js';
 import { marketView } from './render-market.js';
 
@@ -55,68 +58,70 @@ const PASSIVE_TAGS = new Set(['lose', 'tick', 'gain', 'set', 'curse', 'disease',
 // ITEM_FAMILY_TAGS / CHOOSE_ONE_TAGS moved to render-rules.js (task 119); ITEM_FAMILY_TAGS
 // is imported back for the award/label views, CHOOSE_ONE_TAGS is used only by isChooseOne.
 
-// Tag-dispatch table for renderElement (task 9): tag → Story method name. Every
-// method has the signature (container, node, path); tags that share a handler are
-// listed under each alias. This is the view half of the tag registry; the DOM-free
-// effect half lives in engine.js (EFFECT_APPLIERS). Adding a renderable tag is a
-// one-line change here plus its method — no switch to hunt through. (Kept separate
-// from the engine table on purpose: render is DOM, the rules layer is DOM-free.)
+// Tag-dispatch table for renderElement (task 9): tag → view function, called as
+// fn(story, container, node, path); tags that share a handler are listed under each
+// alias. Split view modules (render-rolls.js, …) contribute plain functions directly;
+// handlers still implemented as Story methods are wrapped in an arrow until their
+// module is split out (task 119). This is the view half of the tag registry; the
+// DOM-free effect half lives in engine.js (EFFECT_APPLIERS). Adding a renderable tag
+// is a one-line change here plus its handler — no switch to hunt through. (Kept
+// separate from the engine table on purpose: render is DOM, the rules layer is DOM-free.)
 const TAG_RENDERERS = {
-  p:               'renderParagraph',
-  group:           'renderGroup',
-  text:            'renderTextWrapper',
-  desc:            'renderTextWrapper',
-  if:              'renderIfChain',
-  elseif:          'renderIfChain',
-  else:            'renderIfChain',
-  goto:            'renderGoto',
-  return:          'renderReturn',
-  items:           'renderItemsController',
-  item:            'renderItemAward',
-  weapon:          'renderItemAward',
-  armour:          'renderItemAward',
-  tool:            'renderItemAward',
-  choices:         'renderChoices',
-  choice:          'renderChoiceElement',
-  difficulty:      'renderDifficulty',
-  random:          'renderRandom',
-  rankcheck:       'renderRankcheck',
-  training:        'renderTraining',
-  fight:           'renderFight',
+  p:               (s, c, n, p) => s.renderParagraph(c, n, p),
+  group:           (s, c, n, p) => s.renderGroup(c, n, p),
+  text:            (s, c, n, p) => s.renderTextWrapper(c, n, p),
+  desc:            (s, c, n, p) => s.renderTextWrapper(c, n, p),
+  if:              (s, c, n, p) => s.renderIfChain(c, n, p),
+  elseif:          (s, c, n, p) => s.renderIfChain(c, n, p),
+  else:            (s, c, n, p) => s.renderIfChain(c, n, p),
+  goto:            (s, c, n, p) => s.renderGoto(c, n, p),
+  return:          (s, c, n, p) => s.renderReturn(c, n, p),
+  items:           (s, c, n, p) => s.renderItemsController(c, n, p),
+  item:            (s, c, n, p) => s.renderItemAward(c, n, p),
+  weapon:          (s, c, n, p) => s.renderItemAward(c, n, p),
+  armour:          (s, c, n, p) => s.renderItemAward(c, n, p),
+  tool:            (s, c, n, p) => s.renderItemAward(c, n, p),
+  choices:         (s, c, n, p) => s.renderChoices(c, n, p),
+  choice:          (s, c, n, p) => s.renderChoiceElement(c, n, p),
+  difficulty:      renderDifficulty,
+  random:          renderRandom,
+  rankcheck:       renderRankcheck,
+  training:        renderTraining,
+  fight:           (s, c, n, p) => s.renderFight(c, n, p),
   // <flee>/<fightdamage> describe a consequence that fires on an EVENT (the player
   // fleeing, or the enemy landing a blow), never on render. Show their prose but
   // render them inert — combat.js / the Flee button apply the effects.
-  flee:            'renderInert',
-  fightdamage:     'renderInert',
-  market:          'renderMarket',
-  buy:             'renderInlineBuy',
-  sell:            'renderInlineSell',
-  rest:            'renderRest',
-  moneycache:      'renderMoneyCache',
-  itemcache:       'renderItemCache',
-  transfer:        'renderTransfer',
-  resurrection:    'renderResurrection',
-  reroll:          'renderReroll',
-  image:           'renderImage',
-  table:           'renderTable',
-  'choices-table': 'renderTable',
+  flee:            (s, c, n, p) => s.renderInert(c, n, p),
+  fightdamage:     (s, c, n, p) => s.renderInert(c, n, p),
+  market:          (s, c, n, p) => s.renderMarket(c, n, p),
+  buy:             (s, c, n, p) => s.renderInlineBuy(c, n, p),
+  sell:            (s, c, n, p) => s.renderInlineSell(c, n, p),
+  rest:            (s, c, n, p) => s.renderRest(c, n, p),
+  moneycache:      (s, c, n, p) => s.renderMoneyCache(c, n, p),
+  itemcache:       (s, c, n, p) => s.renderItemCache(c, n, p),
+  transfer:        (s, c, n, p) => s.renderTransfer(c, n, p),
+  resurrection:    (s, c, n, p) => s.renderResurrection(c, n, p),
+  reroll:          renderReroll,
+  image:           (s, c, n, p) => s.renderImage(c, n, p),
+  table:           (s, c, n, p) => s.renderTable(c, n, p),
+  'choices-table': (s, c, n, p) => s.renderTable(c, n, p),
   // task 32: previously unhandled tags. <field>/<extrachoice> are implemented;
   // <while>/<sectionview> render their inner prose (as the default recursion
   // already did — no behaviour change) with the automated mechanic deferred.
   // Explicit entries let the default case become strict later.
-  field:           'renderField',
-  extrachoice:     'renderExtraChoice',
+  field:           (s, c, n, p) => s.renderField(c, n, p),
+  extrachoice:     (s, c, n, p) => s.renderExtraChoice(c, n, p),
   // <while var="V"> repeats its body until V is assigned (task 100): each pass is a
   // fresh iteration with its own roll/effects, and a live unterminated loop blocks
   // the rest of the section (JaFL WhileNode holds execution until the loop ends).
-  while:           'renderWhile',
+  while:           (s, c, n, p) => s.renderWhile(c, n, p),
   // <fightround> is a combat-round RULE (task 99): its body executes headlessly
   // between rounds (combat.fightRound), so it renders as inert prose — visible
   // words, no live roll widgets the player could work out of sequence.
-  fightround:      'renderInert',
+  fightround:      (s, c, n, p) => s.renderInert(c, n, p),
   // <sectionview> (§5.114's trance oracle) opens a read-only popup showing random
   // sections' prose — no effects, no controls, no visit change (task 101).
-  sectionview:     'renderSectionview',
+  sectionview:     (s, c, n, p) => s.renderSectionview(c, n, p),
 };
 
 // Render a section's prose READ-ONLY for the <sectionview> oracle (§5.114): walk the
@@ -621,7 +626,7 @@ export class Story {
       chainActive = false; chainDone = false; chainDeferred = false;
 
       if (tag === 'success' || tag === 'failure' || tag === 'outcomes') {
-        this.renderBranch(container, node, path, this.activeRoll);
+        renderBranch(this, container, node, path, this.activeRoll);
         return;
       }
       this.renderElement(container, node, path);
@@ -697,8 +702,8 @@ export class Story {
       return e;
     }
 
-    const method = TAG_RENDERERS[tag];
-    if (method) return this[method](container, node, path);
+    const fn = TAG_RENDERERS[tag];
+    if (fn) return fn(this, container, node, path);
 
     if (PASSIVE_TAGS.has(tag)) return this.renderPassive(container, node, path);
     // Unknown element: render children so we don't lose prose.
@@ -726,43 +731,6 @@ export class Story {
   // choices table, flagging which row is this node.
   renderChoiceElement(container, node, path) {
     return this.renderChoices(container, node.parentNode, path, node);
-  }
-
-  renderReroll(container, node, path) {
-    const btn = document.createElement('button');
-    btn.className = 'btn-secondary';
-    const inner = document.createElement('span');
-    this.appendChildren(inner, node, path);
-    btn.textContent = inner.textContent.trim() || 'Roll again';
-    const roll = this.activeRoll;
-    btn.addEventListener('click', () => {
-      // §232/502/716 storm form: the reroll IS the "lose the blessing and roll again"
-      // spend. The intended hidden <lose blessing> never fires (its keepblessing guard
-      // is reset by a rerunnable entry set every render), so consume the guarded storm
-      // blessing here — exactly one reroll's worth of protection. (task 114)
-      const spend = blessingSpendForReroll(this.sectionEl, this.state, this.outcomeBlessings);
-      if (spend) this.state.useBlessing(spend);
-      if (roll) this.ctx.rolls.delete('roll@' + roll.path);
-      this.rerender();
-    });
-    container.appendChild(btn);
-    return btn;
-  }
-
-  // After a resolved roll, offer any blessing the player may spend to reroll it (task 76).
-  // `opts` = { ability, success, kind:'check'|'random', travel }; eligibility lives in
-  // state.rerollBlessings. `reroll` re-runs the SAME roll and stores the fresh result (it
-  // must not itself re-render — this does). A used blessing is consumed unless permanent.
-  appendBlessingReroll(widget, opts, reroll) {
-    if (this.inactive) return;
-    for (const name of this.state.rerollBlessings(opts)) {
-      const label = name === 'luck' ? 'Luck' : name === 'travel' ? 'Safe Travel' : name.toUpperCase();
-      const btn = document.createElement('button');
-      btn.className = 'btn-secondary blessing-reroll';
-      btn.textContent = `Use your blessing of ${label} to reroll`;
-      btn.addEventListener('click', () => { if (this.state.useBlessing(name)) reroll(); this.rerender(); });
-      widget.appendChild(btn);
-    }
   }
 
   // <field name="X" label="L"/> — display the live value of a codeword counter
@@ -1929,7 +1897,7 @@ export class Story {
       const tag = node.tagName.toLowerCase();
       if (tag === 'choice') wrap.appendChild(this.renderChoice(node, path + '.c' + i));
       else if (tag === 'success' || tag === 'failure' || tag === 'outcome' || tag === 'outcomes') {
-        this.renderBranch(wrap, node, path + '.b' + i, this.activeRoll);
+        renderBranch(this, wrap, node, path + '.b' + i, this.activeRoll);
       }
     });
     container.appendChild(wrap);
@@ -2011,316 +1979,10 @@ export class Story {
     });
   }
 
-  // ---- rolls: difficulty ---------------------------------------------------
-  renderDifficulty(container, node, path) {
-    const spec = (node.getAttribute('ability') || '').trim();
-    const multi = spec.includes('|');
-    const level = resolveValue(this.state, node.getAttribute('level'));
-    // modifier= is either a keyword selecting how the ability score resolves
-    // (natural/noweapon/affected — book3/235/271/290, book5/516 unarmed COMBAT) or a
-    // numeric/var addend. Keywords route into the ability lookup (mode); anything
-    // else keeps the historical numeric-modifier behaviour. (task 53)
-    const modRaw = (node.getAttribute('modifier') || '').trim().toLowerCase();
-    const mode = ['natural', 'noweapon', 'notool', 'affected'].includes(modRaw) ? modRaw : null;
-    const modifier = (node.getAttribute('modifier') != null && !mode) ? resolveValue(this.state, node.getAttribute('modifier')) : 0;
-
-    // its own descriptive text
-    const desc = document.createElement('span');
-    this.appendChildren(desc, node, path);
-    if (desc.textContent.trim()) container.appendChild(desc);
-
-    const key = 'roll@' + path;
-    const widget = document.createElement('div');
-    widget.className = 'roll';
-    container.appendChild(widget);
-
-    // Pay-to-roll gate (task 51): a flag= roll paired with a [price=] cost is
-    // disabled until the payment sets the flag; rolling consumes it, and a fresh
-    // payment re-arms (dropping any stale result). Extends task 30's <random> gate
-    // to <difficulty> — book6/731 CHARISMA boon, book2/122/book6/630 "MAGIC or …".
-    const { flag, gated, armed } = this.rollGateState(node, key);
-    let stored = this.ctx.rolls.get(key);
-    if (gated && armed && stored) { this.ctx.rolls.delete(key); stored = null; }
-    // An unresolved roll inside a <while> pass holds the loop until the player rolls
-    // it (§5.218's per-pass COMBAT re-attempt to wriggle free). (task 100)
-    if (this.inWhileIter && !this.inactive && !stored) this.whileIterPending = true;
-    if (stored) {
-      const abLabel = (stored.ability || spec.split('|')[0] || '').toUpperCase();
-      this.showDiceResult(widget, stored.dice, `${abLabel} ${stored.abilityScore >= 0 ? '+' : ''}${stored.abilityScore} = ${stored.total} vs ${level}`, stored.success ? 'Success' : 'Failure', stored.success);
-      this.appendBlessingReroll(widget, { ability: stored.ability, success: stored.success, kind: 'check' }, () => {
-        const res = rollDifficulty(this.state, stored.ability, level, modifier + childAdjustment(node, this.state), mode);
-        if (node.getAttribute('var')) { this.state.setVar(node.getAttribute('var'), res.margin); this.ctx.wroteVars.add(node.getAttribute('var')); this.ctx.rolledVars.add(node.getAttribute('var')); }
-        this.ctx.rolls.set(key, res);
-      });
-      return widget;
-    }
-    // Under the Three Fortunes' difficultyCurse an ability roll uses one die (task 36).
-    const diceLabel = diceWord(this.state.data.oneDieRolls ? 1 : 2);
-    if (gated && !armed) {
-      const btn = this.rollButton(`Roll ${diceLabel} + ${spec.split('|')[0].toUpperCase()}`, widget, () => {});
-      btn.disabled = true; btn.title = 'Pay first to make this roll.';
-      widget.appendChild(btn);
-      return widget;
-    }
-    // "combat|magic": let the player pick which ability to roll before rolling.
-    const pickKey = 'pick@' + path;
-    const ability = multi ? this.ctx.rolls.get(pickKey) : spec;
-    if (multi && !ability) {
-      this.appendAbilityPicker(widget, abilityChoiceOptions(spec, this.state, false), (ab) => { this.ctx.rolls.set(pickKey, ab); this.rerender(); });
-      return widget;
-    }
-    const abLabel = (ability || '').split('|')[0].toUpperCase();
-    const btn = this.rollButton(`Roll ${diceLabel} + ${abLabel}`, widget, () => {
-      if (gated) this.state.setFlag(flag, false); // consume the payment — re-pay to re-attempt
-      const res = rollDifficulty(this.state, ability, level, modifier + childAdjustment(node, this.state), mode);
-      if (node.getAttribute('var')) { this.state.setVar(node.getAttribute('var'), res.margin); this.ctx.wroteVars.add(node.getAttribute('var')); this.ctx.rolledVars.add(node.getAttribute('var')); }
-      this.ctx.rolls.set(key, res);
-      this.rerender();
-    });
-    widget.appendChild(btn);
-    return widget;
-  }
-
-  // Pay-to-roll gate state shared by the roll renderers (tasks 30, 51): a flag= roll
-  // paired with a [price="k"] cost is armed only while flag k is set. Returns the
-  // flag name and whether the roll is gated / currently armed.
-  rollGateState(node, key) {
-    const flag = node.getAttribute('flag');
-    const gated = flag != null && this.isRollGate(flag);
-    const armed = gated ? this.state.getFlag(flag) : true;
-    return { flag, gated, armed };
-  }
-
-  // Infer die count from the outcome table this random feeds: if every range
-  // fits within 1-6, it's a single die (some `type="travel"` rolls), otherwise 2.
-  inferDice(node, def) {
-    if (!this.sectionEl) return def;
-    const outs = Array.from(this.sectionEl.querySelectorAll('outcomes'));
-    const target = outs.find((o) => node.compareDocumentPosition(o) & Node.DOCUMENT_POSITION_FOLLOWING);
-    if (!target) return def;
-    let max = 0, hasRange = false;
-    target.querySelectorAll('outcome[range]').forEach((oc) => {
-      hasRange = true;
-      oc.getAttribute('range').replace('+', '').split(/[-,]/).forEach((n) => {
-        const v = parseInt(n, 10); if (!isNaN(v)) max = Math.max(max, v);
-      });
-    });
-    return hasRange && max <= 6 ? 1 : def;
-  }
-
-  // ---- rolls: random -------------------------------------------------------
-  renderRandom(container, node, path) {
-    // Remember where the travel/encounter gate's roll lives, so applyRollGate can read
-    // its result (whether the leg has been rolled yet) after the walk. (task 104)
-    if (this.rollGate && node === this.rollGate.rollNode) this.rollGate.rollPath = path;
-    const dice = node.hasAttribute('dice') ? parseInt(node.getAttribute('dice'), 10) : this.inferDice(node, 2);
-    const varName = node.getAttribute('var');
-    const desc = document.createElement('span');
-    this.appendChildren(desc, node, path);
-    if (desc.textContent.trim()) container.appendChild(desc);
-
-    const key = 'roll@' + path;
-    const widget = document.createElement('div');
-    widget.className = 'roll';
-    container.appendChild(widget);
-
-    // Pay-gated roll (book2/157 etc.): the roll enables only once its payment sets
-    // the flag; rolling consumes the flag, and a fresh payment re-arms it. (task 30)
-    const flag = node.getAttribute('flag');
-    const gated = flag != null && this.isRollGate(flag);
-    const armed = gated ? this.state.getFlag(flag) : true;
-    let stored = this.ctx.rolls.get(key);
-    // Re-arm: a new payment (flag set again) after a prior spin drops the old result
-    // so the player can roll afresh — the per-visit "spin again" cycle.
-    if (gated && armed && stored) { this.ctx.rolls.delete(key); stored = null; }
-    // A <while> pass that has not yet rolled blocks the loop and marks its var stale
-    // (so its downstream `<lose stamina="x">` waits for THIS six, not the last). (task 100)
-    if (this.inWhileIter && !this.inactive && !stored) {
-      this.whileIterPending = true;
-      if (varName && this.whileIterPendingVars) this.whileIterPendingVars.add(varName);
-    }
-
-    if (stored) {
-      // Re-assert this roll's value into its var on every render so a var re-rolled
-      // by a later <while> pass still reads correctly here in document order — the
-      // authoritative value is already saved, so replay it without a fresh save. (task 100)
-      if (varName && this.state.getVar(varName) !== stored.total) this.state.restoreVar(varName, stored.total);
-      this.showDiceResult(widget, stored.dice, `Rolled ${stored.total}`, '', true);
-      // Luck rerolls any dice result; Safe Travel rerolls a type="travel" encounter.
-      const travel = (node.getAttribute('type') || '').toLowerCase() === 'travel';
-      this.appendBlessingReroll(widget, { kind: 'random', travel }, () => {
-        const r = rollDice(dice);
-        const total = r.total + childAdjustment(node, this.state);
-        const res = { kind: 'random', dice: r.dice, total };
-        if (varName) { this.state.setVar(varName, total); this.ctx.wroteVars.add(varName); this.ctx.rolledVars.add(varName); }
-        this.ctx.rolls.set(key, res);
-      });
-    } else if (gated && !armed) {
-      const btn = this.rollButton(`Roll ${diceWord(dice)}`, widget, () => {});
-      btn.disabled = true; btn.title = 'Pay first to make this roll.';
-      widget.appendChild(btn);
-    } else {
-      widget.appendChild(this.rollButton(`Roll ${diceWord(dice)}`, widget, () => {
-        if (gated) this.state.setFlag(flag, false); // consume the payment — re-pay to spin again
-        const r = rollDice(dice);
-        const total = r.total + childAdjustment(node, this.state);
-        const res = { kind: 'random', dice: r.dice, total };
-        if (varName) { this.state.setVar(varName, total); this.ctx.wroteVars.add(varName); this.ctx.rolledVars.add(varName); }
-        this.ctx.rolls.set(key, res);
-        this.rerender();
-      }));
-    }
-    return widget;
-  }
-
-  renderRankcheck(container, node, path) {
-    const dice = parseInt(node.getAttribute('dice') || '1', 10);
-    const add = parseInt(node.getAttribute('add') || '0', 10);
-    const key = 'roll@' + path;
-    const widget = document.createElement('div');
-    widget.className = 'roll';
-    container.appendChild(widget);
-    // Pay-to-roll gate (task 51), as for <difficulty>/<random>.
-    const { flag, gated, armed } = this.rollGateState(node, key);
-    let stored = this.ctx.rolls.get(key);
-    if (gated && armed && stored) { this.ctx.rolls.delete(key); stored = null; }
-    if (this.inWhileIter && !this.inactive && !stored) this.whileIterPending = true; // hold a <while> pass (task 100)
-    if (stored) {
-      this.showDiceResult(widget, stored.dice, `Rolled ${stored.total} vs Rank ${this.state.rankValue()}`, stored.success ? 'Success' : 'Failure', stored.success);
-      this.appendBlessingReroll(widget, { success: stored.success, kind: 'check' }, () => {
-        const res = rollRankCheck(this.state, dice, add, childAdjustment(node, this.state));
-        if (node.getAttribute('var')) { this.state.setVar(node.getAttribute('var'), res.margin); this.ctx.wroteVars.add(node.getAttribute('var')); this.ctx.rolledVars.add(node.getAttribute('var')); }
-        this.ctx.rolls.set(key, res);
-      });
-    } else if (gated && !armed) {
-      const btn = this.rollButton(`Rank check (roll ${diceWord(dice)})`, widget, () => {});
-      btn.disabled = true; btn.title = 'Pay first to make this roll.';
-      widget.appendChild(btn);
-    } else {
-      widget.appendChild(this.rollButton(`Rank check (roll ${diceWord(dice)})`, widget, () => {
-        if (gated) this.state.setFlag(flag, false); // consume the payment
-        const res = rollRankCheck(this.state, dice, add, childAdjustment(node, this.state));
-        if (node.getAttribute('var')) { this.state.setVar(node.getAttribute('var'), res.margin); this.ctx.wroteVars.add(node.getAttribute('var')); this.ctx.rolledVars.add(node.getAttribute('var')); }
-        this.ctx.rolls.set(key, res);
-        this.rerender();
-      }));
-    }
-    return widget;
-  }
-
-  renderTraining(container, node, path) {
-    const spec = (node.getAttribute('ability') || '').trim();
-    // Bare <training> (book5/59) or "?"/"a|b" means "train the ability of your
-    // choice" — offer a picker rather than training a phantom '' ability.
-    const multi = spec === '' || spec === '?' || spec.includes('|');
-    const dice = parseInt(node.getAttribute('dice') || '2', 10);
-    const add = parseInt(node.getAttribute('add') || '0', 10);
-    const key = 'roll@' + path;
-    const widget = document.createElement('div');
-    widget.className = 'roll';
-    container.appendChild(widget);
-    const stored = this.ctx.rolls.get(key);
-    if (this.inWhileIter && !this.inactive && !stored) this.whileIterPending = true; // hold a <while> pass (task 100)
-    if (stored) {
-      const ab = stored.ability;
-      this.showDiceResult(widget, stored.dice, `Rolled ${stored.total} vs ${ab.toUpperCase()} ${stored.natural}`, stored.success ? `+1 ${ab.toUpperCase()}` : 'No gain', stored.success);
-      // Only Luck rerolls a training roll (self-improvement, not an ability *test*).
-      this.appendBlessingReroll(widget, { success: stored.success, kind: 'check' }, () => {
-        this.ctx.rolls.set(key, rollTraining(this.state, ab, dice, add));
-      });
-      return widget;
-    }
-    const pickKey = 'pick@' + path;
-    const ability = multi ? this.ctx.rolls.get(pickKey) : spec.toLowerCase();
-    if (multi && !ability) {
-      this.appendAbilityPicker(widget, abilityChoiceOptions(spec, this.state, false), (ab) => { this.ctx.rolls.set(pickKey, ab); this.rerender(); });
-      return widget;
-    }
-    widget.appendChild(this.rollButton(`Train ${ability.toUpperCase()} (roll ${diceWord(dice)})`, widget, () => {
-      this.ctx.rolls.set(key, rollTraining(this.state, ability, dice, add));
-      this.rerender();
-    }));
-    return widget;
-  }
-
-  rollButton(label, widget, onRoll) {
-    const btn = document.createElement('button');
-    btn.className = 'btn-roll';
-    btn.textContent = label;
-    btn.addEventListener('click', async () => {
-      btn.disabled = true;
-      await animateDice(widget);
-      onRoll();
-    });
-    return btn;
-  }
-
-  showDiceResult(widget, dice, detail, outcome, ok) {
-    widget.innerHTML = '';
-    const row = document.createElement('div');
-    row.className = 'dice-row';
-    (dice || []).forEach((d) => {
-      const die = document.createElement('span');
-      die.className = 'die';
-      die.textContent = d;
-      row.appendChild(die);
-    });
-    widget.appendChild(row);
-    const info = document.createElement('span');
-    info.className = 'roll-detail';
-    info.textContent = detail;
-    widget.appendChild(info);
-    if (outcome) {
-      const badge = document.createElement('span');
-      badge.className = 'roll-outcome ' + (ok ? 'ok' : 'bad');
-      badge.textContent = outcome;
-      widget.appendChild(badge);
-    }
-  }
-
-  // ---- branches (success/failure/outcomes) ---------------------------------
-  // Resolution — which branch is pending, matching, or blessing-vetoed — lives in
-  // branchPlan (render-rules.js, task 119); the view reveals what the plan says.
-  renderBranch(container, node, path, activeRoll) {
-    const roll = activeRoll ? this.ctx.rolls.get('roll@' + activeRoll.path) : null;
-    const plan = branchPlan(this.state, this.ctx, node, roll);
-    switch (plan.kind) {
-      case 'skip': return;
-      case 'reveal': this.revealBranch(container, node, path); return;
-      case 'table': {
-        if (plan.reveal) {
-          // Record the matched outcome for the roll gate: if it carries its own
-          // redirect (a "get lost" <goto>), applyRollGate keeps the onward choices
-          // suppressed so only that redirect is offered (§1.278 → 82). (task 104)
-          if (this.rollGate && node === this.rollGate.outcomesNode) this.rollGate.matchedOutcome = plan.reveal;
-          this.revealBranch(container, plan.reveal, path + '.o' + plan.index);
-        }
-        // Always-available alternatives inside the table (e.g. "or don't try").
-        const choiceKids = Array.from(node.children).filter((c) => c.tagName.toLowerCase() === 'choice');
-        if (choiceKids.length) this.renderChoices(container, node, path, null, choiceKids);
-        return;
-      }
-      default: if (!roll) this.appendChildren(container, node, path);
-    }
-  }
-
-  revealBranch(container, node, path) {
-    const box = document.createElement('span');
-    box.className = 'branch';
-    // apply effects + render inner content
-    this.appendChildren(box, node, path);
-    // if it declares a section (goto target), add a continue link
-    const section = node.getAttribute('section');
-    if (section != null) {
-      const targetBook = node.getAttribute('book') ? Number(node.getAttribute('book')) : this.book;
-      const btn = document.createElement('button');
-      btn.className = 'goto goto-primary';
-      btn.textContent = 'Continue → ' + section;
-      btn.addEventListener('click', () => this.navigate(targetBook, section));
-      box.appendChild(btn);
-    }
-    container.appendChild(box);
-  }
+  // ---- rolls + branches -----------------------------------------------------
+  // The roll widgets (<difficulty>/<random>/<rankcheck>/<training>/<reroll>) and the
+  // branch reveal moved to render-rolls.js (task 119) — plain functions dispatched
+  // from TAG_RENDERERS; renderBranch is imported for the walk/choices call sites.
 
   // ---- fight gating --------------------------------------------------------
   // computeFightGate / computeEscapeCodewords / isDeferredEscapeClear /
