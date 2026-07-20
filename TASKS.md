@@ -343,6 +343,27 @@ stamp and run all sections.
 they silently drop out of the version hash (stale PWA caches on deploy) — extend
 the stamp collector alongside the sw.js precache list and README table.
 
+*Progress (2026-07-19, user scope = phases 1+2; view-file split deferred):* the
+rules/view boundary is re-established — the composite rule logic the DOM class
+had grown to encode inline now lives in three new DOM-free, unit-tested modules,
+each added to `sw.js` REQUIRED + the README table (kept FLAT in `web/js/` so the
+non-recursive stamp collector still hashes them — trap avoided):
+- **1a** `render-rules.js` — blessing veto / spend / guarded-loss rules.
+- **1b** `render-rules.js` (cont.) — reward/payment eligibility (choose-one,
+  priced-item award, roll-gate, forced/optional action, reward-waste) + the
+  shared `ITEM_FAMILY_TAGS`/`CHOOSE_ONE_TAGS` sets.
+- **1c** `render-gates.js` — fight/roll/transfer navigation-gate computation +
+  post-fight deferral decisions (the `tag*`/`apply*` DOM helpers stay in the view).
+- **2** `visit-state.js` — per-visit ctx factory + ctx/return-frame serialization.
+
+`render.js` keeps the `Story`/`previewProse` API unchanged (app.js and tests
+un-churned) and shrank from ~4,450 to under 4,000 lines. Smoke suite RESULT ALL
+PASS (1288) after each slice. **Still open (deferred): Phase 3** — physically
+split the DOM view methods into responsibility-based modules (combat / market /
+actions view), structure TBD (prototype-mixin vs collaborator objects). The
+core "rules out of the view" invariant is now met; Phase 3 is a further
+file-organisation step, not a behaviour or boundary fix.
+
 ---
 
 ## 120. Split the 4,790-line single-scope browser test into focused ES-module suites — HIGH (tests)
