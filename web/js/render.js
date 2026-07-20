@@ -22,7 +22,7 @@ import { animateDice, modal } from './ui.js';
 import {
   computeOutcomeBlessings,
   blessingSpendForGoto, blessingSpendForReroll, ownsSoleLinkedBlessing,
-  ITEM_FAMILY_TAGS, classifyPassive, choiceGate, branchPlan,
+  ITEM_FAMILY_TAGS, classifyPassive, choiceGate, branchPlan, groupPlan, groupRollDefers,
   flagGate as flagGateRule, isSpentSource as isSpentSourceRule,
   linkedRewards as linkedRewardsRule, isCounterReward as isCounterRewardRule,
   isChooseOne as isChooseOneRule, isPricedItemAward as isPricedItemAwardRule,
@@ -1023,65 +1023,11 @@ export class Story {
   // initiate, purchase a blessing, accept a mission…) inside a <group> with a
   // <text> label. These must NOT auto-apply — the player opts in by clicking.
   renderGroup(container, node, path) {
-    // A <group> that bundles a roll (difficulty/random/rankcheck) can't collapse
-    // into a single button — the roll must render as its own widget so the
-    // section's <success>/<failure>/<outcomes> resolve. Render it inline and apply
-    // the group's non-roll effects on the roll event. (task 42)
-    const rollNode = node.querySelector('difficulty, random, rankcheck');
-    if (rollNode) return this.renderGroupWithRoll(container, node, path, rollNode);
-
-    const label = (node.textContent || '').replace(/\s+/g, ' ').trim();
-    // <adjust> is excluded: inside a group it is a modifier for a nested roll
-    // (e.g. "Difficulty 15 if you have climbing gear"), not a group effect. A
-    // bundled <transfer> is the group's own action (§6.490 "fight without a weapon"
-    // stashes the weapon), so it applies headlessly on the group click. (task 107)
-    const effects = Array.from(node.querySelectorAll('lose, tick, gain, set, curse, transfer'));
-    // A bundled item/weapon/armour/tool reward (the hidden quest prize in §1.228/509
-    // gold chain mail, §4.189 Sun Goddess mirror): the group collapses to one button,
-    // so the award can't render its own Take button — grant it headlessly on the
-    // click via the normal award transaction (capacity-checked). (task 96)
-    const itemNodes = Array.from(node.querySelectorAll('item, weapon, armour, tool'));
-    // A bundled <buy> (ship/cargo/tool/item/crew): §5.192 claims the Wrath of God for
-    // 50 Shards and the deed; §4.622 salvages a free Cargo Unit and ticks its codeword.
-    // A collapsed group renders only its label, so without executing the trade the ship/
-    // cargo was never added — permanently unobtainable. Run each through the standalone
-    // market transaction on the group click (price charged here, ship-here/cargo-space
-    // checks enforced, quantity= honoured). No collapsed group carries a <sell>. (task 126)
-    const buyNodes = Array.from(node.querySelectorAll('buy'));
-    // Item/weapon/... rewards linked by flag= to a price this group pays but rendered
-    // OUTSIDE the group — §1.342/§4.111's potion of restoration sits after the group,
-    // inside an affordability <if shards><if item> that flips false the moment the group
-    // is paid, so the reward's own gated Take button vanishes before it can be clicked.
-    // The group is the real payment, so grant those awards on its click and consume the
-    // flag so the (now-hidden) Take can never double-grant. (task 125)
-    const linkedAwards = [];
-    if (this.sectionEl) {
-      effects.forEach((fx) => {
-        const k = fx.getAttribute('price');
-        if (!k) return;
-        this.sectionEl.querySelectorAll(`[flag="${k}"]`).forEach((r) => {
-          if (ITEM_FAMILY_TAGS.has(r.tagName.toLowerCase()) && !node.contains(r)) linkedAwards.push(r);
-        });
-      });
-    }
-    // A <rest> child heals on the group click (book6/628 "regain 1 Stamina point"):
-    // applyRest headlessly, since the group renders as one button, not a rest widget.
-    // Without this the daily inn group cleared its flag but never healed. (task 61)
-    const restNodes = Array.from(node.querySelectorAll('rest'));
-    // A group may also carry navigation (e.g. "cross off 30 Shards and turn to 99
-    // in that book"): apply the effects and then follow the goto/return on click.
-    const gotoNode = node.querySelector('goto');
-    const returnNode = node.querySelector('return');
-    // A death-revival group bundles the "use your deal" trigger (a no-section
-    // <resurrection/>) with the price of coming back — erase possessions/money/ship
-    // (§3.123/560/6.140/1.680) or just the ship (§1.616). On the group action, apply
-    // those losses, consume the earliest deal (revive at half Stamina) and turn to
-    // the deal's own section — instead of ignoring the resurrection child and leaving
-    // the player erased but stranded. (task 98)
-    const resNode = node.querySelector('resurrection');
-    const isRevival = !!resNode && !resNode.getAttribute('section');
-    if (!label || (!effects.length && !itemNodes.length && !buyNodes.length && !restNodes.length && !gotoNode && !returnNode && !isRevival)) {
-      // no visible action (or nothing to apply) — plain inline wrapper
+    // Classification (what the group is and what its click applies) lives in
+    // groupPlan (render-rules.js — task 119); the view builds the matching control.
+    const plan = groupPlan(this.sectionEl, node);
+    if (plan.kind === 'roll') return this.renderGroupWithRoll(container, node, path, plan.rollNode);
+    if (plan.kind === 'inline') {
       const span = document.createElement('span');
       this.appendChildren(span, node, path);
       container.appendChild(span);
@@ -1092,29 +1038,29 @@ export class Story {
     const btn = document.createElement('button');
     btn.className = 'group-action' + (done ? ' done' : '');
     btn.disabled = done;
-    btn.textContent = (done ? '☑ ' : '☐ ') + label;
+    btn.textContent = (done ? '☑ ' : '☐ ') + plan.label;
     if (!done) {
       btn.addEventListener('click', () => {
-        effects.forEach((fx) => applyEffect(fx, this.state, {}));
-        buyNodes.forEach((b) => this.runBuyNode(b));
-        itemNodes.forEach((n) => this.grantItemNode(n));
-        linkedAwards.forEach((n) => { this.grantItemNode(n); const f = n.getAttribute('flag'); if (f) this.state.setFlag(f, false); });
-        restNodes.forEach((r) => {
+        plan.effects.forEach((fx) => applyEffect(fx, this.state, {}));
+        plan.buyNodes.forEach((b) => this.runBuyNode(b));
+        plan.itemNodes.forEach((n) => this.grantItemNode(n));
+        plan.linkedAwards.forEach((n) => { this.grantItemNode(n); const f = n.getAttribute('flag'); if (f) this.state.setFlag(f, false); });
+        plan.restNodes.forEach((r) => {
           const perUse = r.hasAttribute('stamina') ? r.getAttribute('stamina') : null;
           const cost = r.getAttribute('shards') ? resolveValue(this.state, r.getAttribute('shards')) : 0;
           applyRest(this.state, perUse, cost);
         });
         this.ctx.applied.add(key);
-        if (isRevival) {
+        if (plan.isRevival) {
           // Consume the deal and turn to its section (the revive rule — half max
           // Stamina — lives in engine.js). Guard against a missing deal.
           const target = reviveWithResurrection(this.state);
           if (target) { this.navigate(target.book, target.section); return; }
           this.rerender();
-        } else if (gotoNode) {
-          const b = gotoNode.getAttribute('book') ? Number(gotoNode.getAttribute('book')) : this.book;
-          this.navigate(b, gotoNode.getAttribute('section'));
-        } else if (returnNode) {
+        } else if (plan.gotoNode) {
+          const b = plan.gotoNode.getAttribute('book') ? Number(plan.gotoNode.getAttribute('book')) : this.book;
+          this.navigate(b, plan.gotoNode.getAttribute('section'));
+        } else if (plan.returnNode) {
           this.goBack();
         } else {
           this.rerender();
@@ -1157,12 +1103,9 @@ export class Story {
       }
       if (tag === 'text') { this.appendChildren(span, k, kp); return; }
       if (PASSIVE_TAGS.has(tag) || tag === 'rest') {
-        // A bundled cache lock/unlock (task 38) means "freeze the bet on the roll",
-        // so it defers with the visible consequences even when hidden — unlike a
-        // hidden price-flag arming, which must still fire on entry.
-        const special = (k.getAttribute('special') || '').toLowerCase();
-        const cacheLockTick = tag === 'tick' && (special === 'lock' || special === 'unlock');
-        if (boolAttr(k.getAttribute('hidden')) && !cacheLockTick) {
+        // groupRollDefers (render-rules.js) decides: visible costs/consequences (and a
+        // bet lock/unlock, task 38) defer to the roll; hidden book-keeping arms on entry.
+        if (!groupRollDefers(k)) {
           this.renderElement(span, k, kp); // hidden book-keeping arms on entry (renderPassive)
         } else {
           deferred.push(k); // visible cost/consequence (or a bet lock/unlock) — apply on the roll

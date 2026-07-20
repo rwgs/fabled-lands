@@ -214,6 +214,87 @@ export function isEconomicPayment(node) {
   return hasShards || hasItem || hasCargo || hasShip;
 }
 
+// ---- group classification (tasks 42/61/96/98/107/125/126 — task 119 phase 3) --
+
+// Classify a <group> — the books' "optional bundle of effects behind one opt-in" —
+// into the ONE way it renders and what its click must apply:
+//   { kind:'roll', rollNode } — bundles a die roll: can't collapse to a button, the roll
+//     renders as its own widget and drives the section's branches (task 42)
+//   { kind:'inline' }         — no label or nothing to apply: a plain inline wrapper
+//   { kind:'action', label, effects, itemNodes, buyNodes, linkedAwards, restNodes,
+//     gotoNode, returnNode, isRevival } — one click-to-apply button; the view runs the
+//     listed transactions on click, then navigates/returns/revives as flagged
+export function groupPlan(sectionEl, node) {
+  const rollNode = node.querySelector('difficulty, random, rankcheck');
+  if (rollNode) return { kind: 'roll', rollNode };
+
+  const label = (node.textContent || '').replace(/\s+/g, ' ').trim();
+  // <adjust> is excluded: inside a group it is a modifier for a nested roll
+  // (e.g. "Difficulty 15 if you have climbing gear"), not a group effect. A
+  // bundled <transfer> is the group's own action (§6.490 "fight without a weapon"
+  // stashes the weapon), so it applies headlessly on the group click. (task 107)
+  const effects = Array.from(node.querySelectorAll('lose, tick, gain, set, curse, transfer'));
+  // A bundled item/weapon/armour/tool reward (the hidden quest prize in §1.228/509
+  // gold chain mail, §4.189 Sun Goddess mirror): the group collapses to one button,
+  // so the award can't render its own Take button — grant it headlessly on the
+  // click via the normal award transaction (capacity-checked). (task 96)
+  const itemNodes = Array.from(node.querySelectorAll('item, weapon, armour, tool'));
+  // A bundled <buy> (ship/cargo/tool/item/crew): §5.192 claims the Wrath of God for
+  // 50 Shards and the deed; §4.622 salvages a free Cargo Unit and ticks its codeword.
+  // A collapsed group renders only its label, so without executing the trade the ship/
+  // cargo was never added — permanently unobtainable. Run each through the standalone
+  // market transaction on the group click (price charged here, ship-here/cargo-space
+  // checks enforced, quantity= honoured). No collapsed group carries a <sell>. (task 126)
+  const buyNodes = Array.from(node.querySelectorAll('buy'));
+  // Item/weapon/... rewards linked by flag= to a price this group pays but rendered
+  // OUTSIDE the group — §1.342/§4.111's potion of restoration sits after the group,
+  // inside an affordability <if shards><if item> that flips false the moment the group
+  // is paid, so the reward's own gated Take button vanishes before it can be clicked.
+  // The group is the real payment, so grant those awards on its click and consume the
+  // flag so the (now-hidden) Take can never double-grant. (task 125)
+  const linkedAwards = [];
+  if (sectionEl) {
+    effects.forEach((fx) => {
+      const k = fx.getAttribute('price');
+      if (!k) return;
+      sectionEl.querySelectorAll(`[flag="${k}"]`).forEach((r) => {
+        if (ITEM_FAMILY_TAGS.has(r.tagName.toLowerCase()) && !node.contains(r)) linkedAwards.push(r);
+      });
+    });
+  }
+  // A <rest> child heals on the group click (book6/628 "regain 1 Stamina point"):
+  // applied headlessly, since the group renders as one button, not a rest widget. (task 61)
+  const restNodes = Array.from(node.querySelectorAll('rest'));
+  // A group may also carry navigation (e.g. "cross off 30 Shards and turn to 99
+  // in that book"): apply the effects and then follow the goto/return on click.
+  const gotoNode = node.querySelector('goto');
+  const returnNode = node.querySelector('return');
+  // A death-revival group bundles the "use your deal" trigger (a no-section
+  // <resurrection/>) with the price of coming back — erase possessions/money/ship
+  // (§3.123/560/6.140/1.680) or just the ship (§1.616). On the group action, apply
+  // those losses, consume the earliest deal (revive at half Stamina) and turn to
+  // the deal's own section — instead of ignoring the resurrection child and leaving
+  // the player erased but stranded. (task 98)
+  const resNode = node.querySelector('resurrection');
+  const isRevival = !!resNode && !resNode.getAttribute('section');
+
+  if (!label || (!effects.length && !itemNodes.length && !buyNodes.length && !restNodes.length && !gotoNode && !returnNode && !isRevival)) {
+    return { kind: 'inline' }; // no visible action (or nothing to apply)
+  }
+  return { kind: 'action', label, effects, itemNodes, buyNodes, linkedAwards, restNodes, gotoNode, returnNode, isRevival };
+}
+
+// Does a passive/rest child of a roll-bundling group DEFER to the roll event (JaFL
+// treats the roll as the group's action), rather than arming on entry? Visible costs/
+// consequences defer; hidden book-keeping (an armed price flag / cache lock — book3/680,
+// book1/91, book2/138) still applies on entry. The exception: a bundled cache lock/unlock
+// tick (task 38) means "freeze the bet on the roll", so it defers even when hidden.
+export function groupRollDefers(node) {
+  const special = (node.getAttribute('special') || '').toLowerCase();
+  const cacheLockTick = node.tagName.toLowerCase() === 'tick' && (special === 'lock' || special === 'unlock');
+  return !boolAttr(node.getAttribute('hidden')) || cacheLockTick;
+}
+
 // ---- choice eligibility (tasks 28/30/47/55/89/110/133 — task 119 phase 3) ----
 
 // price/flag gate on a choice/goto (JaFL GotoNode.canUse): a flag="k" exit is usable

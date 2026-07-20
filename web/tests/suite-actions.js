@@ -1310,6 +1310,33 @@ export async function run(ctx) {
       ok('task119: branchPlan non-branch element → prose', plan('<p>words</p>', null).kind === 'prose');
     }
 
+    // --- task 119 (phase 3): groupPlan — <group> classification ----------------------
+    {
+      ok('task119: groupPlan routes a roll-bundling group to its roll widget (task 42)',
+         (() => { const gp = rules.groupPlan(null, parse('<group><text>Try</text><random var="x"/></group>')); return gp.kind === 'roll' && gp.rollNode.tagName.toLowerCase() === 'random'; })());
+      ok('task119: groupPlan wordless/effectless group → inline wrapper',
+         rules.groupPlan(null, parse('<group><text>Just words</text></group>')).kind === 'inline');
+
+      const act = rules.groupPlan(null, parse('<group><text>Buy the house</text><lose shards="200"/><tick codeword="Casa"/></group>'));
+      ok('task119: groupPlan effectful labelled group → action with its effects',
+         act.kind === 'action' && act.label === 'Buy the house' && act.effects.length === 2 && !act.isRevival && !act.gotoNode);
+
+      const nav = rules.groupPlan(null, parse('<group><text>Pay and go</text><lose shards="30"/><goto section="99"/></group>'));
+      ok('task119: groupPlan carries the group\'s navigation', nav.kind === 'action' && !!nav.gotoNode);
+
+      const rev = rules.groupPlan(null, parse('<group><text>Use your deal</text><lose shards="*"/><resurrection/></group>'));
+      ok('task119: groupPlan flags a no-section resurrection as a revival (task 98)', rev.kind === 'action' && rev.isRevival === true);
+
+      const sec125 = parse('<section><group><text>Pay 100</text><lose shards="100" price="pot"/></group><item flag="pot" name="potion of restoration"/></section>');
+      const linked = rules.groupPlan(sec125, sec125.querySelector('group'));
+      ok('task119: groupPlan collects flag-linked awards outside the group (task 125)',
+         linked.kind === 'action' && linked.linkedAwards.length === 1 && linked.linkedAwards[0].getAttribute('name') === 'potion of restoration');
+
+      ok('task119: groupRollDefers visible cost defers to the roll', rules.groupRollDefers(parse('<lose shards="10">bet</lose>')) === true);
+      ok('task119: groupRollDefers hidden book-keeping arms on entry', rules.groupRollDefers(parse('<tick price="k" hidden="t"/>')) === false);
+      ok('task119: groupRollDefers a hidden cache lock still defers (task 38)', rules.groupRollDefers(parse('<tick special="lock" cache="bet" hidden="t"/>')) === true);
+    }
+
     // --- task 113: <lose item="?" bonus="N"> enforces the bonus= filter ---
     // §4.456's Tambu offering routes its +2/+3 gifts through <lose item="?" bonus=…
     // price=…>; the bonus filter must be honoured so only a genuinely +2/+3 item can be
