@@ -376,12 +376,27 @@ non-recursive stamp collector still hashes them — trap avoided):
 - **2** `visit-state.js` — per-visit ctx factory + ctx/return-frame serialization.
 
 `render.js` keeps the `Story`/`previewProse` API unchanged (app.js and tests
-un-churned) and shrank from ~4,450 to under 4,000 lines. Smoke suite RESULT ALL
-PASS (1288) after each slice. **Still open (deferred): Phase 3** — physically
-split the DOM view methods into responsibility-based modules (combat / market /
-actions view), structure TBD (prototype-mixin vs collaborator objects). The
-core "rules out of the view" invariant is now met; Phase 3 is a further
-file-organisation step, not a behaviour or boundary fix.
+un-churned) and shrank from ~4,450 to under 4,000 lines after phases 1-2. Smoke
+suite RESULT ALL PASS after each slice. The core "rules out of the view"
+invariant is met.
+
+*Phase 3 partial (2026-07-19; user then chose to stop):* began the physical DOM-
+view split via prototype mixins (each module exports a methods object mixed onto
+`Story.prototype` with `Object.assign`). Done + verified (smoke RESULT ALL PASS
+1288 each), added to `sw.js` + README:
+- `render-util.js` — shared display helpers so view modules avoid importing render.js.
+- `render-combat.js` — the fight view (single/group battle widgets, round controls).
+- `render-market.js` — the economy view (markets, buy/sell, rest, caches, transfer, resurrection).
+
+`render.js` is now ~2,900 lines (from ~4,450) and dropped the combat.js import +
+most of market.js. **NOTE — structure divergence:** these three used prototype
+mixins, but the fifth-review guidance below prefers *plain functions taking the
+story as first argument*. The remaining "actions" view split (rolls/branches,
+passive/payments/rewards/groups, choices/goto) is **not done** — and per that
+guidance should first extract the still-in-view rule-semantic pockets
+(`classifyPassive`, `grantChoosableReward`, `choiceGate`, branch resolution,
+`groupPlan`) as tested DOM-free planners before moving any DOM. Revisit whether
+to also restyle the combat/market mixins to the plain-function pattern.
 
 *Phase-3 guidance (2026-07-19, fifth review — renderer sweep):* the boundary
 claim is ~80% true: the extracted predicates are clean, but several
