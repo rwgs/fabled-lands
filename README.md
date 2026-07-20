@@ -51,7 +51,7 @@ fabled-lands/
     ├── manifest.webmanifest, sw.js       PWA shell + offline service worker
     ├── css/style.css
     ├── js/            app.js, data.js, state.js, rules.js, engine.js,
-    │                  combat.js, market.js, render.js, render-rules.js, ui.js, tts.js, version.js
+    │                  combat.js, market.js, render.js, render-rules.js, render-gates.js, ui.js, tts.js, version.js
     ├── assets/        icon.svg, world-map.jpg
     └── data/          meta.json, book1.json … book6.json   (generated)
 ```
@@ -177,12 +177,13 @@ structure of the books is preserved exactly.
 | `market.js` | Headless economy — buying/selling goods, weapons, armour, ships, cargo, and crew upgrades. No DOM. |
 | `render.js` | Turns a `<section>` tree into interactive DOM and wires all interactions, delegating the actual rules to `engine.js` / `combat.js` / `market.js` / `render-rules.js`. |
 | `render-rules.js` | DOM-free section-render decisions the renderer used to encode inline: blessing veto / spend / guarded-loss rules, and reward/payment eligibility (choose-one, priced item award, roll-gate, forced/optional actions, reward-waste). No DOM. |
+| `render-gates.js` | DOM-free navigation-gate computation: which onward navigations to hold behind an unresolved fight / mandatory roll / forced transfer, and which post-fight effects to defer. The renderer tags and disables the buttons. No DOM. |
 | `ui.js` | Adventure-Sheet panel, dice animation, modals, toasts. |
 | `app.js` | Bootstrap, screens, routing, character creation, death/resurrection, saves. |
 
 The rules were deliberately split **out of the renderer**: `render.js` builds DOM and
 handles clicks, while all game logic lives in DOM-free modules (`engine.js`, `combat.js`,
-`market.js`, `render-rules.js`). This keeps the rules unit-testable in isolation — `web/_test.html` exercises
+`market.js`, `render-rules.js`, `render-gates.js`). This keeps the rules unit-testable in isolation — `web/_test.html` exercises
 combat, economy, rolls and effects directly, without touching the DOM.
 
 ### The rendering model

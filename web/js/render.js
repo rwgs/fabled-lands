@@ -28,19 +28,17 @@ import {
   rewardWasteReason as rewardWasteReasonRule, isOptionalForce as isOptionalForceRule,
   forcedChoiceGroup as forcedChoiceGroupRule, isEconomicPayment as isEconomicPaymentRule,
 } from './render-rules.js';
+import {
+  computeFightGate, computeEscapeCodewords, aggregateFightOutcome,
+  isDeferredEscapeClear, isDeferredTagCleanup, isDeferredDeadChain,
+  computeRollGate, computeTransferGate,
+} from './render-gates.js';
 
 const INLINE_STYLE = { b: 'strong', i: 'em', u: 'u', caps: 'span' };
 const BRANCH_TAGS = new Set(['success', 'failure', 'outcomes']);
 const ROLL_TAGS = new Set(['difficulty', 'random', 'rankcheck', 'training']);
-// Roll-gate scoping (task 104): a roll inside one of these wrappers is conditionally
-// present (optional), so its onward choices are not gated; and a nav node inside one
-// of these is a roll resolution, not onward navigation, so it is never gated.
-const ROLLGATE_OPTIONAL_WRAP = new Set(['if', 'elseif', 'else', 'success', 'failure', 'outcome', 'group']);
-const ROLLGATE_OUTCOME_WRAP = new Set(['outcomes', 'outcome']);
-// A forced <transfer> inside a <group> is applied by the group's own action button
-// (renderGroup), not as a standalone forced action — so it does not drive the
-// forced-transfer nav gate (task 107).
-const TRANSFER_GROUP_WRAP = new Set(['group']);
+// The ROLLGATE_*/TRANSFER_GROUP wrapper tag sets moved to render-gates.js (task 119),
+// used only by the navigation-gate computations that also moved there.
 // Note: <adjust> is deliberately NOT here. In this corpus it is always a die-roll
 // MODIFIER (a child of <difficulty>/<random>/<rankcheck>, consumed by
 // childAdjustment) — never a passive effect. Auto-applying it on view would
@@ -532,22 +530,22 @@ export class Story {
     // Mid-fight escape brackets (task 54): codewords ticked in-section that also gate
     // a box= choice mark a "flee/surrender while the fight is live" option — computed
     // before the fight gate so it can leave those choices ungated.
-    this.escapeCodewords = this.computeEscapeCodewords(el);
+    this.escapeCodewords = computeEscapeCodewords(el);
     // Fight gating: while an unresolved <fight> exists, the navigation that
     // follows it must not be clickable (else the player skips the fight). See
-    // computeFightGate / applyFightGate.
-    this.fightGate = this.computeFightGate(el);
+    // computeFightGate (render-gates.js) / applyFightGate.
+    this.fightGate = computeFightGate(el, this.escapeCodewords);
     // Travel/encounter roll gating: a mandatory <random> feeding an <outcomes> table
     // must be rolled before the section's onward <choices> unlock, and a "get lost"
     // outcome that carries its own <goto> suppresses those choices (task 104). See
     // computeRollGate / applyRollGate.
-    this.rollGate = this.computeRollGate(el);
+    this.rollGate = computeRollGate(el);
     // Forced-transfer gating (task 107): a visible, forced (default force="t"),
     // unpriced <transfer> is a mandatory action — the onward navigation after it
     // stays locked until it runs. renderTransfer flags pendingTransfer while such a
     // transfer is still live this pass; applyTransferGate then disables the tagged
     // navs. Reset per render.
-    this.transferGate = this.computeTransferGate(el);
+    this.transferGate = computeTransferGate(el);
     this.pendingTransfer = false;
     // Blessing-guarded storm/capsize outcomes (task 108): the blessings named on this
     // section's <outcome blessing="X"> hazards. A held blessing vetoes that outcome
@@ -694,7 +692,7 @@ export class Story {
           // confiscate-return <transfer> (book2/462) — mid-fight. Hold the WHOLE chain
           // inactive until the fight is decided (won or lost); the else must not slip
           // active either, so the flag rides the whole chain. (task 39)
-          chainDeferred = tag === 'if' && this.isDeferredDeadChain(node);
+          chainDeferred = tag === 'if' && isDeferredDeadChain(node, this.sectionFights);
           active = chainDeferred ? false : (tag === 'else' ? true : evaluateCondition(node, this.state));
           chainDone = active;
         } else if (chainDeferred) {
@@ -1342,7 +1340,7 @@ export class Story {
     // A fight-escape bracket's closing <lose codeword> (after the fight) is deferred
     // until the fight is won, so the mid-fight surrender/flee box= choice stays live
     // while the fight is unresolved or the player is fleeing (task 54).
-    if (this.isDeferredEscapeClear(node)) {
+    if (isDeferredEscapeClear(node, this.escapeCodewords, this.sectionFights)) {
       if (!hidden) {
         const span = document.createElement('span');
         span.className = 'fx';
@@ -1359,7 +1357,7 @@ export class Story {
     // raise/lower/destroy never lands; a stray tag would also leak onto the weapon for a
     // later re-visit. Defer it to when the section is left (see the navigate wrapper) so
     // the tag survives the whole visit for its own ticks and is stripped exactly once. (task 88)
-    if (this.isDeferredTagCleanup(node)) {
+    if (isDeferredTagCleanup(node)) {
       this.deferredCleanups.set('cleanup@' + path, node);
       return null; // hidden bookkeeping: renders nothing; applied on leaving the section
     }
@@ -1464,7 +1462,7 @@ export class Story {
     // (win / unconditional → on a win; lose → on a loss). computeFightGate tagged it.
     const fightRole = this.fightGate && this.fightGate.effectNodes.get(node);
     if (fightRole && !this.inactive) {
-      const outcome = this.aggregateFightOutcome(this.sectionFights);
+      const outcome = aggregateFightOutcome(this.sectionFights);
       const take = outcome === 'win' ? fightRole !== 'lose'
                  : outcome === 'lose' ? fightRole === 'lose'
                  : false; // unresolved or fled → hold (show the words, apply nothing)
@@ -2882,116 +2880,9 @@ export class Story {
   }
 
   // ---- fight gating --------------------------------------------------------
-  // Identify the navigation that follows a <fight> and which of it is the
-  // "if you lose…" branch. While the fight is unresolved these controls are
-  // disabled; on a win the lose-branch is disabled; on a loss only it is enabled.
-  // Also classifies each BARE post-fight <lose>/<gain> effect (one written in
-  // win/lose prose rather than inside an <if dead>/<success>/<failure> wrapper) as
-  // 'win'/'lose'/'uncond', so renderPassive can hold it until the fight resolves
-  // instead of applying it on entry (task 69).
-  // Returns { navNodes:Set, loseNodes:Set, effectNodes:Map, hasLosePath } or null.
-  computeFightGate(sectionEl) {
-    if (!sectionEl || !sectionEl.querySelector('fight')) return null;
-    const navNodes = new Set(), loseNodes = new Set(), effectNodes = new Map();
-    // Conservative: only clear "you lose / are beaten / reduced to 0" cues mark a
-    // lose-branch. WIN cues merely veto a lose-mark (so "…dead. If you win…" stays
-    // a win). Under-marking just falls back to normal death — never strands a win.
-    const LOSE = /(you lose|if you lose|are beaten|are defeated|reduced to \d|pass out|knocked (out|unconscious)|battered into|lose the (fight|combat|battle)|you are killed|you are slain)/i;
-    const WIN = /(you win|if you win|defeat|reduce the|kill the|slay|victor|survive|beat the|overcome the|are victorious)/i;
-    // Wrappers that already gate their contents to a branch/action — an effect
-    // inside one is not a "bare" post-fight effect (it applies via that branch).
-    const WRAP = new Set(['if', 'elseif', 'else', 'success', 'failure', 'outcomes', 'group', 'choice']);
-    let seenFight = false, recent = '';
-    const walk = (n, skip, gated) => {
-      for (const ch of Array.from(n.childNodes)) {
-        if (ch.nodeType === Node.TEXT_NODE) { if (seenFight) recent = (recent + ' ' + (ch.nodeValue || '')).slice(-220); continue; }
-        if (ch.nodeType !== Node.ELEMENT_NODE) continue;
-        const tag = ch.tagName.toLowerCase();
-        if (tag === 'fight') { seenFight = true; recent = ''; walk(ch, true, gated); continue; }
-        const childSkip = skip || tag === 'flee' || tag === 'fightdamage'; // Flee/fightdamage own gotos aren't gated
-        const childGated = gated || WRAP.has(tag);
-        // A <choice flee="t"> is "flee at any time" — never gate it (book3/662),
-        // so the player can bail mid-fight. A box= choice keyed to a mid-fight escape
-        // codeword (task 54) is likewise ungated: its own box check governs it, so it
-        // is live only while the escape codeword is ticked (surrender/flee routes).
-        const isFleeChoice = tag === 'choice' && boolAttr(ch.getAttribute('flee'));
-        const isEscapeChoice = ch.getAttribute('box') != null && this.escapeCodewords.has(ch.getAttribute('box'));
-        if (seenFight && !skip && !isFleeChoice && !isEscapeChoice && (tag === 'goto' || tag === 'choice' || tag === 'return')) {
-          navNodes.add(ch);
-          // An explicit dead="t" goto/choice IS the "you are killed" branch — prefer
-          // that precise marker over the prose heuristic for the lose-branch (task 28).
-          if (boolAttr(ch.getAttribute('dead')) || (LOSE.test(recent) && !WIN.test(recent))) loseNodes.add(ch);
-          recent = '';
-        }
-        // A bare, non-hidden <lose>/<gain> after the fight is a fight-outcome effect.
-        // (hidden="t" bookkeeping — e.g. task-54 escape clears — is left to its own
-        // deferral.) Classify by the surrounding prose, defaulting to unconditional.
-        if (seenFight && !skip && !gated && (tag === 'lose' || tag === 'gain') && !boolAttr(ch.getAttribute('hidden'))) {
-          const role = LOSE.test(recent) && !WIN.test(recent) ? 'lose'
-                     : WIN.test(recent) && !LOSE.test(recent) ? 'win'
-                     : 'uncond';
-          effectNodes.set(ch, role);
-        }
-        walk(ch, childSkip, childGated);
-      }
-    };
-    walk(sectionEl, false, false);
-    if (!navNodes.size && !effectNodes.size) return null;
-    return { navNodes, loseNodes, effectNodes, hasLosePath: loseNodes.size > 0 };
-  }
-
-  // Mid-fight escape codewords (task 54): a codeword that is BOTH ticked somewhere in
-  // this fight section (at the top as a "fight in progress" marker — book2/582,
-  // book3/211 — or inside a flee <group>/<flee> — book2/442, book2/207) AND used as a
-  // box= gate on a choice. That box= choice is the surrender/flee route, valid only
-  // while the fight is live. Empty unless the section has a fight.
-  computeEscapeCodewords(sectionEl) {
-    if (!sectionEl || !sectionEl.querySelector('fight')) return new Set();
-    const boxes = new Set();
-    sectionEl.querySelectorAll('[box]').forEach((c) => { const b = c.getAttribute('box'); if (b) boxes.add(b); });
-    if (!boxes.size) return new Set();
-    const ticked = new Set();
-    sectionEl.querySelectorAll('tick[codeword]').forEach((t) => {
-      t.getAttribute('codeword').split(/[|,]/).forEach((c) => ticked.add(c.trim()));
-    });
-    return new Set([...boxes].filter((b) => ticked.has(b)));
-  }
-
-  // A fight-escape bracket's closing <lose codeword="X"> — one that sits AFTER the
-  // fight and clears an escape codeword — must not fire while the fight is still
-  // unresolved (or the player is fleeing): un-ticking the box now would revoke the
-  // surrender/flee choice before it can be taken. Defer it until the fight is WON,
-  // at which point the escape correctly closes. An entry-clear <lose codeword> before
-  // the fight (book2/207/442) is left alone. (task 54)
-  isDeferredEscapeClear(node) {
-    if (node.tagName.toLowerCase() !== 'lose') return false;
-    const cw = node.getAttribute('codeword');
-    if (!cw || !this.escapeCodewords.size) return false;
-    if (!cw.split(/[|,]/).some((c) => this.escapeCodewords.has(c.trim()))) return false;
-    if (!this.sectionFights.length) return false; // before the fight → an entry clear, apply now
-    return this.aggregateFightOutcome(this.sectionFights) !== 'win';
-  }
-
-  // A hidden <tick removetag="X"> — an end-of-section selection-tag cleanup that must
-  // not run until the tag has done its job (§5.386). Deferred to the section exit. (task 88)
-  isDeferredTagCleanup(node) {
-    return node.tagName.toLowerCase() === 'tick'
-      && boolAttr(node.getAttribute('hidden'))
-      && node.getAttribute('removetag') != null;
-  }
-
-  // A dead=-gated <if> chain positioned AFTER a fight is that fight's win/lose
-  // outcome (book2/462 confiscate-return, book6/348's "if you win" reward, …).
-  // Defer the whole chain until the fight is decided: while it is unresolved the
-  // player is still alive, which would wrongly activate the "if you win" branch and
-  // apply its rewards / confiscate-return before a blow is struck. Once the fight
-  // resolves (win → alive; lose → dead), the normal dead= test is correct. (task 39)
-  isDeferredDeadChain(node) {
-    if (node.getAttribute('dead') == null) return false;   // only fight-outcome gates
-    if (!this.sectionFights.length) return false;          // no fight before this node
-    const outcome = this.aggregateFightOutcome(this.sectionFights);
-    return outcome !== 'win' && outcome !== 'lose';        // still unresolved (or fled) → hold
-  }
+  // computeFightGate / computeEscapeCodewords / isDeferredEscapeClear /
+  // isDeferredTagCleanup / isDeferredDeadChain / aggregateFightOutcome moved to
+  // render-gates.js (task 119); the tag*/apply* view helpers below consume their output.
 
   // Tag a rendered nav button with its fight role, for applyFightGate to act on.
   tagFightNav(node, btn) {
@@ -3025,56 +2916,8 @@ export class Story {
   }
 
   // ---- travel / encounter roll gating (task 104) ---------------------------
-  // The overland/river/sea idiom is a MANDATORY <random> whose <outcomes> resolve
-  // the leg, followed by a <choices> block of onward destinations. The port draws
-  // those choices independently of the roll, so (1) they are live before the
-  // encounter is rolled — you can leave without rolling — and (2) a "get lost"
-  // outcome that carries its own <goto> (§1.278 → 82, §1.548 → 474) doesn't stop the
-  // player ignoring it and picking a destination anyway. This gate holds the onward
-  // navigation until the roll resolves; once resolved, if the matched outcome
-  // redirects, the onward choices stay suppressed (only that redirect is offered),
-  // otherwise they unlock. Scoped to a mandatory roll: a pay-gated ("pay to spin")
-  // or conditionally-present roll is OPTIONAL — the choices beside it stay live
-  // (§5.674's physician cure, where declining and leaving must remain possible).
-  // Returns { rollNode, outcomesNode, navNodes:Set, rollPath, matchedOutcome } or null.
-  computeRollGate(sectionEl) {
-    if (!sectionEl) return null;
-    const outcomesNode = sectionEl.querySelector('outcomes');
-    if (!outcomesNode) return null;
-    // The mandatory roll feeding those outcomes: a <random> before the table that is
-    // neither pay-gated (flag=/price= → the "pay to spin" cost, book5/674) nor inside
-    // a conditional/branch wrapper (<if>/<success>/… → only sometimes present).
-    const rollNode = Array.from(sectionEl.querySelectorAll('random')).find((r) => {
-      if (!(r.compareDocumentPosition(outcomesNode) & Node.DOCUMENT_POSITION_FOLLOWING)) return false;
-      if (r.getAttribute('price') != null) return false;
-      const fl = r.getAttribute('flag');
-      if (fl != null && this.isRollGate(fl)) return false;
-      return !this.hasAncestorTag(r, ROLLGATE_OPTIONAL_WRAP);
-    });
-    if (!rollNode) return null;
-    // Onward navigation to gate: choice/goto/return that follows the roll and sits
-    // OUTSIDE the outcomes table (the table's own gotos are the roll's resolutions,
-    // revealed by renderBranch, and must stay live). A flee="t" choice is never gated.
-    const navNodes = new Set();
-    sectionEl.querySelectorAll('choice, goto, return').forEach((n) => {
-      if (!(rollNode.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING)) return;
-      if (this.hasAncestorTag(n, ROLLGATE_OUTCOME_WRAP)) return;
-      if (boolAttr(n.getAttribute('flee'))) return;
-      navNodes.add(n);
-    });
-    if (!navNodes.size) return null; // pure roll-to-goto travel (no onward choices) — nothing to gate
-    return { rollNode, outcomesNode, navNodes, rollPath: null, matchedOutcome: null };
-  }
-
-  // Does an ancestor of node carry one of these (lowercased) tag names? Walks up to
-  // the section root, stopping at the document. (A manual sibling of DOM `closest`,
-  // kept explicit like computeFightGate's walk for the XML-parsed section tree.)
-  hasAncestorTag(node, tagSet) {
-    for (let p = node.parentNode; p && p.nodeType === Node.ELEMENT_NODE; p = p.parentNode) {
-      if (tagSet.has(p.tagName.toLowerCase())) return true;
-    }
-    return false;
-  }
+  // computeRollGate and hasAncestorTag moved to render-gates.js (task 119); the
+  // tag*/apply* view helpers below consume computeRollGate's output.
 
   // Tag a rendered nav button as roll-gated, for applyRollGate to act on.
   tagRollNav(node, btn) {
@@ -3109,31 +2952,8 @@ export class Story {
   }
 
   // ---- forced-transfer gating (task 107) -----------------------------------
-  // A visible, forced (default force="t"), unpriced <transfer> is a mandatory
-  // action: the onward navigation that follows it must not be clickable until it
-  // runs (else the player skips the offering/confiscation). Collect that onward
-  // navigation (choice/goto/return after the first such transfer, outside it and
-  // outside any <group> that owns the transfer as its own action). Returns
-  // { navNodes:Set } or null when the section has no forced transfer to gate.
-  computeTransferGate(sectionEl) {
-    if (!sectionEl) return null;
-    const forced = Array.from(sectionEl.querySelectorAll('transfer')).filter((t) =>
-      !boolAttr(t.getAttribute('hidden'))
-      && t.getAttribute('price') == null
-      && (t.getAttribute('force') == null || boolAttr(t.getAttribute('force'), true))
-      && !this.hasAncestorTag(t, TRANSFER_GROUP_WRAP));
-    if (!forced.length) return null;
-    const first = forced[0];
-    const navNodes = new Set();
-    sectionEl.querySelectorAll('choice, goto, return').forEach((n) => {
-      if (!(first.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING)) return;
-      if (forced.some((t) => t.contains(n))) return; // navigation inside the transfer's own words
-      if (boolAttr(n.getAttribute('flee'))) return;
-      navNodes.add(n);
-    });
-    if (!navNodes.size) return null;
-    return { navNodes };
-  }
+  // computeTransferGate moved to render-gates.js (task 119); the tag*/apply* view
+  // helpers below consume its output.
 
   // Tag a rendered nav button as forced-transfer-gated, for applyTransferGate.
   tagTransferNav(node, btn) {
@@ -3154,19 +2974,7 @@ export class Story {
   }
 
   // ---- fight ---------------------------------------------------------------
-  // The aggregate outcome of a section's sequential fights (task 45): a section
-  // is only WON once every fight is won; a LOSS on any fight (death deferred to
-  // an "if you lose…" branch) makes the whole section a loss; a flee ends it;
-  // otherwise it is still unresolved (null — the gate stays shut). This is what
-  // applyFightGate and the death-deferral guard read, so dying to (or winning)
-  // any fight but the last is tracked, not just the document-order last one.
-  aggregateFightOutcome(fights) {
-    if (!fights.length) return null;
-    if (fights.some((f) => f.outcome === 'lose')) return 'lose';
-    if (fights.some((f) => f.outcome === 'fled')) return 'fled';
-    if (fights.every((f) => f.outcome === 'win')) return 'win';
-    return null;
-  }
+  // aggregateFightOutcome moved to render-gates.js (task 119).
 
   renderFight(container, node, path) {
     // group="G": all <fight> in the section sharing the id are one simultaneous
@@ -3202,7 +3010,7 @@ export class Story {
           const pending = self.sectionFights.find((f) => f.outcome !== 'win');
           return (pending || fight).name;
         },
-        get outcome() { return this._override || self.aggregateFightOutcome(self.sectionFights); },
+        get outcome() { return this._override || aggregateFightOutcome(self.sectionFights); },
         set outcome(v) { this._override = v; },
       };
     }

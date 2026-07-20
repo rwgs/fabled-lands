@@ -7,6 +7,7 @@ import { fightRound, makeFight, groupFightRound, isDefeated, useWrathBlessing, u
 import { goodsFrom, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo, canUpgradeCrew, payChoiceCost } from '../js/market.js';
 import { Story, previewProse } from '../js/render.js';
 import * as rules from '../js/render-rules.js';
+import * as gates from '../js/render-gates.js';
 import { Narrator } from '../js/tts.js';
 import { renderSheet } from '../js/ui.js';
 import { renderStatic } from '../js/app.js';
@@ -920,6 +921,45 @@ export async function run(ctx) {
       wr.addBlessing('storm');
       ok('task119: rewardWasteReason flags an already-held blessing', /already have this blessing/i.test(rules.rewardWasteReason(wr, parse('<gain blessing="storm"/>')) || ''));
       ok('task119: rewardWasteReason null for a fresh blessing', rules.rewardWasteReason(wr, parse('<gain blessing="luck"/>')) === null);
+    }
+
+    // --- task 119 (phase 1c): DOM-free navigation-gate planners (render-gates.js) ----
+    {
+      // computeFightGate: a goto after a fight is gated; a "you lose" goto is the lose-branch.
+      const fsec = parse('<section name="tf"><fight/><p>If you win, <goto section="10"/>. If you lose, <goto section="20"/>.</p></section>');
+      const fg = gates.computeFightGate(fsec, new Set());
+      const fgotos = Array.from(fsec.querySelectorAll('goto'));
+      ok('task119: computeFightGate gates the post-fight navigation', !!fg && fg.navNodes.size === 2, fg ? 'n=' + fg.navNodes.size : 'null');
+      ok('task119: computeFightGate marks only the lose-branch goto', fg.loseNodes.has(fgotos[1]) && !fg.loseNodes.has(fgotos[0]));
+
+      ok('task119: aggregateFightOutcome win when all won', gates.aggregateFightOutcome([{ outcome:'win' }, { outcome:'win' }]) === 'win');
+      ok('task119: aggregateFightOutcome lose if any lost', gates.aggregateFightOutcome([{ outcome:'win' }, { outcome:'lose' }]) === 'lose');
+      ok('task119: aggregateFightOutcome null while unresolved', gates.aggregateFightOutcome([{ outcome:'win' }, { outcome:null }]) === null);
+      ok('task119: aggregateFightOutcome null for no fights', gates.aggregateFightOutcome([]) === null);
+
+      // computeEscapeCodewords: a codeword both ticked and used as a box gate, in a fight section.
+      const ecw = gates.computeEscapeCodewords(parse('<section name="te"><fight/><tick codeword="Flee1"/><choice box="Flee1" section="9">Surrender</choice></section>'));
+      ok('task119: computeEscapeCodewords finds the ticked box-gated codeword', ecw.has('Flee1'));
+      ok('task119: computeEscapeCodewords empty without a fight', gates.computeEscapeCodewords(parse('<section><tick codeword="X"/><choice box="X"/></section>')).size === 0);
+
+      const clr = parse('<lose codeword="Flee1"/>');
+      ok('task119: isDeferredEscapeClear defers while the fight is unresolved', gates.isDeferredEscapeClear(clr, new Set(['Flee1']), [{ outcome:null }]) === true);
+      ok('task119: isDeferredEscapeClear applies once the fight is won', gates.isDeferredEscapeClear(clr, new Set(['Flee1']), [{ outcome:'win' }]) === false);
+      ok('task119: isDeferredEscapeClear no-op before any fight', gates.isDeferredEscapeClear(clr, new Set(['Flee1']), []) === false);
+
+      ok('task119: isDeferredTagCleanup true for a hidden removetag tick', gates.isDeferredTagCleanup(parse('<tick hidden="t" removetag="Tz"/>')) === true);
+      ok('task119: isDeferredTagCleanup false for a plain tick', gates.isDeferredTagCleanup(parse('<tick codeword="X"/>')) === false);
+
+      ok('task119: isDeferredDeadChain defers a dead-gated if while the fight is unresolved', gates.isDeferredDeadChain(parse('<if dead="f"/>'), [{ outcome:null }]) === true);
+      ok('task119: isDeferredDeadChain applies once the fight resolves', gates.isDeferredDeadChain(parse('<if dead="f"/>'), [{ outcome:'win' }]) === false);
+
+      const rg = gates.computeRollGate(parse('<section name="tr2"><random/><outcomes><outcome range="1-6" section="5"/></outcomes><choices><choice section="8">Leave</choice></choices></section>'));
+      ok('task119: computeRollGate gates the onward choice behind the mandatory roll', !!rg && rg.navNodes.size === 1, rg ? 'n=' + rg.navNodes.size : 'null');
+      ok('task119: computeRollGate null without an outcomes table', gates.computeRollGate(parse('<section><random/><choices><choice section="8"/></choices></section>')) === null);
+
+      const tg = gates.computeTransferGate(parse('<section name="tt"><transfer to="x" shards="10"/><goto section="9"/></section>'));
+      ok('task119: computeTransferGate gates navigation after a forced transfer', !!tg && tg.navNodes.size === 1, tg ? 'n=' + tg.navNodes.size : 'null');
+      ok('task119: computeTransferGate null for a force="f" (optional) transfer', gates.computeTransferGate(parse('<section><transfer to="x" shards="10" force="f"/><goto section="9"/></section>')) === null);
     }
 
     // --- task 113: <lose item="?" bonus="N"> enforces the bonus= filter ---

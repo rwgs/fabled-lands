@@ -6,6 +6,7 @@ import * as eng from '../js/engine.js';
 import { fightRound, makeFight, groupFightRound, isDefeated, useWrathBlessing, useDefenceBlessing, rerollAttack } from '../js/combat.js';
 import { goodsFrom, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo, canUpgradeCrew, payChoiceCost } from '../js/market.js';
 import { Story, previewProse } from '../js/render.js';
+import * as gates from '../js/render-gates.js';
 import { Narrator } from '../js/tts.js';
 import { renderSheet } from '../js/ui.js';
 import { renderStatic } from '../js/app.js';
@@ -1111,7 +1112,7 @@ export async function run(ctx) {
     ok('dead="t" choice disabled while the player lives', deadChoiceBtn.disabled === true);
     // The fight gate prefers an explicit dead="t" goto as the lose-branch signal.
     const fgSec = parse('<section><fight name="X" combat="5" defence="5" stamina="5"/><p>If you win, <goto section="10"/>. If you are killed, <goto section="7" dead="t"/>.</p></section>');
-    const gate = stAlive.computeFightGate(fgSec);
+    const gate = gates.computeFightGate(fgSec, new Set());
     const deadGoto = fgSec.querySelector('goto[dead="t"]');
     ok('fight gate marks a dead="t" goto as the lose-branch', !!gate && gate.loseNodes.has(deadGoto) && gate.hasLosePath === true, `has=${!!gate && gate.loseNodes.has(deadGoto)}`);
 
