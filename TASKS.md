@@ -33,7 +33,7 @@ the tasks were filed, not work order).
 - [x] 147. Navigation has no in-flight guard — a double-click double-runs leave hooks and entry effects
 - [x] 155. One-shot memos are written after the state mutation they guard — a reload repeats rests, buys, and failed rolls
 - [x] 156. A mid-visit reload silently drops armed `<tick special="attack|defence">` bonuses and penalties
-- [ ] 157. Item-name glob patterns never match — §4.482/§6.201 unreachable, §6.144's trophy head never taken
+- [x] 157. Item-name glob patterns never match — §4.482/§6.201 unreachable, §6.144's trophy head never taken
 - [ ] 158. Two written-max Stamina clamps still strip aura headroom (task 124's remaining siblings)
 - [ ] 159. Resurrection revives at half Stamina — the book and JaFL both say full
 

@@ -322,6 +322,30 @@ export async function run(ctx) {
     st200.begin(await data.getSection(1, '200'), 1, '200');
     ok('§200 renders its inline treasure-map image as a link', !!c200.querySelector('.image-link'));
 
+    // --- task 157: item-name patterns honour '*' globs (JaFL Item.matches) ---
+    // matchItems used to compare names EXACTLY, so a '*'-glob item pattern never matched.
+    {
+      const gGlob = GameState.create({ name:'GB', gender:'m', profession:'Warrior', book:6, adv });
+      gGlob.addItem(makeItem('item', 'silver flute'));
+      gGlob.addItem(makeItem('item', "courtier's mask"));
+      gGlob.addItem(makeItem('item', 'dead head'));
+      gGlob.addItem(makeItem('weapon', 'sword', 3)); // an unrelated item — the globs must not take it
+      // §4.482 <if item="*flute|*whistle"> — either suffix over a pipe alternation.
+      ok('§157 "*flute|*whistle" matches a silver flute (§4.482 shortcut reachable)',
+         eng.evaluateCondition(parse('<if item="*flute|*whistle"/>'), gGlob) === true);
+      // §6.201 <if item="*mask"> — a suffix glob.
+      ok('§157 "*mask" matches a courtier\'s mask (§6.201 reachable)',
+         eng.evaluateCondition(parse('<if item="*mask"/>'), gGlob) === true);
+      // §6.144 <lose item="* head"> — a glob with an embedded space actually removes it.
+      ok('§157 "* head" finds the trophy head', gGlob.findItems('* head').length === 1);
+      eng.applyEffect(parse('<lose item="* head"/>'), gGlob);
+      ok('§157 <lose item="* head"> hands over the head (§6.144 trophy no longer reusable)',
+         gGlob.findItems('* head').length === 0 && gGlob.findItems('dead head').length === 0);
+      // Guard: a concrete (non-glob) name and the unrelated sword are untouched.
+      ok('§157 a bare name still matches exactly and globs do not over-take',
+         gGlob.findItems('silver flute').length === 1 && gGlob.findItems('sword').length === 1);
+    }
+
     // --- task 63: heterogeneous "choose one" rewards (item | Shards | resurrection) ---
     // §1.597: reward for the ghoul's head — amber wand OR 500 Shards OR resurrection.
     const g597 = GameState.create({ name:'Ghoul', gender:'m', profession:'Warrior', book:1, adv });

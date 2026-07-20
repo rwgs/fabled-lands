@@ -1236,6 +1236,17 @@ export function normalize(s) {
   return (s || '').toLowerCase().replace(/[‘’]/g, "'").replace(/\s+/g, ' ').trim();
 }
 
+function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+/** Match a name against a pattern that may use '*' as a wildcard ("*sword*", "*axe",
+ *  "* head"). No '*' means an exact (normalized) comparison. Lives here so both the
+ *  engine's equipment checks and state.js's item matchers share ONE glob (task 157);
+ *  it was previously engine-only, so name-based item patterns never globbed. */
+export function globMatch(pattern, name) {
+  const p = normalize(pattern), n = normalize(name);
+  if (!p.includes('*')) return n === p;
+  return new RegExp('^' + p.split('*').map(escapeRegex).join('.*') + '$').test(n);
+}
+
 /** A treasure named "N Shards" (a dragon-hoard pick, book1/16 et al.) is stackable
  *  currency, not a carried item — returns N, else null. (task 29) */
 export function currencyAward(name) {
@@ -1263,10 +1274,11 @@ export function splitItemName(name) {
  *  adventure sheet and cache lookups so both use the same matching rules. */
 export function matchItems(items, pattern) {
   if (!pattern) return [];
-  const pats = pattern.split('|').map((p) => normalize(p));
+  const pats = pattern.split('|').map((p) => p.trim()).filter(Boolean);
   return (items || []).filter((it) => {
-    const n = normalize(it.name);
-    return pats.some((p) => n === p || (it.tags || []).map(normalize).includes(p));
+    const tags = (it.tags || []).map(normalize);
+    // Name is glob-matched (so §4.482 "*flute", §6.144 "* head" hit); tags stay exact.
+    return pats.some((p) => globMatch(p, it.name) || tags.includes(normalize(p)));
   });
 }
 

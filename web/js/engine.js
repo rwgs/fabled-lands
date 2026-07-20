@@ -2,7 +2,7 @@
 // Reads attributes off the parsed XML elements and applies them to a GameState.
 
 import { ABILITIES, canonShipType, CREW_LEVELS, SHIP_TYPES, canonCargo } from './rules.js';
-import { makeItem, normalize, matchItems, matchItemQuery, isShardsCurrency, currencyAward, splitItemName, parseTags } from './state.js';
+import { makeItem, normalize, globMatch, matchItems, matchItemQuery, isShardsCurrency, currencyAward, splitItemName, parseTags } from './state.js';
 import { availableBooks } from './data.js';
 
 // ---- dice / RNG ------------------------------------------------------------
@@ -308,15 +308,6 @@ const KNOWN_IF_ATTRS = new Set([
   'modifier', 'hidden', 'group',
 ]);
 const _warnedIfAttrs = new Set();
-
-function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
-// Match an item name against a pattern that may use '*' as a wildcard (e.g.
-// "*sword*", "*axe"), used by the weapon-type checks in book 6.
-function globMatch(pattern, name) {
-  const p = normalize(pattern), n = normalize(name);
-  if (!p.includes('*')) return n === p;
-  return new RegExp('^' + p.split('*').map(escapeRegex).join('.*') + '$').test(n);
-}
 
 /** True if `pool` holds a weapon/armour/tool matching the condition. spec "?"/"*"
  *  (or empty) = any of that kind; a name/glob (pipe-separated) matches by name;
