@@ -6,6 +6,7 @@ import * as eng from '../js/engine.js';
 import { fightRound, makeFight, groupFightRound, isDefeated, useWrathBlessing, useDefenceBlessing, rerollAttack } from '../js/combat.js';
 import { goodsFrom, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo, canUpgradeCrew, payChoiceCost } from '../js/market.js';
 import { Story, previewProse } from '../js/render.js';
+import { isRollGate } from '../js/render-rules.js';
 import { Narrator } from '../js/tts.js';
 import { renderSheet } from '../js/ui.js';
 import { renderStatic } from '../js/app.js';
@@ -109,9 +110,9 @@ export async function run(ctx) {
     const stGate = new Story(document.createElement('div'), GameState.create({ name:'GG', gender:'m', profession:'Warrior', book:2, adv }), { navigate(){}, onDeath(){}, notify(){} });
     stGate.book = 2;
     stGate.sectionEl = parse('<section><lose shards="5" price="x"/><random flag="x"/></section>');
-    ok('isRollGate true for a random-gated price', stGate.isRollGate('x') === true);
+    ok('isRollGate true for a random-gated price', isRollGate(stGate.sectionEl, 'x') === true);
     stGate.sectionEl = parse('<section><lose shards="5" price="y"/><tick blessing="combat" flag="y"/></section>');
-    ok('isRollGate false for a plain reward flag', stGate.isRollGate('y') === false);
+    ok('isRollGate false for a plain reward flag', isRollGate(stGate.sectionEl, 'y') === false);
     // <goto price="k"> is open only while the flag is clear (JaFL GotoNode.canUse).
     stGate.sectionEl = parse('<section/>');
     stGate.state.setFlag('x', false);

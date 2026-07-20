@@ -12,6 +12,8 @@ import { normalize, parseTags, splitItemName, isShardsCurrency } from './state.j
 import { canonCargo } from './rules.js';
 import { modal } from './ui.js';
 import { MARKET_TITLES, titleCase, escapeHtml, itemLabel } from './render-util.js';
+import { isChooseOne } from './render-rules.js';
+import { renderChoosableReward } from './render-rewards.js';
 
 export const marketView = {
   renderMarket(container, node, path) {
@@ -664,7 +666,7 @@ export const marketView = {
     // A flag-linked resurrection inside a "choose one" reward menu renders as a
     // pick (book1/597: taking it consumes the single choice). (task 63)
     const resFlag = node.getAttribute('flag');
-    if (resFlag != null && this.isChooseOne(resFlag)) return this.renderChoosableReward(container, node, path, resFlag);
+    if (resFlag != null && isChooseOne(this.sectionEl, resFlag)) return renderChoosableReward(this, container, node, path, resFlag);
     const section = node.getAttribute('section');
     const shards = node.getAttribute('shards');
     const supplemental = boolAttr(node.getAttribute('supplemental'));
