@@ -7,8 +7,9 @@
 // attributes / running querySelectorAll on it is fine (the same thing engine.js does);
 // only DOM *construction* belongs in the view. Unit-tested headlessly.
 
-import { boolAttr, isDiceExpr } from './engine.js';
-import { normalize, currencyAward } from './state.js';
+import { boolAttr, isDiceExpr, resolveValue } from './engine.js';
+import { normalize, currencyAward, isShardsCurrency } from './state.js';
+import { availableBooks } from './data.js';
 import { isRollGate, isDeferredEscapeClear, isDeferredTagCleanup, aggregateFightOutcome } from './render-gates.js';
 
 // isRollGate moved to render-gates.js (one-way dependency: classifyPassive below composes
@@ -211,6 +212,85 @@ export function isEconomicPayment(node) {
   const hasShip = boolAttr(node.getAttribute('ship'));
   if (node.getAttribute('stamina') != null || node.getAttribute('ability') != null) return false;
   return hasShards || hasItem || hasCargo || hasShip;
+}
+
+// ---- choice eligibility (tasks 28/30/47/55/89/110/133 — task 119 phase 3) ----
+
+// price/flag gate on a choice/goto (JaFL GotoNode.canUse): a flag="k" exit is usable
+// only once flag k is set; a price="k" exit only while it is clear — the "pay to spin"
+// exit (book2/157 → 19, book6/628 → 8, book3/680 → 407): while the payment is armed
+// (paid, not yet resolved) the exit is withheld, and once the roll consumes the flag it
+// reopens. Returns a reason when gated out, else null. (task 30)
+export function flagGate(state, node) {
+  const flag = node.getAttribute('flag');
+  const price = node.getAttribute('price');
+  if (flag != null && !state.getFlag(flag)) return 'not yet available';
+  if (price != null && state.getFlag(price)) return 'resolve this first';
+  return null;
+}
+
+// True for the one choice/goto node the player took before the current <return>
+// restored this section: it is spent (crossed off) unless it carries revisit="t",
+// which marks a hub action the player may take again. Only ever set right after a
+// return, so a normal render leaves every source action enabled. (task 110)
+export function isSpentSource(ctx, node) {
+  return !!(ctx && ctx.usedSource === node && !boolAttr(node.getAttribute('revisit')));
+}
+
+// The full eligibility + payment verdict for a <choice> row (task 119): every gate the
+// books put on a choice, plus the pay= consumption default (task 55), decided DOM-free so
+// the view merely disables the button and hands `payment` to payChoiceCost on click.
+// `view` is the renderer's rule surface — { ctx } is all this planner reads.
+// Returns { reasons, isSail, cost, coinLabel, payment }:
+//   reasons  — why the choice is disabled (empty = live)
+//   payment  — payChoiceCost's opts: { pay, cost, currency, foreignCoin, item, itemTags }
+export function choiceGate(state, node, view) {
+  const shards = node.getAttribute('shards');
+  // A currency="Mithral" cost is paid in that foreign coin, not Shards (book2/545).
+  const currency = node.getAttribute('currency');
+  const foreignCoin = !isShardsCurrency(currency);
+  const coinLabel = foreignCoin ? currency : 'Shards';
+  const wallet = foreignCoin ? state.currencyBalance(currency) : state.data.shards;
+  const itemReq = node.getAttribute('item');
+  const itemTags = node.getAttribute('tags'); // e.g. <choice item="?" tags="light"> (task 47)
+  // pay= governs whether the choice *consumes* its requirement on click. An
+  // explicit pay="t" consumes both a shards= cost and an item= requirement
+  // (book2/400 green gem, book6/740 rope — previously ignored for item-only
+  // choices); pay="f" never consumes; and with no pay= a shards= cost still
+  // deducts by default while a bare item= gate is kept (a mere requirement). (task 55)
+  const payAttr = node.getAttribute('pay');
+  const payExplicit = payAttr != null ? boolAttr(payAttr) : null;
+  const pay = payExplicit === true || (payExplicit == null && shards != null);
+  // A sail="t" choice is a sail action exactly like a sail goto (task 89): it needs
+  // a ship at THIS dock.
+  const isSail = boolAttr(node.getAttribute('sail'));
+
+  const reasons = [];
+  if (isSail && state.shipsHere().length === 0) reasons.push('you need a ship here');
+  const cost = shards != null ? resolveValue(state, shards) : 0;
+  if (shards != null && wallet < cost) reasons.push(`needs ${cost} ${coinLabel}`);
+  // item= gate: "?" (+ optional tags=) means "any possession carrying these tags"
+  // (a light source, etc.) — the same matcher as <if item="?" tags=…>, so a
+  // light-gated choice is no longer permanently locked (task 47).
+  if (itemReq && !state.hasItemMatch(itemReq, itemTags)) reasons.push(itemReq === '?' ? `needs ${itemTags || 'an item'}` : `needs ${itemReq}`);
+  const boxWord = node.getAttribute('box');
+  if (boxWord && !state.hasCodeword(boxWord)) reasons.push('box not ticked');
+  const profession = node.getAttribute('profession');
+  if (profession && normalize(profession) !== normalize(state.data.profession)) reasons.push(profession + ' only');
+  const god = node.getAttribute('god');
+  if (god && !state.hasGod(god)) reasons.push('requires ' + god);
+  const emptyvar = node.getAttribute('emptyvar');
+  if (emptyvar && state.hasVar(emptyvar)) reasons.push('unavailable');
+  const bookNum = node.getAttribute('book');
+  if (bookNum && !availableBooks().includes(Number(bookNum))) reasons.push('book not in edition');
+  // dead="t" choices are only for a dead player (and dead="f" only while alive) — task 28.
+  const deadAttr = node.getAttribute('dead');
+  if (deadAttr != null && boolAttr(deadAttr) !== state.isDead()) reasons.push(boolAttr(deadAttr) ? 'only if you are dead' : 'only while you live');
+  const fg = flagGate(state, node); // price/flag "pay to spin" gate (task 30)
+  if (fg) reasons.push(fg);
+  if (isSpentSource(view.ctx, node)) reasons.push('already taken');
+
+  return { reasons, isSail, cost, coinLabel, payment: { pay, cost, currency, foreignCoin, item: itemReq, itemTags } };
 }
 
 // ---- the passive-effect execution model (task 119 phase 3) -------------------

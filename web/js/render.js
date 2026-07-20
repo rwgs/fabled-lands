@@ -15,14 +15,15 @@ import {
 // combat.js → render-combat.js (fight view); most of market.js → render-market.js (economy
 // view). render.js keeps only what its remaining methods use directly. (task 119)
 import { applyInlineBuy, payChoiceCost } from './market.js';
-import { GameState, normalize, makeItem, parseTags, currencyAward, splitItemName, isShardsCurrency } from './state.js';
+import { GameState, makeItem, parseTags, currencyAward, splitItemName } from './state.js';
 import { ABILITY_LABEL } from './rules.js';
 import { bookTitle, availableBooks, loadBook, getSection } from './data.js';
 import { animateDice, modal } from './ui.js';
 import {
   computeOutcomeBlessings, blessingVeto,
   blessingSpendForGoto, blessingSpendForReroll, ownsSoleLinkedBlessing,
-  ITEM_FAMILY_TAGS, classifyPassive,
+  ITEM_FAMILY_TAGS, classifyPassive, choiceGate,
+  flagGate as flagGateRule, isSpentSource as isSpentSourceRule,
   linkedRewards as linkedRewardsRule, isCounterReward as isCounterRewardRule,
   isChooseOne as isChooseOneRule, isPricedItemAward as isPricedItemAwardRule,
   hasVisiblePay as hasVisiblePayRule, isRollGate as isRollGateRule,
@@ -1744,18 +1745,8 @@ export class Story {
     return true;
   }
 
-  // price/flag gate on navigation (JaFL GotoNode.canUse): a <goto flag="k"> is
-  // usable only once flag k is set; a <goto price="k"> only while it is clear —
-  // the "pay to spin" exit (book2/157 → 19, book6/628 → 8, book3/680 → 407): while
-  // the payment is armed (paid, not yet resolved) the exit is withheld, and once the
-  // roll consumes the flag it reopens. Returns a reason when gated out, else null.
-  flagGate(node) {
-    const flag = node.getAttribute('flag');
-    const price = node.getAttribute('price');
-    if (flag != null && !this.state.getFlag(flag)) return 'not yet available';
-    if (price != null && this.state.getFlag(price)) return 'resolve this first';
-    return null;
-  }
+  // Rule in render-rules.js (task 119). Still called by renderGoto's exit gate.
+  flagGate(node) { return flagGateRule(this.state, node); }
 
   renderGoto(container, node, path) {
     const section = node.getAttribute('section');
@@ -1858,13 +1849,8 @@ export class Story {
     this.render();
   }
 
-  // True for the one choice/goto node the player took before the current <return>
-  // restored this section: it is spent (crossed off) unless it carries revisit="t",
-  // which marks a hub action the player may take again. Only ever set right after a
-  // return, so a normal render leaves every source action enabled. (task 110)
-  isSpentSource(node) {
-    return this.ctx && this.ctx.usedSource === node && !boolAttr(node.getAttribute('revisit'));
-  }
+  // Rule in render-rules.js (task 119). Still called by renderGoto's source gate.
+  isSpentSource(node) { return isSpentSourceRule(this.ctx, node); }
 
   // <return> — a "go back to where you came from" link.
   renderReturn(container, node, path) {
@@ -2077,59 +2063,17 @@ export class Story {
 
     const section = node.getAttribute('section');
     const targetBook = node.getAttribute('book') ? Number(node.getAttribute('book')) : this.book;
-    const shards = node.getAttribute('shards');
-    // A currency="Mithral" cost is paid in that foreign coin, not Shards (book2/545).
-    const currency = node.getAttribute('currency');
-    const foreignCoin = !isShardsCurrency(currency);
-    const coinLabel = foreignCoin ? currency : 'Shards';
-    const wallet = foreignCoin ? this.state.currencyBalance(currency) : this.state.data.shards;
-    const itemReq = node.getAttribute('item');
-    const itemTags = node.getAttribute('tags'); // e.g. <choice item="?" tags="light"> (task 47)
-    // pay= governs whether the choice *consumes* its requirement on click. An
-    // explicit pay="t" consumes both a shards= cost and an item= requirement
-    // (book2/400 green gem, book6/740 rope — previously ignored for item-only
-    // choices); pay="f" never consumes; and with no pay= a shards= cost still
-    // deducts by default while a bare item= gate is kept (a mere requirement). (task 55)
-    const payAttr = node.getAttribute('pay');
-    const payExplicit = payAttr != null ? boolAttr(payAttr) : null;
-    const pay = payExplicit === true || (payExplicit == null && node.getAttribute('shards') != null);
     const boxWord = node.getAttribute('box');
-    const profession = node.getAttribute('profession');
-    const god = node.getAttribute('god');
-    const emptyvar = node.getAttribute('emptyvar');
-    const bookNum = node.getAttribute('book');
     const isFlee = boolAttr(node.getAttribute('flee')); // "flee at any time" option
-    // A sail="t" choice is a sail action exactly like a sail goto (task 89): it needs
-    // a ship at THIS dock and, on click, sets the chosen vessel at large (prompting
-    // when several are here) before navigating — so the voyage tracks a real ship.
-    const isSail = boolAttr(node.getAttribute('sail'));
 
-    // gating
-    const reasons = [];
-    if (isSail && this.state.shipsHere().length === 0) reasons.push('you need a ship here');
-    const cost = shards != null ? resolveValue(this.state, shards) : 0;
-    if (shards != null && wallet < cost) reasons.push(`needs ${cost} ${coinLabel}`);
-    // item= gate: "?" (+ optional tags=) means "any possession carrying these tags"
-    // (a light source, etc.) — the same matcher as <if item="?" tags=…>, so a
-    // light-gated choice is no longer permanently locked (task 47).
-    if (itemReq && !this.state.hasItemMatch(itemReq, itemTags)) reasons.push(itemReq === '?' ? `needs ${itemTags || 'an item'}` : `needs ${itemReq}`);
-    if (boxWord && !this.state.hasCodeword(boxWord)) reasons.push('box not ticked');
-    if (profession && normalize(profession) !== normalize(this.state.data.profession)) reasons.push(profession + ' only');
-    if (god && !this.state.hasGod(god)) reasons.push('requires ' + god);
-    if (emptyvar && this.state.hasVar(emptyvar)) reasons.push('unavailable');
-    if (bookNum && !availableBooks().includes(Number(bookNum))) reasons.push('book not in edition');
-    // dead="t" choices are only for a dead player (and dead="f" only while alive) — task 28.
-    const deadAttr = node.getAttribute('dead');
-    if (deadAttr != null && boolAttr(deadAttr) !== this.state.isDead()) reasons.push(boolAttr(deadAttr) ? 'only if you are dead' : 'only while you live');
-    const fg = this.flagGate(node); // price/flag "pay to spin" gate (task 30)
-    if (fg) reasons.push(fg);
-    // A source choice the player took before a <return> is spent unless revisit="t" (task 110).
-    if (this.isSpentSource(node)) reasons.push('already taken');
+    // Eligibility + payment semantics decided DOM-free in render-rules.js (task 119):
+    // reasons disable the button; `payment` is handed to payChoiceCost on click.
+    const gate = choiceGate(this.state, node, this);
 
-    if (cost) {
+    if (gate.cost) {
       const tag = document.createElement('span');
       tag.className = 'choice-cost';
-      tag.textContent = `${cost} ${coinLabel}`;
+      tag.textContent = `${gate.cost} ${gate.coinLabel}`;
       btn.appendChild(tag);
     }
     if (boxWord) {
@@ -2139,10 +2083,10 @@ export class Story {
       btn.insertBefore(cb, label);
     }
 
-    if (reasons.length) {
+    if (gate.reasons.length) {
       btn.disabled = true;
       btn.classList.add('disabled');
-      btn.title = reasons.join('; ');
+      btn.title = gate.reasons.join('; ');
     } else {
       btn.addEventListener('click', () => {
         // A flee="t" choice IS the flee action: apply the <flee> consequence
@@ -2156,12 +2100,13 @@ export class Story {
         // The cost is re-validated against the live sheet (task 133): if the required
         // possession was dropped (or funds spent) since this button rendered, refuse and
         // refresh so the now-ineligible choice greys out instead of crossing for free.
-        const paid = payChoiceCost(this.state, { pay, cost, currency, foreignCoin, item: itemReq, itemTags }); // transaction lives in market.js (task 34)
+        const paid = payChoiceCost(this.state, gate.payment); // transaction lives in market.js (task 34)
         if (!paid.ok) { this.rerender(); return; }
         if (section == null) return; // a cost-only choice: pays and stays, not a source action
         this._pendingSourceNode = node; // record the source action for a possible <return> (task 110)
-        // Sail exit: same chooser/action as a sail goto (task 89).
-        if (isSail) { this.sailThenGo(btn.parentElement || this.root, btn, targetBook, section); return; }
+        // Sail exit: same chooser/action as a sail goto (task 89) — on click, sets the
+        // chosen vessel at large (prompting when several are here) before navigating.
+        if (gate.isSail) { this.sailThenGo(btn.parentElement || this.root, btn, targetBook, section); return; }
         this.navigate(targetBook, section);
       });
     }

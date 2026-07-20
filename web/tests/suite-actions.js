@@ -1227,6 +1227,42 @@ export async function run(ctx) {
          (() => { const v = classify(setSec, 'set', { ctx: ownedCtx }); return v.mode === 'apply' && v.rollOwned === true && v.rerunnable === false; })());
     }
 
+    // --- task 119 (phase 3): choiceGate — the <choice> eligibility + payment verdict ---
+    {
+      const g = GameState.create({ name:'CG119', gender:'m', profession:'Warrior', book:1, adv });
+      g.data.shards = 20;
+      const gate = (xml, over = {}) => rules.choiceGate(g, parse(xml), { ctx: visit.newCtx(), ...over });
+
+      ok('task119: choiceGate live choice → no reasons, shards pay by default',
+         (() => { const v = gate('<choice section="9" shards="10">Pay 10</choice>'); return v.reasons.length === 0 && v.cost === 10 && v.payment.pay === true; })());
+      ok('task119: choiceGate too-poor shards cost → needs N Shards',
+         gate('<choice section="9" shards="50">Pay 50</choice>').reasons.join() === 'needs 50 Shards');
+      ok('task119: choiceGate pay="f" never consumes', gate('<choice section="9" shards="10" pay="f">x</choice>').payment.pay === false);
+      ok('task119: choiceGate a bare item= gate is kept (a mere requirement), not consumed',
+         (() => { g.data.items = [makeItem('item', 'rope')]; const v = gate('<choice section="9" item="rope">use rope</choice>'); return v.reasons.length === 0 && v.payment.pay === false; })());
+      ok('task119: choiceGate pay="t" consumes an item requirement (task 55)',
+         gate('<choice section="9" item="rope" pay="t">give rope</choice>').payment.pay === true);
+      ok('task119: choiceGate a missing item disables with its name', gate('<choice section="9" item="lantern">x</choice>').reasons.join() === 'needs lantern');
+      ok('task119: choiceGate item="?" tags= names the tag class (task 47)',
+         gate('<choice section="9" item="?" tags="light">x</choice>').reasons.join() === 'needs light');
+      ok('task119: choiceGate box gate', gate('<choice section="9" box="Zx">x</choice>').reasons.join() === 'box not ticked');
+      ok('task119: choiceGate profession gate', gate('<choice section="9" profession="mage">x</choice>').reasons.join() === 'mage only');
+      ok('task119: choiceGate god gate', gate('<choice section="9" god="Tyrnai">x</choice>').reasons.join() === 'requires Tyrnai');
+      ok('task119: choiceGate dead="t" only for the dead (task 28)', gate('<choice section="9" dead="t">x</choice>').reasons.join() === 'only if you are dead');
+      ok('task119: choiceGate sail needs a ship here (task 89)',
+         (() => { const v = gate('<choice section="9" sail="t">set sail</choice>'); return v.isSail === true && v.reasons.join() === 'you need a ship here'; })());
+      ok('task119: choiceGate flag= locked until its payment arms it (task 30)',
+         gate('<choice section="9" flag="k">spin</choice>').reasons.join() === 'not yet available');
+      ok('task119: flagGate price= withheld while armed', (() => { g.setFlag('p1', true); return rules.flagGate(g, parse('<goto section="9" price="p1"/>')) === 'resolve this first'; })());
+      const spentNode = parse('<choice section="9">once</choice>');
+      const spentCtx = visit.newCtx(); spentCtx.usedSource = spentNode;
+      ok('task119: isSpentSource marks the taken source action (task 110)', rules.isSpentSource(spentCtx, spentNode) === true);
+      ok('task119: choiceGate spent source → already taken',
+         rules.choiceGate(g, spentNode, { ctx: spentCtx }).reasons.join() === 'already taken');
+      ok('task119: choiceGate foreign currency wallet (book2/545)',
+         (() => { const v = gate('<choice section="9" shards="5" currency="Mithral">x</choice>'); return v.coinLabel === 'Mithral' && v.payment.foreignCoin === true && v.reasons.join() === 'needs 5 Mithral'; })());
+    }
+
     // --- task 113: <lose item="?" bonus="N"> enforces the bonus= filter ---
     // §4.456's Tambu offering routes its +2/+3 gifts through <lose item="?" bonus=…
     // price=…>; the bonus filter must be honoured so only a genuinely +2/+3 item can be
