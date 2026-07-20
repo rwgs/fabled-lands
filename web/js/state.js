@@ -541,7 +541,9 @@ export class GameState {
   // Permanent Stamina change (an <gain/lose ability="stamina">): moves the
   // maximum AND the current score together, mirroring JaFL's adjustAbility for
   // ABILITY_STAMINA. fatal="t" ⇒ death if current drops to 0 or below; otherwise
-  // current floors at 1.
+  // current floors at 1. The upper clamp is the EFFECTIVE max (written + aura), not
+  // the written max, so a ring-of-ultimate-power holder above the written max keeps
+  // that aura headroom instead of shedding up to 10 Stamina on any move. (task 158)
   adjustAbilityStamina(delta, fatal = false) {
     let d = delta;
     let newMax = this.data.staminaMax + d;
@@ -549,7 +551,7 @@ export class GameState {
     this.data.staminaMax = newMax;
     this.data.stamina += d;
     if (this.data.stamina <= 0) this.data.stamina = fatal ? 0 : 1;
-    else if (this.data.stamina > this.data.staminaMax) this.data.stamina = this.data.staminaMax;
+    else if (this.data.stamina > this.effectiveStaminaMax()) this.data.stamina = this.effectiveStaminaMax();
     this.changed();
   }
 

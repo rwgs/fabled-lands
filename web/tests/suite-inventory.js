@@ -473,6 +473,30 @@ export async function run(ctx) {
       deleteSlot(impSlot124);
     } else ok('§124 importSave slot unavailable (skipped import round trip)', true);
 
+    // --- task 158: permanent Stamina moves + heal-to-full keep aura headroom ---
+    // A ring-of-ultimate-power holder sits above the WRITTEN max (30 current / 20 written,
+    // +10 aura). Clamping current to the written max on a <gain|lose ability="stamina"> move
+    // or a heal-to-full rest silently sheds up to 10 Stamina; the ceiling must be the
+    // effective max (written + aura).
+    {
+      const ring158 = { id:'ring158', kind:'item', name:'ring of ultimate power', bonus:0, ability:null, tags:[], effects:[{ type:'aura', ability:'Stamina', bonus:10, text:'+10 Stamina' }], group:null, wielded:false, worn:false };
+      const load158 = (stam) => new GameState(sanitizeData(JSON.parse(JSON.stringify({ schema:3, abilities:{ combat:5 }, staminaMax:20, stamina:stam, items:[ring158], book:5, section:'564' }))));
+      // (1) adjustAbilityStamina — a Stamina ability move.
+      const gA = load158(30);
+      ok('§158 setup: aura holder at 30 current / 30 effective', gA.data.stamina === 30 && gA.effectiveStaminaMax() === 30);
+      gA.adjustAbilityStamina(2);  // <gain ability="stamina" 2>: written 20→22, effective 30→32
+      ok('§158 a Stamina gain keeps the aura headroom (32, not clamped to 22)',
+         gA.data.stamina === 32 && gA.effectiveStaminaMax() === 32, `stam=${gA.data.stamina} eff=${gA.effectiveStaminaMax()}`);
+      gA.adjustAbilityStamina(-2); // <lose ability="stamina" 2>: back to 30 / 30
+      ok('§158 a Stamina loss keeps the aura headroom (30, not clamped to 20)',
+         gA.data.stamina === 30 && gA.effectiveStaminaMax() === 30, `stam=${gA.data.stamina} eff=${gA.effectiveStaminaMax()}`);
+      // (2) applyRest restore-to-full — heals to the effective max, not the written max.
+      const gR = load158(1);
+      ok('§158 rest setup: aura holder wounded at 1 / 30', gR.data.stamina === 1 && gR.effectiveStaminaMax() === 30);
+      eng.applyRest(gR, null, 0);  // <rest> with no stamina= ⇒ heal all
+      ok('§158 a heal-to-full rest reaches the effective max (30, not 21)', gR.data.stamina === 30, `stam=${gR.data.stamina}`);
+    }
+
     // --- task 36: grab-bag (godless clears god; difficultyCurse one-die; useCache Defence) ---
     const gGL = GameState.create({ name:'GL', gender:'m', profession:'Warrior', book:6, adv });
     gGL.setGod('Nagil');

@@ -1466,7 +1466,7 @@ export function applyRest(state, perUse, cost) {
   if (cost) state.adjustMoney(-cost);
   const before = state.data.stamina;
   if (perUse == null || String(perUse).trim() === '') {
-    state.healStamina(state.data.staminaMax); // clamps to max ⇒ restore to full
+    state.healStamina(state.effectiveStaminaMax()); // heal to the EFFECTIVE max (incl. aura headroom) ⇒ truly full (task 158)
   } else {
     state.healStamina(resolveValue(state, String(perUse)));
   }
