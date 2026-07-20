@@ -7,6 +7,7 @@ import { fightRound, makeFight, groupFightRound, isDefeated, useWrathBlessing, u
 import { goodsFrom, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo, canUpgradeCrew, payChoiceCost } from '../js/market.js';
 import { Story, previewProse } from '../js/render.js';
 import { isRollGate } from '../js/render-rules.js';
+import { renderGoto } from '../js/render-choices.js';
 import { Narrator } from '../js/tts.js';
 import { renderSheet } from '../js/ui.js';
 import { renderStatic } from '../js/app.js';
@@ -116,10 +117,10 @@ export async function run(ctx) {
     // <goto price="k"> is open only while the flag is clear (JaFL GotoNode.canUse).
     stGate.sectionEl = parse('<section/>');
     stGate.state.setFlag('x', false);
-    const gotoOpen = stGate.renderGoto(document.createElement('div'), parse('<goto section="19" price="x"/>'), 'g1');
+    const gotoOpen = renderGoto(stGate, document.createElement('div'), parse('<goto section="19" price="x"/>'), 'g1');
     ok('goto price= open while flag clear', gotoOpen.disabled === false);
     stGate.state.setFlag('x', true);
-    const gotoShut = stGate.renderGoto(document.createElement('div'), parse('<goto section="19" price="x"/>'), 'g2');
+    const gotoShut = renderGoto(stGate, document.createElement('div'), parse('<goto section="19" price="x"/>'), 'g2');
     ok('goto price= withheld while flag set', gotoShut.disabled === true);
 
     // §2.157 golden wheel: pay 20 to arm a 1-die spin (the classic idiom).

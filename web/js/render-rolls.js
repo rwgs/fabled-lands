@@ -10,6 +10,7 @@ import {
   childAdjustment, abilityChoiceOptions,
 } from './engine.js';
 import { branchPlan, blessingSpendForReroll, isRollGate } from './render-rules.js';
+import { renderChoices } from './render-choices.js';
 import { animateDice } from './ui.js';
 import { diceWord } from './render-util.js';
 
@@ -343,7 +344,7 @@ export function renderBranch(story, container, node, path, activeRoll) {
       }
       // Always-available alternatives inside the table (e.g. "or don't try").
       const choiceKids = Array.from(node.children).filter((c) => c.tagName.toLowerCase() === 'choice');
-      if (choiceKids.length) story.renderChoices(container, node, path, null, choiceKids);
+      if (choiceKids.length) renderChoices(story, container, node, path, null, choiceKids);
       return;
     }
     default: if (!roll) story.appendChildren(container, node, path);

@@ -7,23 +7,18 @@
 //   * revealed branches only appear (and only apply their effects) once resolved.
 
 import {
-  evaluateCondition, applyEffect, applyEffectBody, boolAttr,
-  whileLoopDone, useItemEffect,
+  evaluateCondition, applyEffect, boolAttr, whileLoopDone, useItemEffect,
 } from './engine.js';
 // The view is split by responsibility (task 119): rolls/branches → render-rolls.js, the
 // passive/payment/reward/item-award cluster → render-rewards.js, the fight view →
 // render-combat.js, the economy view → render-market.js. render.js keeps the section
 // lifecycle, the core walk, conditionals, navigation and the tag registry, importing only
 // what its remaining methods use directly.
-import { payChoiceCost } from './market.js';
 import { GameState } from './state.js';
 import { ABILITY_LABEL } from './rules.js';
 import { bookTitle, availableBooks, loadBook, getSection } from './data.js';
 import { modal } from './ui.js';
-import {
-  computeOutcomeBlessings, blessingSpendForGoto, choiceGate, branchPlan,
-  flagGate as flagGateRule, isSpentSource as isSpentSourceRule,
-} from './render-rules.js';
+import { computeOutcomeBlessings } from './render-rules.js';
 import {
   computeFightGate, computeEscapeCodewords, isDeferredDeadChain,
   computeRollGate, computeTransferGate,
@@ -38,6 +33,9 @@ import {
 import {
   renderGroup, renderPassive, renderItemsController, renderItemAward,
 } from './render-rewards.js';
+import {
+  renderChoices, renderChoiceElement, renderGoto, renderReturn,
+} from './render-choices.js';
 import { combatView } from './render-combat.js';
 import { marketView } from './render-market.js';
 
@@ -70,15 +68,15 @@ const TAG_RENDERERS = {
   if:              (s, c, n, p) => s.renderIfChain(c, n, p),
   elseif:          (s, c, n, p) => s.renderIfChain(c, n, p),
   else:            (s, c, n, p) => s.renderIfChain(c, n, p),
-  goto:            (s, c, n, p) => s.renderGoto(c, n, p),
-  return:          (s, c, n, p) => s.renderReturn(c, n, p),
+  goto:            renderGoto,
+  return:          renderReturn,
   items:           renderItemsController,
   item:            renderItemAward,
   weapon:          renderItemAward,
   armour:          renderItemAward,
   tool:            renderItemAward,
-  choices:         (s, c, n, p) => s.renderChoices(c, n, p),
-  choice:          (s, c, n, p) => s.renderChoiceElement(c, n, p),
+  choices:         (s, c, n, p) => renderChoices(s, c, n, p),
+  choice:          renderChoiceElement,
   difficulty:      renderDifficulty,
   random:          renderRandom,
   rankcheck:       renderRankcheck,
@@ -723,12 +721,6 @@ export class Story {
     return span;
   }
 
-  // A <choice> reached directly (not via its <choices> parent) renders the whole
-  // choices table, flagging which row is this node.
-  renderChoiceElement(container, node, path) {
-    return this.renderChoices(container, node.parentNode, path, node);
-  }
-
   // <field name="X" label="L"/> — display the live value of a codeword counter
   // (0 if unset), e.g. the Uttaku court status or the running bribery/offering
   // bonus. Re-reads on every render so it tracks <tick name="X">. (task 32)
@@ -987,101 +979,9 @@ export class Story {
   }
 
   // ---- navigation ----------------------------------------------------------
-  targetBook(node) {
-    const b = node.getAttribute('book');
-    return b ? Number(b) : this.book;
-  }
-
-  // A dead="t"/"f" attribute gates navigation on the player's alive/dead state:
-  // dead="t" is a "you are dead" link (only for a dead player) — while alive it
-  // must not be clickable, else a survivor walks into the you-are-dead section
-  // (book4/16's trample → §7). dead="f" is the mirror (only while alive). Returns
-  // true (and disables the button) when the node is gated out. (task 28)
-  deadGate(node, btn) {
-    const d = node.getAttribute('dead');
-    if (d == null) return false;
-    const needDead = boolAttr(d);
-    if (needDead === this.state.isDead()) return false;
-    btn.disabled = true;
-    btn.classList.add('gated');
-    btn.title = needDead ? 'Only if you are dead.' : 'Only while you live.';
-    return true;
-  }
-
-  // Rule in render-rules.js (task 119). Still called by renderGoto's exit gate.
-  flagGate(node) { return flagGateRule(this.state, node); }
-
-  renderGoto(container, node, path) {
-    const section = node.getAttribute('section');
-    if (section == null) return null;
-    const targetBook = this.targetBook(node);
-    const isSail = boolAttr(node.getAttribute('sail'));
-    const force = node.getAttribute('force');
-    // force defaults to true (a primary "continue"), EXCEPT a sail goto, which the spec
-    // makes optional by default. (task 73)
-    const primary = force == null ? !isSail : boolAttr(force, true);
-
-    // A sail goto needs a ship at the CURRENT dock (not merely any owned ship — a ship
-    // left at Smogmaw can't sail from Kunrir). (task 73)
-    const canSail = !isSail || this.state.shipsHere().length > 0;
-    const bookAvailable = availableBooks().includes(targetBook);
-
-    const link = document.createElement('button');
-    link.className = 'goto' + (primary ? ' goto-primary' : '');
-    // Text: use the node's own text if any, else the section number.
-    const inner = document.createElement('span');
-    this.appendChildren(inner, node, path);
-    link.appendChild(inner.textContent.trim() ? inner : document.createTextNode(String(section)));
-
-    if (!canSail) { link.disabled = true; link.title = 'You need a ship here.'; }
-    this.deadGate(node, link); // dead="t" only for a dead player, dead="f" only while alive
-    const fg = this.flagGate(node); // price/flag "pay to spin" exit gate (task 30)
-    if (fg) { link.disabled = true; link.classList.add('gated'); link.title = fg; }
-    // A source goto the player took before a <return> is spent — crossed off on the
-    // restored section — unless it carries revisit="t" (task 110).
-    if (this.isSpentSource(node)) { link.disabled = true; link.classList.add('disabled'); link.title = 'You have already taken this path.'; }
-
-    // The storm-safe goto (§200/250/60) spends the guarded Safety from Storms on the
-    // way out — the roll gate only leaves it clickable in the protected state. (task 108)
-    const spendBlessing = blessingSpendForGoto(node, this.sectionEl, this.state, this.outcomeBlessings);
-    link.addEventListener('click', () => {
-      if (!bookAvailable) { this.notify(`“${bookTitle(targetBook)}” (Book ${targetBook}) isn’t included in this edition.`, 'warn'); return; }
-      this._pendingSourceNode = node; // record the source action for a possible <return> (task 110)
-      if (spendBlessing && this.state.hasBlessing(spendBlessing)) this.state.useBlessing(spendBlessing);
-      // A sail goto puts a ship "at large" before leaving; prompt when more than one
-      // ship is at this dock, else sail the single one. (task 73)
-      if (isSail) { this.sailThenGo(container, link, targetBook, section); return; }
-      this.navigate(targetBook, section);
-    });
-    this.tagFightNav(node, link);
-    this.tagRollNav(node, link);
-    this.tagTransferNav(node, link);
-    container.appendChild(link);
-    return link;
-  }
-
-  // Perform a sail action: set a ship "at large", then navigate. When several ships are
-  // at this dock, prompt the player to choose which one to sail (JaFL ship selection);
-  // otherwise sail the single ship here. (task 73)
-  sailThenGo(container, link, targetBook, section) {
-    const here = this.state.shipsHere();
-    // Sail the chosen ship, exempt it from this section's todock (it leaves with you),
-    // then navigate. (tasks 73, 81)
-    const go = (ship) => { const s = this.state.sailShip(ship && ship.id); this._sailExempt = s ? s.id : null; this.navigate(targetBook, section); };
-    if (here.length <= 1) { go(here[0]); return; }
-    link.disabled = true;
-    const box = document.createElement('div');
-    box.className = 'ship-choice';
-    box.appendChild(document.createTextNode('Sail which ship? '));
-    here.forEach((s) => {
-      const b = document.createElement('button');
-      b.className = 'btn-mini';
-      b.textContent = (s.name && s.name !== 'Ship') ? `${s.name} (${s.type})` : String(s.type);
-      b.addEventListener('click', () => go(s));
-      box.appendChild(b);
-    });
-    container.appendChild(box);
-  }
+  // renderGoto / sailThenGo / renderReturn / the dead=/target-book gates moved to
+  // render-choices.js (task 119) — dispatched from TAG_RENDERERS. goBack() stays here:
+  // reversing a visit is section lifecycle, not view.
 
   // <return>: reverse the last goto and restore the section it came from at the point
   // it was left (task 110). When a return frame is held, run the temporary section's
@@ -1112,123 +1012,9 @@ export class Story {
     this.render();
   }
 
-  // Rule in render-rules.js (task 119). Still called by renderGoto's source gate.
-  isSpentSource(node) { return isSpentSourceRule(this.ctx, node); }
-
-  // <return> — a "go back to where you came from" link.
-  renderReturn(container, node, path) {
-    const hist = this.state.data.history || [];
-    const link = document.createElement('button');
-    link.className = 'goto goto-primary';
-    const inner = document.createElement('span');
-    this.appendChildren(inner, node, path);
-    link.appendChild(inner.textContent.trim() ? inner : document.createTextNode('Go back'));
-    if (hist.length) link.addEventListener('click', () => this.goBack());
-    else { link.disabled = true; link.title = 'Nowhere to return to'; }
-    this.tagFightNav(node, link);
-    this.tagRollNav(node, link);
-    this.tagTransferNav(node, link);
-    container.appendChild(link);
-    return link;
-  }
-
-  // renderItemsController / renderItemAward / renderReplaceAward moved to
-  // render-rewards.js (task 119) — dispatched from TAG_RENDERERS.
-
-  // ---- choices -------------------------------------------------------------
-  renderChoices(container, choicesNode, path, only = null, explicitKids = null) {
-    const wrap = document.createElement('div');
-    wrap.className = 'choices';
-    // A <choices> table can also hold the roll-branch elements the books place
-    // beside the buttons (<success>/<failure>/<outcome>) — the resolution of a
-    // <difficulty>/<random> rolled in the prose above (e.g. book1/123 swim). Route
-    // those through renderBranch so they reveal their goto once the roll resolves.
-    const kids = explicitKids || (only ? [only] : Array.from(choicesNode.children));
-    kids.forEach((node, i) => {
-      const tag = node.tagName.toLowerCase();
-      if (tag === 'choice') wrap.appendChild(this.renderChoice(node, path + '.c' + i));
-      else if (tag === 'success' || tag === 'failure' || tag === 'outcome' || tag === 'outcomes') {
-        renderBranch(this, wrap, node, path + '.b' + i, this.activeRoll);
-      }
-    });
-    container.appendChild(wrap);
-    return wrap;
-  }
-
-  renderChoice(node, path) {
-    const btn = document.createElement('button');
-    btn.className = 'choice';
-    const label = document.createElement('span');
-    label.className = 'choice-label';
-    // strip {box} token
-    const raw = Array.from(node.childNodes);
-    const tmp = document.createElement('span');
-    this.appendChildrenList(tmp, raw, path);
-    label.innerHTML = tmp.innerHTML.replace('{box}', '');
-    btn.appendChild(label);
-
-    const section = node.getAttribute('section');
-    const targetBook = node.getAttribute('book') ? Number(node.getAttribute('book')) : this.book;
-    const boxWord = node.getAttribute('box');
-    const isFlee = boolAttr(node.getAttribute('flee')); // "flee at any time" option
-
-    // Eligibility + payment semantics decided DOM-free in render-rules.js (task 119):
-    // reasons disable the button; `payment` is handed to payChoiceCost on click.
-    const gate = choiceGate(this.state, node, this);
-
-    if (gate.cost) {
-      const tag = document.createElement('span');
-      tag.className = 'choice-cost';
-      tag.textContent = `${gate.cost} ${gate.coinLabel}`;
-      btn.appendChild(tag);
-    }
-    if (boxWord) {
-      const cb = document.createElement('span');
-      cb.className = 'choice-box' + (this.state.hasCodeword(boxWord) ? ' ticked' : '');
-      cb.textContent = this.state.hasCodeword(boxWord) ? '☑' : '☐';
-      btn.insertBefore(cb, label);
-    }
-
-    if (gate.reasons.length) {
-      btn.disabled = true;
-      btn.classList.add('disabled');
-      btn.title = gate.reasons.join('; ');
-    } else {
-      btn.addEventListener('click', () => {
-        // A flee="t" choice IS the flee action: apply the <flee> consequence
-        // (parting wound / codeword) before leaving, and mark the fight fled.
-        if (isFlee) {
-          const fleeNode = this.sectionEl && this.sectionEl.querySelector('flee');
-          if (fleeNode) applyEffectBody(fleeNode, this.state);
-          if (this.sectionFight) this.sectionFight.outcome = 'fled';
-          if (this.state.isDead()) { this.rerender(); return; }
-        }
-        // The cost is re-validated against the live sheet (task 133): if the required
-        // possession was dropped (or funds spent) since this button rendered, refuse and
-        // refresh so the now-ineligible choice greys out instead of crossing for free.
-        const paid = payChoiceCost(this.state, gate.payment); // transaction lives in market.js (task 34)
-        if (!paid.ok) { this.rerender(); return; }
-        if (section == null) return; // a cost-only choice: pays and stays, not a source action
-        this._pendingSourceNode = node; // record the source action for a possible <return> (task 110)
-        // Sail exit: same chooser/action as a sail goto (task 89) — on click, sets the
-        // chosen vessel at large (prompting when several are here) before navigating.
-        if (gate.isSail) { this.sailThenGo(btn.parentElement || this.root, btn, targetBook, section); return; }
-        this.navigate(targetBook, section);
-      });
-    }
-    this.tagFightNav(node, btn);
-    this.tagRollNav(node, btn);
-    this.tagTransferNav(node, btn);
-    return btn;
-  }
-
-  appendChildrenList(container, nodeList, basePath) {
-    nodeList.forEach((node, idx) => {
-      const path = basePath + '.' + idx;
-      if (node.nodeType === Node.TEXT_NODE) this.appendText(container, node.nodeValue);
-      else if (node.nodeType === Node.ELEMENT_NODE) this.renderElement(container, node, path);
-    });
-  }
+  // renderReturn / the <choices> table / individual <choice> buttons / appendChildrenList
+  // moved to render-choices.js (task 119) — dispatched from TAG_RENDERERS and used by the
+  // branch reveal (render-rolls.js).
 
   // ---- rolls + branches -----------------------------------------------------
   // The roll widgets (<difficulty>/<random>/<rankcheck>/<training>/<reroll>) and the
