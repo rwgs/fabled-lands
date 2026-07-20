@@ -22,6 +22,8 @@ the tasks were filed, not work order).
 
 **MEDIUM**
 
+- [ ] 134. Market sells with several candidates silently take the first match — JaFL asks which ship/item to sell
+- [ ] 137. A save blob can persist without its `fl_meta` entry — the orphaned slot turns invisible and gets overwritten
 - [x] 129. Free fixed-amount `<rest stamina="N">` is infinitely repeatable — every hospitality rest heals to full
 - [x] 130. Inline `<buy>` allows one purchase per visit; JaFL's default is unlimited ("buy as many as you can afford")
 - [x] 131. Cache `max=` semantics: `max="0"` must bar deposits (§4.263 money-doubling), and item caches must store Shards (§6.512)
@@ -39,22 +41,24 @@ the tasks were filed, not work order).
 
 **LOW**
 
-- [ ] 134. Market sells with several candidates silently take the first match — JaFL asks which ship/item to sell
-- [ ] 135. Renouncing a god keeps that god's resurrection deal
-- [ ] 136. Engine grab-bag #2: `transfer tenth=`, named-cargo loss quantity, `effect description=`, `<set>` identifier edges, `<buy force="t">`
-- [ ] 137. A save blob can persist without its `fl_meta` entry — the orphaned slot turns invisible and gets overwritten
-- [ ] 138. Offline navigations with a query string bypass the service-worker cache
-- [ ] 139. The Adventure Sheet never shows foreign-currency balances
+*Impact-ranked 2026-07-20 (was filing order): zero-risk signal protection first,
+then real-but-rare player-facing bugs, a11y + info UX, divergences/polish, and
+the latent no-corpus-trigger items last. See the Review log.*
+
 - [ ] 142. CI's smoke verdict greps the whole DOM dump — failing runs are misdiagnosed as bootstrap FATALs
 - [ ] 143. A failing `ok()` fired after the report is silently lost — a latent silent-pass vector
 - [ ] 144. meta.json embeds the build date — a no-op rebuild busts every installed player's cache
-- [ ] 145. payChoiceCost validates a tag/wildcard item payment it can never consume *(latent — no corpus trigger)*
-- [ ] 148. undo() leaves a stale return frame — a post-undo `<return>` re-enters a pre-undo visit
 - [ ] 149. A priced sail choice pays before the ship chooser — an abandoned chooser eats the payment
-- [ ] 150. renderIfChain's list path runs `<else>`/`<elseif>` unconditionally *(latent — no corpus trigger)*
+- [ ] 148. undo() leaves a stale return frame — a post-undo `<return>` re-enters a pre-undo visit
+- [ ] 138. Offline navigations with a query string bypass the service-worker cache
+- [ ] 153. Accessibility quick wins: aria-live for toasts/rolls/fight log; dialog semantics + Escape for modals
+- [ ] 139. The Adventure Sheet never shows foreign-currency balances
+- [ ] 135. Renouncing a god keeps that god's resurrection deal
+- [ ] 136. Engine grab-bag #2: `transfer tenth=`, named-cargo loss quantity, `effect description=`, `<set>` identifier edges, `<buy force="t">`
 - [ ] 151. The dead-end fallback counts disabled controls — an unaffordable forced payment can softlock
 - [ ] 152. View-layer polish grab-bag #1: begin() scaffold duplication, modal close handle, demo dead end, TTS nits, buy-parse duplication
-- [ ] 153. Accessibility quick wins: aria-live for toasts/rolls/fight log; dialog semantics + Escape for modals
+- [ ] 145. payChoiceCost validates a tag/wildcard item payment it can never consume *(latent — no corpus trigger)*
+- [ ] 150. renderIfChain's list path runs `<else>`/`<elseif>` unconditionally *(latent — no corpus trigger)*
 - [ ] 160. Loss-matcher follow-ups: named equipment losses never filter by name; `losePaymentPlan` ignores `multiple=` *(both latent)*
 
 **Done**
@@ -902,9 +906,12 @@ its gated content without re-entering. Web-only; stamp and run all sections.
 
 ---
 
-## 134. Market sells with several candidates silently take the first match — LOW (market)
+## 134. Market sells with several candidates silently take the first match — MEDIUM (market)
 
-*(Filed 2026-07-16 from a fourth full repository review.)* `sellTrade` picks the
+*(Filed 2026-07-16 from a fourth full repository review as LOW; moved to MEDIUM
+2026-07-20 — the wrong-possession sale is irreversible, the same severity logic
+that moved task 118 to HIGH, and task 117/118's shared loss matcher it must
+reuse is now done, so it is unblocked.)* `sellTrade` picks the
 first ship of the type (market.js:122 — a **cargo-laden** ship can be sold,
 destroying its cargo, while an empty same-type ship sits in the same berth), and
 generic weapon/armour/item rows pick the first bonus/name match
@@ -982,10 +989,13 @@ until the barque is taken). Web-only; stamp and run all sections.
 
 ---
 
-## 137. A save blob can persist without its `fl_meta` entry — the orphaned slot turns invisible and gets overwritten — LOW (state/app)
+## 137. A save blob can persist without its `fl_meta` entry — the orphaned slot turns invisible and gets overwritten — MEDIUM (state/app)
 
-*(Filed 2026-07-16 from a fourth full repository review; the seam tasks 4/7
-missed.)* `save()` writes `fl_save_<slot>` then `fl_meta` (state.js:866-887); if
+*(Filed 2026-07-16 from a fourth full repository review as LOW — the seam tasks
+4/7 missed; moved to MEDIUM 2026-07-20 — silently overwriting a whole adventurer
+is a high-consequence save-integrity loss (tasks 4/7/79 family), and it was
+parked behind task 116, which rewrote the persistence schema and is now done, so
+it is unblocked.)* `save()` writes `fl_save_<slot>` then `fl_meta` (state.js:866-887); if
 the meta write throws (quota reached between the writes) the blob **is**
 persisted while `nextFreeSlot()` (state.js:1247-1251), the title screen's
 `hasSaves` (app.js:167-168) and the save list consult only `fl_meta` — the
@@ -1470,6 +1480,25 @@ and run all sections.
 *Running audit log of the backlog — each pass re-verifies the open items against
 the current code and records what was filed, split, or re-confirmed. Task
 numbers refer to the contents checklist at the top of the file.*
+
+Re-prioritised 2026-07-20 (backlog re-review — no new code audit; the fifth-pass
+verdicts stand). The burn-down cleared every HIGH and MEDIUM task, leaving all 17
+open items in LOW. Two were under-ranked and are moved LOW → MEDIUM: **134** (a
+multi-candidate market sell irreversibly destroys the wrong ship+cargo, or the
+named weapon over a generic one — the same irreversible-loss severity that moved
+118 to HIGH; its dependency, the 117/118 shared loss matcher, is now done) and
+**137** (a save persisted without its `fl_meta` entry silently overwrites a whole
+adventurer — a high-consequence save-integrity loss, unblocked now that 116 has
+rewritten the persistence schema). 134 leads the MEDIUM block, then 137. The
+remaining LOW bucket — never impact-ranked before (it carried filing order) — is
+reordered: zero-risk signal protection first (**142** CI verdict grep, **143**
+post-report silent-pass, **144** no-op rebuild cache-bust — the logic that moved
+140/141 up), then the real-but-rare player-facing bugs (**149**, **148**, **138**),
+a11y + info UX (**153**, **139**), the divergence/robustness/polish grab-bags
+(**135**, **136**, **151**, **152**), and the three latent, no-corpus-trigger
+items last (**145**, **150**, **160**). Everything else was re-confirmed LOW.
+Work order is now 134 → 137 → 142 → 143 → 144 → 149 → 148 → 138 → 153 → 139 →
+135 → 136 → 151 → 152 → 145 → 150 → 160.
 
 Reviewed 2026-07-19 (fifth full pass): started clean at `383aede` (task 119
 phases 1+2 freshly landed), suite green on a fresh profile at the reviewed
