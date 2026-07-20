@@ -28,7 +28,7 @@ the tasks were filed, not work order).
 - [x] 132. `<if blessing="?">` never matches — §5.365's chapel stacks blessings
 - [x] 133. Adventure-Sheet mutations (drop/lift) leave the story pane stale — item-gated choices stay live after the item is gone
 - [x] 121. The documented `powershell` build command no longer parses `build-data.ps1` on Windows PowerShell 5.1
-- [ ] 119. Re-establish the rules/view boundary and split the 4,060-line renderer by responsibility
+- [x] 119. Re-establish the rules/view boundary and split the 4,060-line renderer by responsibility
 - [ ] 146. A roll's dice animation leaves other controls live — the pending result lands on the wrong visit
 - [ ] 147. Navigation has no in-flight guard — a double-click double-runs leave hooks and entry effects
 - [x] 155. One-shot memos are written after the state mutation they guard — a reload repeats rests, buys, and failed rolls
@@ -325,7 +325,7 @@ named kept-item handover. Web-only; stamp and run all sections.
 
 ---
 
-## 119. Re-establish the rules/view boundary and split the 4,060-line renderer by responsibility — MEDIUM (architecture)
+## 119. Re-establish the rules/view boundary and split the 4,060-line renderer by responsibility — DONE (architecture)
 
 *(Filed 2026-07-15 from a third full repository review.)* The overall module map
 is still sound: state, combat, economy, data, shell, UI and TTS have recognizable
@@ -462,6 +462,39 @@ will drift — re-grep.
 Success (unchanged): no behaviour change, no browser globals in the rule modules,
 the all-section suite green after each extraction, the `Story` API stable, and no
 single replacement file inheriting the god-object role.
+
+*Done (2026-07-20 — Phase 3 completed on the accepted route above; one
+planner/module per commit, full every-section smoke `RESULT ALL PASS` before
+each).* The in-view rule pockets were extracted DOM-free FIRST, each unit-tested
+in `suite-actions`, then the DOM moved:
+- **1** `classifyPassive(node, view)` — the renderPassive execution cascade →
+  render-rules.js (with `pendingRollVar` + the `needsAbility/Equipment/Profession`
+  predicates). `isRollGate` moved to render-gates.js (re-exported) so the two rule
+  modules stay one-way.
+- **2** `choiceGate(state, node, view) → {reasons, payment, …}` (+ `flagGate`,
+  `isSpentSource`) → render-rules.js.
+- **3** branch resolution `branchPlan(state, ctx, node, roll)` (branchSuccess/
+  Resolved/AbilityMatches + the `<outcomes>` matcher) → render-rules.js.
+- **4** `groupPlan(sectionEl, node)` + `groupRollDefers` → render-rules.js.
+- **5** `grantChoosableReward` → engine.js `grantChosenReward(state, node, key,
+  book)`, routing item awards through the existing `applyItemAward` applier (a
+  chosen item's curse/disease/poison child now bites on pickup, matching every
+  other award path).
+- **6** begin()'s inline scaffold rebuild folded into
+  `visit-state.rebuildVisitScaffold(ctx, sectionEl, state?)` (state ⇒ fresh entry
+  resets roll-lock caches; omitted ⇒ resume keeps a locked bet).
+- Then the view split into plain-function modules (`story` first arg), flat in
+  `web/js/`, each in `sw.js` REQUIRED + the README table: **render-rolls.js**
+  (rolls/branches), **render-rewards.js** (passive/payments/rewards/item-awards/
+  groups), **render-choices.js** (choices/goto/return/navigation). `TAG_RENDERERS`
+  now dispatches `fn(story, container, node, path)`.
+- **render-combat.js** / **render-market.js** converted from `Object.assign`
+  mixins to the same plain-function style; the `Object.assign(Story.prototype…)`
+  wiring is gone, so the whole view is one convention.
+`render.js` is the facade at **~1,090 lines** (from ~4,450): class decl + exports,
+lifecycle, the core walk, conditionals, `previewProse`, and the fight/roll/transfer
+nav `tag*`/`apply*` helpers + `goBack`. `Story`/`previewProse` API unchanged; no
+browser globals in the rule modules; smoke `RESULT ALL PASS 1377` throughout.
 
 ---
 
