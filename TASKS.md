@@ -18,6 +18,7 @@ the tasks were filed, not work order).
 - [x] 126. A collapsed `<group>` action never executes its `<buy>` children — §5.192's ship and §4.622's cargo are unobtainable
 - [x] 127. Abbreviated cargo names (`grai`, `meta`, …) are never canonicalised — the trans-book trading economy is broken
 - [x] 128. A bare `ability=` disjunct on `<if>` is always true — §5.680 gives away the ring of ultimate power
+- [ ] 154. begin() autosaves the NEW section paired with the OLD visit ctx — resume aliases foreign memos onto the new section
 
 **MEDIUM**
 
@@ -28,6 +29,13 @@ the tasks were filed, not work order).
 - [x] 133. Adventure-Sheet mutations (drop/lift) leave the story pane stale — item-gated choices stay live after the item is gone
 - [x] 121. The documented `powershell` build command no longer parses `build-data.ps1` on Windows PowerShell 5.1
 - [ ] 119. Re-establish the rules/view boundary and split the 4,060-line renderer by responsibility
+- [ ] 146. A roll's dice animation leaves other controls live — the pending result lands on the wrong visit
+- [ ] 147. Navigation has no in-flight guard — a double-click double-runs leave hooks and entry effects
+- [ ] 155. One-shot memos are written after the state mutation they guard — a reload repeats rests, buys, and failed rolls
+- [ ] 156. A mid-visit reload silently drops armed `<tick special="attack|defence">` bonuses and penalties
+- [ ] 157. Item-name glob patterns never match — §4.482/§6.201 unreachable, §6.144's trophy head never taken
+- [ ] 158. Two written-max Stamina clamps still strip aura headroom (task 124's remaining siblings)
+- [ ] 159. Resurrection revives at half Stamina — the book and JaFL both say full
 
 **LOW**
 
@@ -37,6 +45,17 @@ the tasks were filed, not work order).
 - [ ] 137. A save blob can persist without its `fl_meta` entry — the orphaned slot turns invisible and gets overwritten
 - [ ] 138. Offline navigations with a query string bypass the service-worker cache
 - [ ] 139. The Adventure Sheet never shows foreign-currency balances
+- [ ] 142. CI's smoke verdict greps the whole DOM dump — failing runs are misdiagnosed as bootstrap FATALs
+- [ ] 143. A failing `ok()` fired after the report is silently lost — a latent silent-pass vector
+- [ ] 144. meta.json embeds the build date — a no-op rebuild busts every installed player's cache
+- [ ] 145. payChoiceCost validates a tag/wildcard item payment it can never consume *(latent — no corpus trigger)*
+- [ ] 148. undo() leaves a stale return frame — a post-undo `<return>` re-enters a pre-undo visit
+- [ ] 149. A priced sail choice pays before the ship chooser — an abandoned chooser eats the payment
+- [ ] 150. renderIfChain's list path runs `<else>`/`<elseif>` unconditionally *(latent — no corpus trigger)*
+- [ ] 151. The dead-end fallback counts disabled controls — an unaffordable forced payment can softlock
+- [ ] 152. View-layer polish grab-bag #1: begin() scaffold duplication, modal close handle, demo dead end, TTS nits, buy-parse duplication
+- [ ] 153. Accessibility quick wins: aria-live for toasts/rolls/fight log; dialog semantics + Escape for modals
+- [ ] 160. Loss-matcher follow-ups: named equipment losses never filter by name; `losePaymentPlan` ignores `multiple=` *(both latent)*
 
 **Done**
 
@@ -363,6 +382,40 @@ split the DOM view methods into responsibility-based modules (combat / market /
 actions view), structure TBD (prototype-mixin vs collaborator objects). The
 core "rules out of the view" invariant is now met; Phase 3 is a further
 file-organisation step, not a behaviour or boundary fix.
+
+*Phase-3 guidance (2026-07-19, fifth review — renderer sweep):* the boundary
+claim is ~80% true: the extracted predicates are clean, but several
+composition/transaction pockets still in the view ARE rule semantics, and a
+file-only split would fossilise them. Extract these as DOM-free planners
+FIRST (each unit-tested, per this task's own rule), then move the DOM:
+- `renderPassive`'s decision cascade (render.js:1196-1412) — the ordering IS
+  JaFL's execution model; extract a `classifyPassive(node, view) → {mode,…}`
+  verdict the view merely switches on.
+- `grantChoosableReward` (render.js:1803-1836) — a full award transaction
+  (currency/possession branch, quantity loop, resurrection deal, flag
+  consumption) in the view; it duplicates the engine applier `grantItemNode`
+  already delegates to. Belongs in engine/market behind a chooser-style API.
+- `renderChoice`'s eleven inline eligibility gates + the `pay=` default
+  (render.js:2274-2311) — extract `choiceGate(state, node, view) → reasons[]`
+  into render-rules.js (unit tests there would also catch task-133-style
+  revalidation drift).
+- Branch resolution (render.js:2636-2760) — `branchSuccess`/`branchResolved`/
+  the `<outcomes>` matcher are pure functions of (node, roll record, state,
+  wroteVars); the natural fourth block of render-rules.js.
+- The `renderGroup` planner family (render.js:994-1161) — extract a
+  `groupPlan(sectionEl, node)` classification.
+Plan a FOURTH view module for rolls+branches (~530 lines, render.js:2365-2778)
+alongside combat/market/actions — rolls are the heart of the render/rules
+interplay and belong to none of those three. On the TBD structure question:
+prefer plain functions taking the story as first argument (the pattern the
+render-rules delegates already use) over prototype mixins (keep the god object
+and hide dependencies) or collaborator objects (two-way reference ceremony);
+converting TAG_RENDERERS' string values to imported function references makes
+the moves mechanical. Keep new files flat in `web/js/` (stamp trap above) and
+extend sw.js REQUIRED + the README table per file, as phases 1-2 did.
+Also: begin() re-implements visit-state's `rebuildVisitScaffold` inline
+(render.js:258-273 vs visit-state.js:65-78) — fold that into whichever slice
+touches begin() first, or take it with task 152.
 
 ---
 
@@ -953,11 +1006,441 @@ numbers in both files (checklist line in TASKS.md, detail in the archive).
 
 ---
 
+## 142. CI's smoke verdict greps the whole DOM dump — failing runs are misdiagnosed as bootstrap FATALs — LOW (ci)
+
+*(Filed 2026-07-19 from a fifth full repository review; the residue of task
+140's fix.)* smoke.yml decides the outcome with `grep -q 'RESULT ALL PASS'` /
+`elif grep -q 'RESULT FATAL'` over the whole dumped DOM (smoke.yml:68/70) — but
+`--dump-dom` includes _test.html's inline script SOURCE, which contains the
+literal `RESULT FATAL pass=0 fail=1` (the bootstrap's provisional-fatal string,
+_test.html:27). On any genuinely failing run the ALL PASS check misses, the
+FATAL check matches that source string, and CI prints "aborted before running
+(module parse/bootstrap error)" — a wrong diagnosis for an ordinary assertion
+failure (the job still exits 1, so nothing false-passes today). Verified
+against a real dump: a passing dump matches `RESULT FATAL` via the source
+literal, and sed-flipping the live result line to FAILURES routes the verdict
+to the FATAL branch. The dual risk: any future page comment containing
+`RESULT ALL PASS` would make failing runs pass. Fix: compute the verdict from
+the FIRST extracted result line — the display grep at smoke.yml:67 already
+computes exactly this; capture it in a variable and case on it. CI-only; no
+stamp; verify the branch logic against a passing dump and a hand-flipped one.
+
+---
+
+## 143. A failing `ok()` fired after the report is silently lost — LOW (tests)
+
+*(Filed 2026-07-19 from a fifth full repository review; same family as task
+120's async gaps a/b.)* The sticky-fatal bootstrap flips the aggregate for
+thrown errors and unhandled rejections that arrive after report()
+(_test.html:17-31), but a plain failing `ok()` fired from un-awaited async work
+after the reporter has printed only mutates counters and an `out` array nobody
+re-reads (_test.html:55-58) — the title stays TESTS_OK and the RESULT line
+stays ALL PASS. No suite currently asserts after its `run()` resolves, so this
+is latent, but it is the one remaining silent-pass vector in the harness. Fix:
+set a `reported` flag in report() and make `ok()` route a post-report failure
+through `flFatal` (or re-render the report). Dev-only — _test.html is excluded
+from the stamp; run the suite once.
+
+---
+
+## 144. meta.json embeds the build date — a no-op rebuild busts every installed player's cache — LOW (build)
+
+*(Filed 2026-07-19 from a fifth full repository review.)* build-data.ps1:217
+writes `generated = (Get-Date).ToString('yyyy-MM-dd')` into meta.json; nothing
+in web/js reads the field (verified by grep). stamp-version.ps1 hashes
+`web/data/*.json` (stamp-version.ps1:39), so rebuilding with UNCHANGED
+books/rules on a later day still changes meta.json → new stamp → new
+service-worker cache key → every installed PWA re-downloads the entire
+precache (all six book JSONs + assets) for a byte-identical app. It also makes
+"did the data rebuild change anything?" unanswerable from `git status`. Fix:
+drop the field, or derive it from content (e.g. the corpus hash). Build-only;
+verify by rebuilding twice — the second run must leave `web/data/` and
+`version.js` byte-identical.
+
+---
+
+## 145. payChoiceCost validates a tag/wildcard item payment it can never consume — LOW (market, latent)
+
+*(Filed 2026-07-19 from a fifth full repository review.)* `payChoiceCost`
+gates on the tag-aware `hasItemMatch(item, itemTags)` but consumes via the
+name-only `findItems(item)[0]` (market.js:204-211), and `matchItems` treats
+`?` as a literal name (state.js:1241-1248). A paid `<choice item="?"
+tags="…">` would validate, deduct any Shards cost, then silently skip the item
+consumption (`if (it)` guards the undefined lookup). Latent: the corpus holds
+only two paid item-choices, both concrete names, no tags/wildcards (verified
+by grep) — but the checker/taker disagreement is one data update from live,
+and the same call shape serves every future paid choice. Fix: consume via
+`matchItemQuery(state.data.items, item, itemTags)[0]` so both sides share one
+matcher. Web-only; unit assertion in suite-economy; stamp and run all sections.
+
+---
+
+## 146. A roll's dice animation leaves other controls live — the pending result lands on the wrong visit — MEDIUM (render/ui)
+
+*(Filed 2026-07-19 from a fifth full repository review — renderer sweep;
+verified against the code by a second reader.)* `rollButton` disables only
+itself, awaits the ~560ms `animateDice`, then runs `onRoll`
+(render.js:2598-2608; ui.js:6-29). Only a mandatory `<random>`→`<outcomes>`
+roll gates navigation, so during the animation the section's other navs stay
+clickable: click Train/Attack, then a live choice within ~0.6s, and
+`Story.navigate`→`begin()` swaps `this.ctx` BEFORE the pending `onRoll`
+executes. `rollTraining`/`fightRound` then mutate state after the player has
+left the section, `this.ctx.rolls.set('roll@'+path, …)` writes the stale
+result into the NEW visit's memo (a node at the same positional path renders
+as already-rolled with the old result), and the autosave persists all of it.
+The onRoll closures (e.g. render.js:2591-2593) resolve `this.ctx` at
+post-await execution time; nothing compares it to the click-time ctx. The
+suite can't see this — `__FL_INSTANT_DICE__` collapses the window. Fix:
+capture the ctx when the roll is clicked and bail from `onRoll` when
+`this.ctx` differs (belt: disable the pane's other controls during the
+animation). Test with a fake delayed `animateDice`. Web-only; stamp and run
+all sections.
+
+---
+
+## 147. Navigation has no in-flight guard — a double-click double-runs leave hooks and entry effects — MEDIUM (app/render)
+
+*(Filed 2026-07-19 from a fifth full repository review — renderer sweep;
+verified against the code by a second reader.)* Goto/choice buttons are never
+disabled on click and `app.navigate` awaits `data.getSection` with no
+re-entrancy token (app.js:586-600), while the `Story.navigate` wrapper runs
+frame capture + leave hooks synchronously PER CLICK (render.js:149-162,
+214-227). Same-book the await is a microtask, but a cross-book goto fetches an
+entire book JSON — hundreds of ms cold. A double-click in that window: (1) the
+leave hooks run twice — `_sailExempt` is consumed by the first pass, so the
+second re-applies `applyTodock` and the ship you just sailed with is docked
+back at the departure port; (2) both fetches resolve, so `state.goTo` runs
+twice — `turns` double-counts and history gains a self-entry
+(state.js:872-878); (3) `begin()` runs twice with a fresh ctx each time, so
+the destination's on-entry `<lose>`/`<gain>`/`<tick>` apply twice. Related
+wart: the hooks fire before the fetch is known to succeed, so a missing
+section (app.js:589-592 toasts and returns) leaves the player in a section
+whose todock already fired and whose `_returnFrame` was overwritten. Fix: an
+in-flight flag in `app.navigate` that ignores clicks until `begin()` completes,
+and/or defer the leave hooks until the section element has resolved. Web-only;
+stamp and run all sections.
+
+---
+
+## 148. undo() leaves a stale return frame — a post-undo `<return>` re-enters a pre-undo visit — LOW (app/render)
+
+*(Filed 2026-07-19 from a fifth full repository review — renderer sweep.)*
+`app.undo` calls `story.begin(el, …)` directly (app.js:602-613) and `begin()`
+never touches `this._returnFrame`, so the frame captured when the PRE-undo
+timeline left its previous section survives the undo. If the section the
+player lands in via undo carries a `<return>`, `goBack()`
+(render.js:2023-2042) consumes the stale frame: `restoreReturn` pops a
+legitimate history entry and re-hydrates the visit with a pre-undo ctx/vars —
+rolls the undo reverted render as resolved. Verified by enumerating the
+`_returnFrame` writers (navigate wrapper, goBack, resume, resumeStale) — undo
+is the one entry path that doesn't reset it. Fix: null `story._returnFrame` in
+`app.undo`, and audit `handleDeath`'s load/new paths for the same gap.
+Web-only; stamp and run all sections.
+
+---
+
+## 149. A priced sail choice pays before the ship chooser — an abandoned chooser eats the payment — LOW (render)
+
+*(Filed 2026-07-19 from a fifth full repository review — renderer sweep.)*
+`payChoiceCost` deducts the Shards / consumes the item, and only THEN, for
+`sail="t"` with two or more ships at the dock, `sailThenGo` shows the
+which-ship picker (render.js:2342-2347, 1995-2013). Dismiss the picker — or
+let a task-133 sheet-change rerender rebuild the pane — and the payment is
+gone with nothing memoized as paid: the re-rendered choice charges again. The
+same shape exists at render.js:1975-1983, where a storm-guarded goto spends
+the blessing (`useBlessing`) before its chooser. Requires a priced sail choice
+with multiple ships docked, so rare — but a real money/blessing leak. Fix: run
+the chooser first and commit cost + blessing inside the final `go()`.
+Web-only; stamp and run all sections.
+
+---
+
+## 150. renderIfChain's list path runs `<else>`/`<elseif>` unconditionally — LOW (render, latent)
+
+*(Filed 2026-07-19 from a fifth full repository review — renderer sweep.)*
+When if/elseif/else reach the renderer through `renderElement` — which happens
+only from `appendChildrenList` (choice labels, render.js:2357-2363) and
+`renderGroupWithRoll`'s child loop (render.js:1143) — `<else>` renders (and
+applies effects) unconditionally and `<elseif>` evaluates independently of
+whether its `<if>` matched (render.js:974-988), diverging from the correct
+chain walker at render.js:583-607. Corpus-verified unreachable today: no
+`<else>`/`<elseif>` inside `<choice>` or `<group>`, and no `<if>` inside
+`<choice>` at all — but it is a second, wrong implementation of the chain
+semantics sitting one data update from live. Fix: route those two call sites
+through the real chain walker, or make the `renderElement` path treat non-`if`
+chain members as inert. Web-only; stamp and run all sections.
+
+---
+
+## 151. The dead-end fallback counts disabled controls — an unaffordable forced payment can softlock — LOW (render)
+
+*(Filed 2026-07-19 from a fifth full repository review — renderer sweep.)* The
+"accept your fate" fallback filters candidate controls only by
+`.cond-inactive`, not `disabled` (render.js:480-488). A forced economic
+payment sets `this.blocked`, so nothing after it in document order renders
+(render.js:1573-1612); if the player cannot afford the cost, the Pay button
+renders disabled — and the fallback counts that disabled button as a way
+forward and stays hidden, leaving only Undo. No live corpus section was proven
+(whether a decline exit ever sits after its payment was not exhaustively
+checked), so this is filed as a robustness fix to the fallback predicate: also
+require `!c.disabled`, taking care not to fire during live fight/roll gates
+(their Attack/Roll buttons are enabled anyway). Web-only; stamp and run all
+sections.
+
+---
+
+## 152. View-layer polish grab-bag #1 — LOW (render/app/tts)
+
+*(Filed 2026-07-19 from a fifth full repository review — renderer sweep; each
+verified individually, none player-visible beyond the noted edges.)*
+- `begin()` re-implements visit-state's `rebuildVisitScaffold` inline
+  (render.js:258-273 vs visit-state.js:65-78; the latter's comment documents
+  the drift risk) — call the shared helper plus the lock-flag reset pass.
+  *(Also noted on task 119 — whichever lands first takes it.)*
+- `showGameMenu`'s `close()` removes the overlay behind `modal()`'s back, so
+  the modal's promise never resolves (app.js:706-707) — harmless today; give
+  `modal()` a programmatic close/resolve handle.
+- `startDemo` with a bad spec (`?demo=9.99999`) builds the game screen, toasts
+  "Section not found", and strands a blank story pane (app.js:51-59) — return
+  to the title screen instead.
+- `Narrator.stop()` ends in `if (was) this._emit(); else this._emit();` — a
+  dead branch (tts.js:136-142); and `handleRerender` leaves `this.chunks`
+  referencing the previous section's detached DOM until the next `play()`
+  (tts.js:24/105) — clear it.
+- `runBuyNode` duplicates `renderInlineBuy`'s buy-option parsing
+  (render.js:1180-1193 vs 3481-3489) — extract one DOM-free
+  `buyOptions(node)` helper (natural home: market.js) used by both.
+Web-only; stamp and run all sections.
+
+---
+
+## 153. Accessibility quick wins: live regions and dialog semantics — LOW (ui)
+
+*(Filed 2026-07-19 from a fifth full repository review — renderer sweep.)*
+Screen readers never hear toasts — codeword gained, save failed, blessing
+spent — because the toast host has no live region (ui.js:33-40): one line,
+`aria-live="polite"`. `modal()` lacks `role="dialog"`/`aria-modal`, never
+moves focus into the dialog (Tab reaches the obscured background), and ignores
+Escape even when dismissable (ui.js:51-76) — focusing the primary button plus
+an Escape handler is ~6 lines; a full focus trap can wait. Roll results and
+the fight log replace content with no live region — `aria-live="polite"` on
+the `.roll` widget and fight log, one line each. Icon buttons, curse-lift
+buttons and the theme toggle already carry proper labels (checked clean).
+Web-only; stamp and run all sections.
+
+---
+
+## 154. begin() autosaves the NEW section paired with the OLD visit ctx — resume aliases foreign memos onto the new section — HIGH (render/state)
+
+*(Filed 2026-07-19 from a fifth full repository review — engine/state sweep;
+premise re-verified line-by-line by a second reader. The systemic follow-up to
+task 116: the persisted visit record is not atomic with the live visit; tasks
+155/156 share the cause and likely the fix.)* `begin()` sets `this.section`
+to the NEW section (render.js:234), then calls `clearPotionBonuses()`,
+`clearFightBonuses()`, `clearVars()` and `arriveAtDock()` (237-249) — each of
+which fires `changed()` → `save()` → the visit provider — while `this.ctx` is
+still the PREVIOUS section's ctx (replaced only at render.js:252) and the
+entry-tick snapshot is still the old one (reset later still). The persisted
+record passes `sanitizeVisit`'s section-match guard and `resumeOrBegin`'s
+check (app.js:638) while carrying a foreign memo, and `clearVars()` fires
+after virtually every roll-bearing section, so the malformed record is written
+on almost every navigation — corrected only by the NEXT save, which in a
+section with no passive entry effects never comes until the player acts. Close
+the tab (or hit the SW `controllerchange` reload) during such a visit and
+`resume()` rebuilds the visit from the old ctx: positional keys (`fx@…`,
+`roll@…`, `buy@…`, fights, stock) alias onto the new section's nodes — rolls
+and fights appear pre-resolved with the wrong result, one-shot actions appear
+consumed (or their memos vanish), and the `<if ticks=>` baseline is wrong.
+Sub-defect in the same seam: `arriveAtDock` (state.js:825-837) mutates
+`data.location` WITHOUT `changed()` when no ship berths and no voyage ends,
+so a reload during a save-free visit restores a stale location into
+`shipsHere()`/`currentShip()` (the task-73/89 locality rules). Fix direction:
+make the record atomic with the visit — swap in the fresh ctx + entry ticks
+BEFORE the state-clearing calls, or suppress/defer the provider until
+`begin()` completes and force one save at its end; and make `arriveAtDock`
+call `changed()` whenever `data.location` actually changes. Web-only; needs a
+focused resume test (save mid-begin ordering) in suite-actions; stamp and run
+all sections.
+
+---
+
+## 155. One-shot memos are written after the state mutation they guard — a reload repeats rests, buys, and failed rolls — MEDIUM (render/state)
+
+*(Filed 2026-07-19 from a fifth full repository review — engine/state sweep;
+rest-handler ordering re-verified by a second reader. Shares task 154's
+systemic cause; re-opens 129/130 via save-scumming.)* The autosave fires from
+INSIDE the state mutation (`applyRest` → `healStamina` → `changed()`), but the
+ctx memo is added only after it returns — and ctx mutations never trigger a
+save: rest at render.js:3608-3611 (`applyRest` then `ctx.applied.add(memo)`),
+inline buy at render.js:3482-3492, roll handlers at render.js:2404-2405,
+2428-2429, 2507-2508, 2520-2521, 2544. The last persisted record therefore
+says the action never happened while its state effects ARE saved. Concretely:
+click a task-129 hospitality rest, reload → the rest is live again (infinite
+heal restored via reload); buy §4.658's `quantity="1"` barque, reload → a
+second barque; fail a `<difficulty>` roll whose var write was the only save,
+reload → free reroll. The passive-effect path already does this correctly —
+`ctx.applied.add(key)` BEFORE `applyEffect` (render.js:1391-1392) — so the fix
+is that ordering in the click handlers, or a deferred end-of-handler save
+(which would also close 154). Web-only; focused reload assertions per handler
+family; stamp and run all sections.
+
+---
+
+## 156. A mid-visit reload silently drops armed `<tick special="attack|defence">` bonuses and penalties — MEDIUM (render/state)
+
+*(Filed 2026-07-19 from a fifth full repository review — engine/state sweep.
+Task 116's regression on task 49; shares 154's cause.)* `_fightBonus` is
+deliberately transient ("never survives a save", state.js:141-147, 287-304) —
+safe when a reload re-ran `begin()` and re-applied the granting tick. After
+task 116, `resume()` restores `ctx.applied` (the `fx@` memo says the tick
+already ran) onto a fresh `GameState` whose `_fightBonus` is zero, and nothing
+re-applies it (render.js:355-365). Combat autosaves every round, so mid-fight
+reloads are normal. Live both ways: §1.42/§1.145/§1.247/§1.428 rat poison +3
+(item crossed off, paid bonus gone), §4.434 +4 Defence, §6.183 — and
+exploitably §1.238/§6.624 (`<tick special="attack" bonus="-2" hidden="t"/>`:
+reload to shed the penalty). Fix: persist the per-fight bonus in the visit
+record (it is per-visit state — exactly what the record is for) or re-apply
+special ticks on resume. Web-only; resume assertion in suite-combat; stamp and
+run all sections.
+
+---
+
+## 157. Item-name glob patterns never match — §4.482/§6.201 unreachable, §6.144's trophy head never taken — MEDIUM (state/engine)
+
+*(Filed 2026-07-19 from a fifth full repository review — engine/state sweep;
+§4.482's pattern re-verified in source by a second reader.)* `matchItems`
+compares exact normalized names/tags only (state.js:1241-1248); JaFL
+wildcard-matches item names (java-engine/flands/Item.java:425-432), and the
+port itself already globs equipment (`globMatch`, engine.js:315-319) — item
+names were just never routed through it (`matchItemQuery`'s comment even
+claims "name/glob", state.js:1250-1255). Live triggers, each verified against
+granted items in the corpus: §4.482 `<if item="*flute|*whistle">` never true
+(flute/silver flute/centaur flute/enchanted flute exist) — the §632 shortcut
+is unreachable and flute-owners must sing; §6.201 `<if item="*mask">` never
+true (courtier's mask, dragon mask) — §248 unreachable; §6.144 `<lose
+item="* head">` removes nothing (dead head, ghoul's head, severed head…) —
+the handed-over trophy survives and can be reused. Fix: route `matchItems`'
+name comparison through the shared `globMatch` (moving it to state.js/rules.js
+to avoid an import cycle). Web-only; unit tests for the three patterns; stamp
+and run all sections.
+
+---
+
+## 158. Two written-max Stamina clamps still strip aura headroom — MEDIUM (state/engine)
+
+*(Filed 2026-07-19 from a fifth full repository review — engine/state sweep.
+Task 124's remaining siblings.)* Task 124 fixed load/import; two more clamps
+remain: (1) `adjustAbilityStamina` (state.js:531-540) clamps current Stamina
+to the WRITTEN `staminaMax`, where JaFL moves natural/affected/current
+together with no upper clamp (Adventurer.java:283-297) — a
+ring-of-ultimate-power holder at 30/20 who hits any `<gain|lose
+ability="stamina">` (72 nodes corpus-wide; ~18 files in books 5-6 where the
+ring is held) silently loses up to 10 Stamina. (2) `applyRest`'s
+restore-to-full form heals BY `staminaMax` clamped to the effective max
+(engine.js:1449-1451), so a ring-holder below 10 ends below full (1 → 21 of
+30) where JaFL's missing-stamina rest is heal-to-affected (RestNode +
+StaminaStat.heal) — pass the effective max instead. Noted, not in scope:
+`adjustStaminaMax` (state.js:551-555) shares the clamp but is dead code (no
+callers). Web-only; aura-holder assertions for both paths; stamp and run all
+sections.
+
+---
+
+## 159. Resurrection revives at half Stamina — the book and JaFL both say full — MEDIUM (engine/app)
+
+*(Filed 2026-07-19 from a fifth full repository review — engine/state sweep;
+the half rule predates task 34 — moved verbatim from app.js, never checked
+against the reference.)* `reviveWithResurrection` sets `stamina = max(1,
+floor(staminaMax/2))` (engine.js:1468-1474). JaFL `Resurrection.activate()`
+is documented "Heals the player entirely" and heals to full
+(java-engine/flands/Resurrection.java:41-46), and the book agrees — §1.640:
+"Your Stamina is back to its normal score." Also uses the written max (task
+158's aura issue — use the effective max). Secondary, same seam: with several
+deals held, JaFL lets the player CHOOSE which resurrection to use; the port
+consumes `resurrections.shift()` and the death modal shows only
+`resurrections[0]` (app.js:658) — a supplemental boon (task 98) bought before
+a standard deal is consumed in the wrong order. *(Distinct from open task 135,
+which owns renounce/god-linkage.)* Web-only; death-flow assertion in
+suite-engine; stamp and run all sections.
+
+---
+
+## 160. Loss-matcher follow-ups: named equipment losses never filter by name; `losePaymentPlan` ignores `multiple=` — LOW (engine, latent)
+
+*(Filed 2026-07-19 from a fifth full repository review — engine/state sweep;
+both latent, both verified un-triggered in the current corpus.)* (1)
+`loseEquipmentCandidates` (engine.js:694-705) filters by bonus/tags/using but
+never by the name pattern, so a future `<lose weapon="oaken staff">` would
+enumerate ALL weapons — and `applyKeepRule`'s "explicit named handover may
+take a kept item" branch (engine.js:1012-1018) is reachable only through this
+unfiltered path, so the first named equipment loss would misbehave twice over.
+Every equipment loss in all six books today is `?`/`*` (verified by grep). (2)
+`losePaymentPlan` (engine.js:742-766) treats `eligible` as "any candidate",
+ignoring `multiple=` quantity, and `applyLose` arms the price flag when ANY
+item was taken (engine.js:626-634) — task 117's spec says the plan must cover
+required quantities; `multiple=` and `price=` never co-occur today (the 12
+`multiple=` nodes are all unpriced). Fix both inside the shared task-117
+matcher: apply `matchItems`/`globMatch` to the spec before the keep rule, and
+make the plan quantity-aware. Web-only; unit tests with synthetic nodes; stamp
+and run all sections.
+
+---
+
 ## Review log
 
 *Running audit log of the backlog — each pass re-verifies the open items against
 the current code and records what was filed, split, or re-confirmed. Task
 numbers refer to the contents checklist at the top of the file.*
+
+Reviewed 2026-07-19 (fifth full pass): started clean at `383aede` (task 119
+phases 1+2 freshly landed), suite green on a fresh profile at the reviewed
+tree (`RESULT ALL PASS pass=1288 fail=0`). Method: two deep subsystem sweeps
+(engine/state core; renderer/view), each finding verified against the code,
+the live XML and the JaFL reference, with the highest-severity premises
+re-verified line-by-line by a second reader; combat/market, build/CI/SW/docs
+and the test harness were reviewed inline (three further parallel sweeps were
+started and deliberately stopped; their scopes were re-covered inline). Filed
+tasks **142–160**. The headline is a save/load atomicity family that is the
+systemic successor to task 116 — the persisted visit record is not atomic with
+the live visit: `begin()` autosaves the new section against the OLD ctx on
+almost every navigation (154, HIGH — work this first); one-shot rest/buy/roll
+memos are written after the saving mutation, so a reload repeats them,
+re-opening 129/130 via save-scumming (155); and a mid-visit reload drops armed
+`<tick special=>` fight bonuses/penalties (156) — one deferred-save fix likely
+closes all three. Independent rules divergences: item-name globs never match —
+§4.482/§6.201 unreachable, §6.144's trophy head never taken (157); two
+written-max Stamina clamps still strip aura headroom, 124's siblings (158);
+resurrection revives at half Stamina where the book and JaFL say full, a rule
+that predates task 34 and was never reference-checked (159). View-layer races:
+the dice-animation window lands pending rolls on the wrong visit (146) and
+navigation has no in-flight guard — double-clicks double-run leave hooks and
+entry effects (147); plus undo's stale return frame (148), pay-before-chooser
+leaks (149), the latent renderIfChain else/elseif divergence (150), the
+dead-end fallback counting disabled controls (151), a view polish grab-bag
+(152) and a11y quick wins (153). Infra/tests: CI's verdict grep matches the
+whole DOM dump — failing runs are misdiagnosed as bootstrap FATALs today, and
+a source literal could false-pass tomorrow (142, proven against a real and a
+hand-flipped dump); a failing `ok()` after report() is the harness's one
+remaining silent-pass vector (143); meta.json's embedded build date busts
+every installed player's cache on a no-op rebuild (144); payChoiceCost
+validates a tag/wildcard payment it can never consume, latent (145); and the
+task-117 loss matcher's two latent gaps (160). Task 119 gained a phase-3
+guidance note: extract the remaining rule pockets (renderPassive's cascade,
+grantChoosableReward, renderChoice's gates, branch resolution, the group
+planner) as tested DOM-free planners BEFORE moving view files, and plan a
+fourth rolls+branches view module. Checked clean this pass: task-115 detours
+(every navigation routes through `Story.navigate`), 116's ctx serialization
+round-trip, the memo-path tripwire, listener/XSS hygiene, a 4,437-section
+corpus scan for the mixed flag-reward double-grant seam (zero fall-throughs),
+`sanitizeData` field coverage, `canonCargo` folding, the task-128 equipment
+fold (the real hyperium wand matches), combat.js blessing/reroll/group-fight
+semantics, market transactions (the sole `currency=` market, book2/495, holds
+no inline buys), the build scripts (validation-first, deterministic, the stamp
+covers everything the SW precaches), the README module table, regression
+coverage for all sixteen recent fixes, the every-section corpus suite, and
+the NOTICE/licence split. Open items 134–139 were deliberately not re-verified
+this pass (the fourth-pass verdicts stand); 119's progress claim was assessed
+(~80% true) and extended rather than re-litigated.
 
 Reviewed 2026-07-16 (fourth full pass): started clean at `b012eff` (no code
 changes since the third pass — this pass was an independent re-audit with fresh
