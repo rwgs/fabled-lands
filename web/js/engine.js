@@ -712,6 +712,15 @@ export function grantChosenReward(state, node, key, book) {
  *  be confiscated); only an explicit named piece with no ordinary match may. (tasks 117, 118) */
 function loseEquipmentCandidates(el, state, kind) {
   let cands = state.data.items.filter((it) => it.kind === kind);
+  // Name/glob filter for a concrete spec ("?"/"*"/blank take any of that kind) — mirrors
+  // matchEquipment's <if weapon="X"> check so the take enumerates exactly what the gate
+  // matched, not every weapon. A named handover reaching applyKeepRule is now narrowed
+  // first, so a kept item is only offered when it is genuinely the named piece. (task 160)
+  const spec = String(el.getAttribute(kind) || '').trim();
+  if (spec !== '' && spec !== '?' && spec !== '*') {
+    const alts = spec.split('|');
+    cands = cands.filter((it) => alts.some((a) => globMatch(a, it.name)));
+  }
   const bonus = el.getAttribute('bonus');
   if (bonus != null && /^-?\d+$/.test(bonus)) cands = cands.filter((it) => (it.bonus || 0) === parseInt(bonus, 10));
   const tags = el.getAttribute('tags');
@@ -774,7 +783,11 @@ export function losePaymentPlan(el, state) {
       return { present: true, kind: 'item', candidates: pool, eligible: pool.length > 0, needsChoice: false };
     }
     const cands = loseItemMatches(el, state);
-    return { present: true, kind: 'item', candidates: cands, eligible: cands.length > 0, needsChoice: false };
+    // Quantity-aware eligibility (task 117 spec / task 160): a multiple= loss demands that
+    // many matching items, so the plan is only met when at least `count` exist — mirrors
+    // applyLose's take of up to `count`. (multiple= and price= never co-occur today.)
+    const count = g('multiple') ? resolveValue(state, g('multiple')) : 1;
+    return { present: true, kind: 'item', candidates: cands, eligible: cands.length >= count, needsChoice: false };
   }
   for (const kind of ['weapon', 'armour', 'tool']) {
     if (g(kind) != null) return plan(kind, g(kind), loseEquipmentCandidates(el, state, kind));

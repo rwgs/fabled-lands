@@ -678,4 +678,30 @@ export async function run(ctx) {
          eng.evalExpression('12-charisma', gCur, 'natural') === 12, `v=${eng.evalExpression('12-charisma', gCur, 'natural')}`);
     }
 
+    // task 160: loss-matcher follow-ups.
+    {
+      // 160.1 — a named equipment loss filters candidates BY NAME (not "any of that kind"),
+      // so it takes the named piece and leaves an unrelated weapon that is first in order.
+      const g160 = GameState.create({ name:'E160', gender:'m', profession:'Warrior', book:1, adv });
+      g160.data.items = [];
+      g160.addItem(makeItem('weapon', 'sword', 3));        // first in inventory order
+      g160.addItem(makeItem('weapon', 'oaken staff', 1));
+      eng.applyEffect(parse('<lose weapon="oaken staff"/>'), g160);
+      ok('task160.1: a named weapon loss takes the NAMED weapon, not the first of its kind',
+         g160.hasItem('sword') && !g160.hasItem('oaken staff'),
+         `items=${JSON.stringify(g160.data.items.map((i) => i.name))}`);
+
+      // 160.2 — losePaymentPlan is quantity-aware: a multiple= loss is eligible only once
+      // that many matching items exist.
+      const g160b = GameState.create({ name:'M160', gender:'m', profession:'Warrior', book:1, adv });
+      g160b.data.items = [];
+      g160b.addItem(makeItem('item', 'gem', 0, null, ['gem']));
+      g160b.addItem(makeItem('item', 'gem', 0, null, ['gem']));
+      const planShort = eng.losePaymentPlan(parse('<lose item="gem" multiple="3" price="k"/>'), g160b);
+      ok('task160.2: plan is ineligible when fewer than multiple= items exist', planShort.eligible === false);
+      g160b.addItem(makeItem('item', 'gem', 0, null, ['gem']));
+      const planOk = eng.losePaymentPlan(parse('<lose item="gem" multiple="3" price="k"/>'), g160b);
+      ok('task160.2: plan is eligible once multiple= items exist', planOk.eligible === true);
+    }
+
 }
