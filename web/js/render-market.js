@@ -7,7 +7,7 @@
 // engine.js; this only builds the widgets and wires the clicks.
 
 import { applyEffect, applyEffectBody, boolAttr, resolveValue, applyRest, buyResurrectionDeal, readItemEffects, filterMatches, transferPlan } from './engine.js';
-import { shopKind, goodsFrom, ownsGoods, buyTrade, sellTrade, sellPlan, applyInlineBuy, sellInlineItem, sellCargo, canUpgradeCrew } from './market.js';
+import { shopKind, goodsFrom, ownsGoods, buyTrade, sellTrade, sellPlan, applyInlineBuy, buyOptions, sellInlineItem, sellCargo, canUpgradeCrew } from './market.js';
 import { normalize, parseTags, splitItemName, isShardsCurrency } from './state.js';
 import { canonCargo } from './rules.js';
 import { modal } from './ui.js';
@@ -281,14 +281,7 @@ export function renderInlineBuy(story, container, node, path) {
 
   if (!reason) {
     btn.addEventListener('click', () => {
-      const res = applyInlineBuy(story.state, {
-        price, ship: shipType, shipName: node.getAttribute('name'), initialCrew: node.getAttribute('initialCrew'),
-        tool, item, cargo,
-        bonus: node.getAttribute('bonus') ? parseInt(node.getAttribute('bonus'), 10) : 0,
-        ability: node.getAttribute('ability'),
-        tags: parseTags(node.getAttribute('buytags') || node.getAttribute('tags')),
-        effects: readItemEffects(node), // <buy item="potion of strength"><effect .../></buy> (task 41)
-      });
+      const res = applyInlineBuy(story.state, buyOptions(node, story.state)); // shared buy-node parse (task 152)
       if (!res.ok) { if (res.note) story.notify(res.note, 'warn'); return; }
       story.ctx.buys.set(memo, bought + 1);
       story.rerender();

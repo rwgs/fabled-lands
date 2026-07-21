@@ -66,7 +66,8 @@ export function toast(msg, type = 'info') {
 
 // ---- modal -----------------------------------------------------------------
 export function modal({ title, body, buttons = [{ label: 'OK', value: true }], dismissable = true }) {
-  return new Promise((resolve) => {
+  let doClose = () => {};
+  const p = new Promise((resolve) => {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     const box = document.createElement('div');
@@ -83,7 +84,13 @@ export function modal({ title, body, buttons = [{ label: 'OK', value: true }], d
     box.appendChild(content);
     const bar = document.createElement('div');
     bar.className = 'modal-buttons';
-    const close = (value) => { document.removeEventListener('keydown', onKey); document.body.removeChild(overlay); resolve(value); };
+    // Idempotent teardown: drop the Escape listener + overlay and resolve exactly once.
+    // Exposed as `.close(value)` on the returned promise so a caller can dismiss the
+    // dialog programmatically AND settle its promise — the game menu relies on this
+    // instead of ripping the overlay out behind the promise's back. (tasks 152, 153)
+    let closed = false;
+    const close = (value) => { if (closed) return; closed = true; document.removeEventListener('keydown', onKey); overlay.remove(); resolve(value); };
+    doClose = close;
     let primaryBtn = null;
     buttons.forEach((b) => {
       const btn = document.createElement('button');
@@ -101,6 +108,8 @@ export function modal({ title, body, buttons = [{ label: 'OK', value: true }], d
     document.body.appendChild(overlay);
     (primaryBtn || bar.querySelector('button'))?.focus();
   });
+  p.close = (value = null) => doClose(value);
+  return p;
 }
 
 // ---- Adventure Sheet -------------------------------------------------------

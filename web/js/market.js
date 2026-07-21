@@ -6,7 +6,7 @@
 
 import { makeItem, parseTags, splitItemName, isShardsCurrency, normalize } from './state.js';
 import { SHIP_TYPES, CREW_LEVELS, canonShipType, canonCargo } from './rules.js';
-import { resolveValue } from './engine.js';
+import { resolveValue, readItemEffects } from './engine.js';
 
 const shipCap = (type) => SHIP_TYPES[canonShipType(type)]?.capacity || 1;
 
@@ -198,6 +198,30 @@ export function sellTrade(state, goods, price, currency = null, opts = {}) {
     return { ok: true, item: target };
   }
   return { ok: true };
+}
+
+/** Parse a <buy> node into the option bag applyInlineBuy consumes (task 152). The single
+ *  home for buy-node parsing, shared by the inline-buy widget (render-market) and a
+ *  group's forced buy (runBuyNode) so the two can't drift — both resolve the price against
+ *  `state`, canonicalise an abbreviated cargo (task 127) and read |-alt buytags. Reads the
+ *  parsed section node; builds no DOM. quantity= is the caller's concern. */
+export function buyOptions(node, state) {
+  const shards = node.getAttribute('shards');
+  const cargo = node.getAttribute('cargo');
+  return {
+    price: shards != null ? resolveValue(state, shards) : 0,
+    crew: node.getAttribute('crew'),
+    ship: node.getAttribute('ship'),
+    shipName: node.getAttribute('name'),
+    initialCrew: node.getAttribute('initialCrew'),
+    tool: node.getAttribute('tool'),
+    item: node.getAttribute('item'),
+    cargo: cargo != null ? canonCargo(cargo) : null,
+    bonus: node.getAttribute('bonus') ? parseInt(node.getAttribute('bonus'), 10) : 0,
+    ability: node.getAttribute('ability'),
+    tags: parseTags(node.getAttribute('buytags') || node.getAttribute('tags')),
+    effects: readItemEffects(node),
+  };
 }
 
 /**

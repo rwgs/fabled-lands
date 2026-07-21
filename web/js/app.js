@@ -51,11 +51,17 @@ async function boot() {
 async function startDemo(spec) {
   const [b, s] = spec.split('.');
   const book = Number(b) || 1;
+  const section = s || 1;
+  // Validate the spec BEFORE building the game screen: a bad ?demo= (e.g. 9.99999) would
+  // otherwise toast "Section not found" and strand a blank story pane — fall back to the
+  // title screen instead. (task 152)
+  const sectionEl = await data.getSection(book, section);
+  if (!sectionEl) { toast(`Section ${section} not found in Book ${book}.`, 'warn'); showTitle(); return; }
   const adv = await getAdvData(book);
   state = GameState.create({ name: 'Wanderer', gender: 'm', profession: 'Warrior', book, adv });
   state.ephemeral = true; // a preview: don't create a persistent save unless kept
   buildGameScreen();
-  await navigate(book, s || 1);
+  await navigate(book, section);
 }
 
 /** Modal shown when the player has all 20 save slots occupied. */
@@ -727,7 +733,7 @@ async function showGameMenu() {
   const ver = el('div', 'menu-version', 'Version ' + VERSION);
   body.appendChild(ver);
   const p = modal({ title: 'Menu', body, buttons: [{ label: 'Close', value: null }] });
-  close = () => { const ov = document.querySelector('.modal-overlay'); if (ov) ov.remove(); };
+  close = () => p.close(null); // resolve the modal's promise AND tear it down cleanly (task 152)
   await p;
 }
 

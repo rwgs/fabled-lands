@@ -102,7 +102,12 @@ export class Narrator {
   }
 
   /** Called by the app when a section (re)renders — narration must not outlive the DOM. */
-  handleRerender() { if (this.playing) this.stop(); }
+  handleRerender() {
+    if (this.playing) this.stop();
+    // Drop the chunk list even when not playing: it holds element refs into the previous
+    // section's now-detached DOM until the next play() rebuilds it. (task 152)
+    this.chunks = []; this.index = 0;
+  }
 
   autoplayIfEnabled(flowEl) { if (this.settings.autoplay) this.play(flowEl); }
 
@@ -135,10 +140,9 @@ export class Narrator {
 
   stop() {
     if (SUPPORTED) { try { speechSynthesis.cancel(); } catch {} }
-    const was = this.playing;
     this.playing = false;
     this._clearHighlight();
-    if (was) this._emit(); else this._emit();
+    this._emit();
   }
 
   _emit() { if (this.onState) this.onState(this.playing); }

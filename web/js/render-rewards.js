@@ -11,7 +11,7 @@ import {
   losePaymentPlan, abilityChoiceOptions, grantChosenReward,
 } from './engine.js';
 import { makeItem, parseTags, currencyAward, splitItemName } from './state.js';
-import { applyInlineBuy } from './market.js';
+import { applyInlineBuy, buyOptions } from './market.js';
 import {
   classifyPassive, groupPlan, groupRollDefers, ownsSoleLinkedBlessing, ITEM_FAMILY_TAGS,
   linkedRewards, isCounterReward, isChooseOne, isPricedItemAward, hasVisiblePay,
@@ -172,17 +172,8 @@ export function grantItemNode(story, node) {
 // can't proceed (no Shards, no ship here for cargo) simply doesn't apply — matching
 // JaFL's GroupNode, which runs its children in sequence without gating on them. (task 126)
 function runBuyNode(story, node) {
-  const price = node.getAttribute('shards') != null ? resolveValue(story.state, node.getAttribute('shards')) : 0;
   const quantity = node.getAttribute('quantity') ? Math.max(1, parseInt(node.getAttribute('quantity'), 10) || 1) : 1;
-  const opts = {
-    price, crew: node.getAttribute('crew'),
-    ship: node.getAttribute('ship'), shipName: node.getAttribute('name'), initialCrew: node.getAttribute('initialCrew'),
-    tool: node.getAttribute('tool'), item: node.getAttribute('item'), cargo: node.getAttribute('cargo'),
-    bonus: node.getAttribute('bonus') ? parseInt(node.getAttribute('bonus'), 10) : 0,
-    ability: node.getAttribute('ability'),
-    tags: parseTags(node.getAttribute('buytags') || node.getAttribute('tags')),
-    effects: readItemEffects(node),
-  };
+  const opts = buyOptions(node, story.state); // the shared buy-node parse (task 152)
   for (let k = 0; k < quantity; k++) { if (!applyInlineBuy(story.state, opts).ok) break; }
 }
 

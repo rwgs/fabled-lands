@@ -4,10 +4,10 @@ import * as data from '../js/data.js';
 import { GameState, readSlotData, importSave, loadSlotMeta, deleteSlot, makeItem, nextFreeSlot, sanitizeData, currencyAward, splitItemName } from '../js/state.js';
 import * as eng from '../js/engine.js';
 import { fightRound, makeFight, groupFightRound, isDefeated, useWrathBlessing, useDefenceBlessing, rerollAttack } from '../js/combat.js';
-import { goodsFrom, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo, canUpgradeCrew, payChoiceCost } from '../js/market.js';
+import { goodsFrom, buyTrade, sellTrade, applyInlineBuy, buyOptions, sellInlineItem, sellCargo, canUpgradeCrew, payChoiceCost } from '../js/market.js';
 import { Story, previewProse } from '../js/render.js';
 import { Narrator } from '../js/tts.js';
-import { renderSheet } from '../js/ui.js';
+import { renderSheet, modal } from '../js/ui.js';
 import { renderStatic } from '../js/app.js';
 
 export async function run(ctx) {
@@ -507,4 +507,37 @@ export async function run(ctx) {
     const picks127 = Array.from(c127.querySelectorAll('.reward-pick'));
     ok('§127 no phantom button; both bet picks armed on entry', !c127.querySelector('.pay-action') && picks127.length === 2 && picks127.every((b) => !b.disabled));
     ok('§127 no bet is auto-placed on entry', !g127.hasCodeword('4.127.1') && !g127.hasCodeword('4.127.2'));
+
+    // task 152.2: modal() exposes a programmatic close that settles its promise AND tears
+    // down the overlay + Escape listener (the game menu relies on this).
+    {
+      const before = document.querySelectorAll('.modal-overlay').length;
+      const p = modal({ title: 'T', body: 'hi', buttons: [{ label: 'X', value: 'btn' }] });
+      ok('152.2: modal opens an overlay', document.querySelectorAll('.modal-overlay').length === before + 1);
+      p.close('prog');
+      const resolved = await p;
+      ok('152.2: programmatic close resolves the promise with its value', resolved === 'prog');
+      ok('152.2: programmatic close removes that overlay', document.querySelectorAll('.modal-overlay').length === before);
+    }
+
+    // task 152.4: Narrator.handleRerender drops the chunk list even when not playing, so it
+    // stops referencing the previous section's detached DOM.
+    {
+      const n = new Narrator();
+      n.chunks = [{ el: document.createElement('p'), text: 'stale' }];
+      n.index = 3;
+      n.handleRerender();
+      ok('152.4: handleRerender clears the stale chunk list', n.chunks.length === 0 && n.index === 0);
+    }
+
+    // task 152.5: buyOptions is the single buy-node parse — it resolves the price against
+    // state, canonicalises an abbreviated cargo (task 127) and reads |-alt buytags.
+    {
+      const gbo = GameState.create({ name:'BO', gender:'m', profession:'Warrior', book:5, adv });
+      gbo.setVar('p', 7);
+      const opts = buyOptions(parse('<buy cargo="grai" shards="p" buytags="a|b"/>'), gbo);
+      ok('152.5: buyOptions resolves price from a var', opts.price === 7, `price=${opts.price}`);
+      ok('152.5: buyOptions canonicalises an abbreviated cargo', opts.cargo === 'grain', `cargo=${opts.cargo}`);
+      ok('152.5: buyOptions reads |-alt buytags', Array.isArray(opts.tags) && opts.tags.includes('a') && opts.tags.includes('b'));
+    }
 }
