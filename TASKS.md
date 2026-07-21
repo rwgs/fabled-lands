@@ -52,7 +52,7 @@ the latent no-corpus-trigger items last. See the Review log.*
 - [x] 148. undo() leaves a stale return frame — a post-undo `<return>` re-enters a pre-undo visit
 - [x] 138. Offline navigations with a query string bypass the service-worker cache
 - [x] 153. Accessibility quick wins: aria-live for toasts/rolls/fight log; dialog semantics + Escape for modals
-- [ ] 139. The Adventure Sheet never shows foreign-currency balances
+- [x] 139. The Adventure Sheet never shows foreign-currency balances
 - [ ] 135. Renouncing a god keeps that god's resurrection deal
 - [ ] 136. Engine grab-bag #2: `transfer tenth=`, named-cargo loss quantity, `effect description=`, `<set>` identifier edges, `<buy force="t">`
 - [ ] 151. The dead-end fallback counts disabled controls — an unaffordable forced payment can softlock

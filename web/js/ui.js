@@ -152,6 +152,12 @@ export function renderSheet(state, container, opts = {}) {
   const line = el('div', 'sheet-line');
   line.appendChild(kv('Defence', state.defence()));
   line.appendChild(kv('Shards', d.shards));
+  // Foreign-currency purses (Mithral etc. — task 40) surface beside Shards, else
+  // coin won in an alternate-currency market is invisible until the player happens
+  // into the next same-currency widget (task 139). Only non-zero balances show.
+  for (const [name, amount] of Object.entries(d.currencies || {})) {
+    if (amount > 0) line.appendChild(kv(name, amount));
+  }
   container.appendChild(line);
 
   // Items

@@ -535,6 +535,16 @@ export async function run(ctx) {
       ok('sheet shows exactly one Use button (potion, not the aura sword)', useBtns.length === 1 && /Drink/.test(useBtns[0].textContent), `n=${useBtns.length} txt=${useBtns[0] && useBtns[0].textContent}`);
       useBtns[0] && useBtns[0].click();
       ok('sheet Use button fires onUse with the item + effect', !!used && used.it.name === 'potion of strength' && used.eff.type === 'use');
+
+      // Foreign-currency balances surface on the sheet beside Shards (task 139).
+      const gcur = GameState.create({ name: 'Cur', gender: 'm', profession: 'Warrior', book: 2, adv });
+      gcur.adjustCurrency('Mithral', 15);
+      gcur.adjustCurrency('Scila', 0); // zero balance must stay hidden
+      const curBox = document.createElement('div');
+      renderSheet(gcur, curBox, {});
+      const curKvs = Array.from(curBox.querySelectorAll('.sheet-line .kv')).map((k) => k.textContent);
+      ok('sheet shows a non-zero foreign balance (Mithral 15)', curKvs.some((t) => /Mithral/.test(t) && /15/.test(t)), `kvs=${JSON.stringify(curKvs)}`);
+      ok('sheet hides a zero foreign balance (Scila)', !curKvs.some((t) => /Scila/.test(t)));
     }
 
     // --- save-slot exhaustion never silently overwrites slot 0 (task 4) ---
