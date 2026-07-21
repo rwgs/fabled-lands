@@ -634,4 +634,48 @@ export async function run(ctx) {
       ok('task135: renouncing another god leaves the godless deal', gh.hasResurrection());
     }
 
+    // task 136: five small reference divergences.
+    {
+      // 136.1 — <transfer shards="tenth"> resolves §6.496's own rounded-up var (995 → 100, not 99).
+      const g496 = GameState.create({ name:'T', gender:'m', profession:'Warrior', book:6, adv });
+      g496.data.shards = 995;
+      eng.applyEffect(parse('<set var="tenth" value="(shards+9)/10"/>'), g496);
+      ok('task136.1: §6.496 tenth var rounds up ((995+9)/10=100)', g496.getVar('tenth') === 100, `tenth=${g496.getVar('tenth')}`);
+      eng.applyEffect(parse('<transfer shards="tenth" to="tithe"/>'), g496);
+      ok('task136.1: the tithe moves 100 Shards, not 99', g496.cacheMoney('tithe') === 100 && g496.data.shards === 895, `cache=${g496.cacheMoney('tithe')} purse=${g496.data.shards}`);
+
+      // 136.2 — a plain named cargo loss (§5.634 "they are lost") drops EVERY unit.
+      const g634 = GameState.create({ name:'C', gender:'m', profession:'Warrior', book:5, adv });
+      g634.addShip({ type:'barque', name:'Hold', crew:'poor', cargo:['grain','grain','spices'] });
+      eng.applyEffect(parse('<lose cargo="grain"/>'), g634);
+      ok('task136.2: §5.634 plain named cargo loss removes every grain unit',
+         !!g634.currentShip() && !g634.currentShip().cargo.includes('grain') && g634.currentShip().cargo.length === 1,
+         `cargo=${JSON.stringify(g634.currentShip() && g634.currentShip().cargo)}`);
+      // a priced one-for-one exchange (§3.569 price=) still trades a single unit.
+      const g569 = GameState.create({ name:'P', gender:'m', profession:'Warrior', book:3, adv });
+      g569.addShip({ type:'barque', name:'Hold', crew:'poor', cargo:['furs','furs','timber'] });
+      eng.applyEffect(parse('<lose cargo="furs" price="x"/>'), g569);
+      ok('task136.2: a priced cargo exchange still trades one unit',
+         g569.currentShip().cargo.filter((c) => c === 'furs').length === 1,
+         `cargo=${JSON.stringify(g569.currentShip().cargo)}`);
+
+      // 136.3 — <effect description="+5 Stamina"> surfaces as the effect text (§5.638).
+      const effs638 = eng.readItemEffects(parse('<item name="potion of healing"><effect type="use" uses="1" verb="Drink" description="+5 Stamina"><rest stamina="5"/></effect></item>'));
+      ok('task136.3: §5.638 description= surfaces as effect text', !!effs638[0] && effs638[0].text === '+5 Stamina', `text=${effs638[0] && effs638[0].text}`);
+
+      // 136.4 — value="rank" honours modifier="natural" (a +2-Rank ring-holder judged by natural Rank, §2.270).
+      const gRank = GameState.create({ name:'R', gender:'m', profession:'Warrior', book:2, adv });
+      gRank.data.rank = 3;
+      gRank.data.items.push({ id:'ringR', kind:'item', name:'ring of ultimate power', bonus:0, ability:null, tags:[], effects:[{ type:'aura', ability:'Rank', bonus:2 }], group:null, wielded:false, worn:false });
+      ok('task136.4: rankValue includes the ring +2 aura (5)', gRank.rankValue() === 5, `rank=${gRank.rankValue()}`);
+      ok('task136.4: value="rank" modifier="natural" reads natural Rank (3, not 5)', eng.evalExpression('rank', gRank, 'natural') === 3);
+      ok('task136.4: value="rank" with no modifier reads effective Rank (5)', eng.evalExpression('rank', gRank, null) === 5);
+
+      // 136.4 — a cursed ability reads as 0 in a value expression (§6.332 12-charisma → 12), not the -1000 sentinel.
+      const gCur = GameState.create({ name:'X', gender:'m', profession:'Warrior', book:6, adv });
+      gCur.setAbilityFlag('charisma', 'cursed', true);
+      ok('task136.4: cursed CHARISMA reads 0 in value context (12-charisma=12, not 1012)',
+         eng.evalExpression('12-charisma', gCur, 'natural') === 12, `v=${eng.evalExpression('12-charisma', gCur, 'natural')}`);
+    }
+
 }

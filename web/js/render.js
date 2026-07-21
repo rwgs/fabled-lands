@@ -21,7 +21,7 @@ import { modal } from './ui.js';
 import { computeOutcomeBlessings } from './render-rules.js';
 import {
   computeFightGate, computeEscapeCodewords, isDeferredDeadChain,
-  computeRollGate, computeTransferGate,
+  computeRollGate, computeTransferGate, computeBuyGate,
 } from './render-gates.js';
 import {
   newCtx, resolveNodePath, serializeCtx, deserializeCtx, serializeFrame, rebuildVisitScaffold,
@@ -472,6 +472,12 @@ f
     // navs. Reset per render.
     this.transferGate = computeTransferGate(el);
     this.pendingTransfer = false;
+    // Forced-buy gating (task 136.5): a visible, enabled <buy force="t"> (§4.658's free
+    // barque) is mandatory — the onward navigation after it stays locked until it runs.
+    // renderInlineBuy flags pendingBuy while such a buy is still live this pass;
+    // applyBuyGate then disables the tagged navs. Reset per render.
+    this.buyGate = computeBuyGate(el);
+    this.pendingBuy = false;
     // Blessing-guarded storm/capsize outcomes (task 108): the blessings named on this
     // section's <outcome blessing="X"> hazards. A held blessing vetoes that outcome
     // (renderBranch), and a non-hidden sibling <lose blessing="X"> is the deferred
@@ -484,6 +490,7 @@ f
     this.applyFightGate(flow);
     this.applyRollGate(flow); // gate onward nav on the mandatory travel/encounter roll (task 104)
     this.applyTransferGate(flow); // gate onward nav on an unresolved forced transfer (task 107)
+    this.applyBuyGate(flow); // gate onward nav on an unrun forced buy (task 136.5)
     this.surfaceExtraChoices(flow); // persistent <extrachoice> options active here (task 32)
     // Draw the box row now (after the walk) so a <tick/> applied this visit reads
     // as ☑ immediately; it sits above the prose, beside the section number (task 70).
@@ -1127,6 +1134,24 @@ f
       btn.disabled = true;
       btn.classList.add('gated');
       btn.title = 'Resolve the transfer above first.';
+    });
+  }
+
+  // ---- forced-buy gating (task 136.5) --------------------------------------
+  // Tag a rendered nav button as forced-buy-gated, for applyBuyGate.
+  tagBuyNav(node, btn) {
+    if (this.buyGate && this.buyGate.navNodes.has(node)) btn.dataset.buynav = '1';
+  }
+
+  // Disable the tagged onward navigation while a forced buy is still pending this pass
+  // (renderInlineBuy set pendingBuy). Only ADDS a disable, so it composes with the other gates.
+  applyBuyGate(flow) {
+    if (!this.buyGate || !this.pendingBuy) return;
+    flow.querySelectorAll('[data-buynav]').forEach((btn) => {
+      if (btn.disabled) return; // already gated for another reason — keep it
+      btn.disabled = true;
+      btn.classList.add('gated');
+      btn.title = 'Take the item above first.';
     });
   }
 

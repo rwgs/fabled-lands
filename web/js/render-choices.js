@@ -112,6 +112,7 @@ export function renderChoice(story, node, path) {
   story.tagFightNav(node, btn);
   story.tagRollNav(node, btn);
   story.tagTransferNav(node, btn);
+  story.tagBuyNav(node, btn);
   return btn;
 }
 
@@ -195,6 +196,7 @@ export function renderGoto(story, container, node, path) {
   story.tagFightNav(node, link);
   story.tagRollNav(node, link);
   story.tagTransferNav(node, link);
+  story.tagBuyNav(node, link);
   container.appendChild(link);
   return link;
 }
@@ -244,6 +246,7 @@ export function renderReturn(story, container, node, path) {
   story.tagFightNav(node, link);
   story.tagRollNav(node, link);
   story.tagTransferNav(node, link);
+  story.tagBuyNav(node, link);
   container.appendChild(link);
   return link;
 }

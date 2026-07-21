@@ -808,7 +808,19 @@ function applyShipLose(el, state, opts = {}) {
         const idx = (pick && pick.length) ? cargo.indexOf(pick[0]) : 0;
         cargo.splice(idx >= 0 ? idx : 0, 1); took = true;
       }
-    } else { const want = canonCargo(c); const i = cargo.findIndex((x) => canonCargo(x) === want); if (i >= 0) { cargo.splice(i, 1); took = true; } }
+    } else {
+      const want = canonCargo(c);
+      if (el.getAttribute('price') != null) {
+        // A priced one-for-one exchange (§3.569 `price=`) trades a single Unit. (task 117)
+        const i = cargo.findIndex((x) => canonCargo(x) === want); if (i >= 0) { cargo.splice(i, 1); took = true; }
+      } else {
+        // A plain named loss ("they are lost", §5.634) drops EVERY Unit of the
+        // commodity, as JaFL's LoseNode does — extras must not survive. (task 136.2)
+        const before = cargo.length;
+        ship.cargo = cargo.filter((x) => canonCargo(x) !== want);
+        if (ship.cargo.length !== before) took = true;
+      }
+    }
   }
   if (el.getAttribute('ship') != null) { const i = state.data.ships.indexOf(ship); if (i >= 0) { state.data.ships.splice(i, 1); took = true; } }
   state.changed();
@@ -1114,7 +1126,9 @@ function transferShards(el, state) {
   const avail = from != null ? state.cacheMoney(from) : state.data.shards;
   let amt;
   if (spec === '*') amt = avail;
-  else if (spec === 'tenth') amt = Math.floor(avail / 10);
+  // JaFL has no `tenth` keyword; §6.496 sets its own `<set var="tenth"
+  // value="(shards+9)/10"/>` (rounded up). Resolve it as a var so the tithe
+  // stops under-paying by 1 on non-multiples of 10 (task 136.1).
   else amt = Math.min(avail, resolveValue(state, spec));
   return { spec, avail, amt };
 }
@@ -1140,7 +1154,7 @@ export function transferPlan(el, state) {
   const explicitLimit = el.getAttribute('limit');
   const shardsSpec = el.getAttribute('shards');
   const enoughItems = !hasItemSel || explicitLimit == null || movers.length >= (parseInt(explicitLimit, 10) || 0);
-  const enoughShards = shardsSpec == null || shardsSpec === '*' || shardsSpec === 'tenth' || shardsAvail >= resolveValue(state, shardsSpec);
+  const enoughShards = shardsSpec == null || shardsSpec === '*' || shardsAvail >= resolveValue(state, shardsSpec);
   const canPay = doesAnything && enoughItems && enoughShards;
   return { movers, limit, needChoice, doesAnything, canPay };
 }
@@ -1356,7 +1370,9 @@ export function readItemEffects(node) {
     // verb may sit on the effect or (book1/342 potion of restoration) on the item.
     let verb = e.getAttribute('verb') || node.getAttribute('verb');
     if (!verb) verb = (type === 'use' && ability) ? 'Drink' : 'Use';
-    out.push({ type, ability: ability || null, bonus, uses, verb, text: e.getAttribute('text') || null, body });
+    // §5.638's potion labels its effect with description= rather than text=; accept it as
+    // a text= fallback so the sheet's Use button shows the effect ("+5 Stamina"). (task 136.3)
+    out.push({ type, ability: ability || null, bonus, uses, verb, text: e.getAttribute('text') || e.getAttribute('description') || null, body });
   });
   return out;
 }
@@ -1417,14 +1433,19 @@ export function evalExpression(expr, state, mode = null, sel = null) {
     // stamina: natural/affected → the unwounded max (incl. aura/affliction); no modifier → current.
     if (w === 'stamina') return mode ? state.effectiveStaminaMax() : state.data.stamina;
     if (w === 'shards') return state.data.shards;
-    if (w === 'rank') return state.rankValue(); // ring of ultimate power +2 (task 44)
+    // rank: natural → the WRITTEN Rank; affected/none → rankValue() incl. the ring of
+    // ultimate power's +2 aura. §2.270 sets `var rank = rank modifier="natural"` and then
+    // compares against it, so a ring-holder must be judged by natural Rank. (task 136.4)
+    if (w === 'rank') return mode === 'natural' ? state.data.rank : state.rankValue();
     if (w === 'defence') return state.defence();
     if (w === 'armour') return state.armourBonus();
     if (w === 'weapon') return state.wieldedWeapon()?.bonus || 0;
     if (w === 'crew') return CREW_LEVELS.indexOf(state.currentShip()?.crew) + 1 || 0;
     if (ABILITIES.includes(w)) {
-      if (mode === 'natural') return state.abilityForCheck(w, true);  // written score
-      if (mode === 'affected') return state.abilityForCheck(w, false); // item-boosted
+      // abilityForValue honours the modifier but maps a cursed ability to 0, not the
+      // -1000 check-sentinel (§6.332 value="12-charisma"). No modifier is unchanged. (task 136.4)
+      if (mode === 'natural') return state.abilityForValue(w, true);  // written score
+      if (mode === 'affected') return state.abilityForValue(w, false); // item-boosted
       return state.ability(w); // no modifier — unchanged
     }
     return state.getVar(word); // stored variable; 0 when undefined

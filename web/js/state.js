@@ -352,6 +352,14 @@ export class GameState {
     return this.ability(ability);
   }
 
+  /** Ability score for a <set value=> arithmetic read (JaFL SetVarNode.resolveIdentifier):
+   *  same modifier handling as abilityForCheck, but a cursed ability reads as 0 — the
+   *  -1000 check-sentinel forces roll failure and must never enter arithmetic. (task 136.4) */
+  abilityForValue(ability, natural = false) {
+    const v = this.abilityForCheck(ability, natural);
+    return v === CURSED_ABILITY ? 0 : v;
+  }
+
   abilityNatural(ability) { return this.data.abilities[ability] || 0; }
 
   /** The affected ability score without the weapon/tool (item) bonus — computed

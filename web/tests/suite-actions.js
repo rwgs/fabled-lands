@@ -86,6 +86,34 @@ export async function run(ctx) {
       window.__FL_INSTANT_DICE__ = false;
     }
 
+    // --- task 136.5: <buy force="t"> gates the onward navigation until it runs ---
+    {
+      // §4.658's free barque is the section's only ship; JaFL blocks the onward <goto 533>
+      // until it is taken. (A group-wrapped optional buy — §4.622 — must NOT gate.)
+      const g658 = GameState.create({ name:'B658', gender:'m', profession:'Warrior', book:4, adv });
+      g658.addShip({ type:'brigantine', name:'Old', crew:'good', cargo:[] });
+      const c658 = document.createElement('div');
+      const st658 = new Story(c658, g658, { navigate(){}, onDeath(){}, notify(){} });
+      st658.begin(await data.getSection(4, '658'), 4, '658');
+      const goto533 = () => Array.from(c658.querySelectorAll('.goto')).find((b) => b.textContent.trim() === '533');
+      const barqueBtn = () => Array.from(c658.querySelectorAll('.btn-mini')).find((b) => /Note it/i.test(b.textContent));
+      ok('§4.658 builds a forced-buy gate', !!st658.buyGate);
+      ok('§4.658 onward goto 533 is gated before the barque is taken',
+         !!goto533() && goto533().disabled && goto533().dataset.buynav === '1',
+         `disabled=${goto533() && goto533().disabled} buynav=${goto533() && goto533().dataset.buynav}`);
+      ok('§4.658 offers an enabled barque buy', !!barqueBtn() && !barqueBtn().disabled);
+      barqueBtn() && barqueBtn().click();
+      ok('§4.658 taking the barque unlocks the onward goto 533',
+         !!goto533() && !goto533().disabled, `disabled=${goto533() && goto533().disabled}`);
+
+      // §4.622's forced cargo buys are group-wrapped optional pickups — no gate is built.
+      const g622 = GameState.create({ name:'B622', gender:'m', profession:'Warrior', book:4, adv });
+      const c622 = document.createElement('div');
+      const st622 = new Story(c622, g622, { navigate(){}, onDeath(){}, notify(){} });
+      st622.begin(await data.getSection(4, '622'), 4, '622');
+      ok('§4.622 builds no forced-buy gate (group-wrapped pickups are optional)', st622.buyGate === null);
+    }
+
     // --- task 107: <transfer> is a player action (chooser/filter/price/force) ---
     { // block-scoped
       // §4.456: the +1 offering is a price-gated transfer — it must NOT auto-run on

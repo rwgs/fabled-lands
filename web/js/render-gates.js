@@ -29,6 +29,7 @@ const DOCUMENT_POSITION_FOLLOWING = 0x04;
 const ROLLGATE_OPTIONAL_WRAP = new Set(['if', 'elseif', 'else', 'success', 'failure', 'outcome', 'group']);
 const ROLLGATE_OUTCOME_WRAP = new Set(['outcomes', 'outcome']);
 const TRANSFER_GROUP_WRAP = new Set(['group']);
+const BUY_GROUP_WRAP = new Set(['group']);
 
 // Does an ancestor of `node` carry one of these (lowercased) tag names? Walks up to the
 // section root. A manual sibling of DOM `closest`, kept explicit for the parsed section tree.
@@ -183,6 +184,29 @@ export function computeTransferGate(sectionEl) {
   sectionEl.querySelectorAll('choice, goto, return').forEach((n) => {
     if (!(first.compareDocumentPosition(n) & DOCUMENT_POSITION_FOLLOWING)) return;
     if (forced.some((t) => t.contains(n))) return; // navigation inside the transfer's own words
+    if (boolAttr(n.getAttribute('flee'))) return;
+    navNodes.add(n);
+  });
+  if (!navNodes.size) return null;
+  return { navNodes };
+}
+
+// The forced-buy gate (task 136.5): a <buy force="t"> is a mandatory "note it on your
+// Adventure Sheet" action — §4.658's free barque, the section's only ship — so the onward
+// navigation after it stays locked until it runs. Unlike <transfer>, force defaults to
+// FALSE for a buy, so only an explicit force="t" gates; a buy inside a <group> (§4.622's
+// optional "take whatever cargo you can fit" pickups) is excluded — those are opt-in and
+// gating them would softlock a shipless player. Returns { navNodes:Set } or null.
+export function computeBuyGate(sectionEl) {
+  if (!sectionEl) return null;
+  const forced = Array.from(sectionEl.querySelectorAll('buy')).filter((b) =>
+    boolAttr(b.getAttribute('force')) && !hasAncestorTag(b, BUY_GROUP_WRAP));
+  if (!forced.length) return null;
+  const first = forced[0];
+  const navNodes = new Set();
+  sectionEl.querySelectorAll('choice, goto, return').forEach((n) => {
+    if (!(first.compareDocumentPosition(n) & DOCUMENT_POSITION_FOLLOWING)) return;
+    if (forced.some((b) => b.contains(n))) return; // navigation inside the buy's own words
     if (boolAttr(n.getAttribute('flee'))) return;
     navNodes.add(n);
   });

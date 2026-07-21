@@ -274,6 +274,11 @@ export function renderInlineBuy(story, container, node, path) {
   btn.disabled = !!reason;
   if (reason && reason !== 'done') btn.title = reason;
 
+  // A force="t" buy is mandatory (§4.658's free barque, the section's only ship): hold the
+  // onward navigation until it runs. Only an enabled, not-yet-done forced buy gates —
+  // computeBuyGate already excludes group-wrapped optional pickups (§4.622). (task 136.5)
+  if (boolAttr(node.getAttribute('force')) && !done && !reason) story.pendingBuy = true;
+
   if (!reason) {
     btn.addEventListener('click', () => {
       const res = applyInlineBuy(story.state, {
