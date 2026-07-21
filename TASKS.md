@@ -23,7 +23,7 @@ the tasks were filed, not work order).
 
 **MEDIUM**
 
-- [ ] 162. Continuing combat redraws without persisting the updated fight memo — reload rewinds the round
+- [x] 162. Continuing combat redraws without persisting the updated fight memo — reload rewinds the round
 - [x] 134. Market sells with several candidates silently take the first match — JaFL asks which ship/item to sell
 - [x] 137. A save blob can persist without its `fl_meta` entry — the orphaned slot turns invisible and gets overwritten
 - [x] 129. Free fixed-amount `<rest stamina="N">` is infinitely repeatable — every hospitality rest heals to full
@@ -1571,6 +1571,22 @@ damages a surviving foe and the replies miss, then inspect the provider-written
 visit record and resume it into a fresh state; cover a continuing COMBAT blessing
 retry too. The restored enemy Stamina, log and once-per-round flags must exactly
 match the live widget. Web-only; stamp and run all sections.
+
+*Done 2026-07-21:* a fight already rides in `story.ctx.fights`, which
+`serializeVisit` persists — the gap was only that the eight continuing-round
+handlers in render-combat.js (single + group: attack, COMBAT reroll, Divine
+Wrath, Defence through Faith) redrew the widget directly without persisting. Each
+now calls `story.state.save()` immediately after its continue-redraw, once all
+fight + player mutations are final — no full section render (win/lose/fled/death
+still take `story.rerender()`, which saves, so the navigation gates re-evaluate).
+The reroll case notably re-persists after the retry result is recorded, correcting
+`rerollAttack()`'s pre-retry blessing autosave. Added deterministic single- and
+group-fight tests to `suite-combat` where the player wounds a surviving Combat-0
+foe (so the replies always miss and no incidental `damageStamina` autosave can
+mask the fix), plus a continuing COMBAT-blessing retry: each inspects the
+provider-written visit record, resumes it into a fresh state, and asserts the
+restored enemy Stamina/log/once-per-round flags match the live widget exactly.
+Smoke `RESULT ALL PASS pass=1493`; focused `suite=combat` also green.
 
 ---
 

@@ -1218,4 +1218,136 @@ export async function run(ctx) {
     ok('§5.80 the dead="t" §7 lose-branch is the enabled route after a loss', (() => { const b = g80goto('7'); return b && b.disabled === false; })());
     ok('§5.80 the win exit §123 is disabled after a loss', (() => { const b = g80goto('123'); return b && b.disabled === true; })());
 
+    // --- task 162: a continuing combat round persists the updated fight memo ---
+    // A fight lives in Story.ctx, not GameState.data. A continuing round (attack / COMBAT
+    // reroll / blessing) redraws the widget directly; it previously neither rerendered nor
+    // saved, so if the player wounded a surviving foe and the replies missed, NO persistent
+    // mutation occurred — a reload restored the enemy's pre-round Stamina. render-combat now
+    // saves the visit after each completed-but-continuing action, so the serialized fight
+    // (enemy Stamina, log, once-per-round flags) resumes exactly. To isolate the fix, every
+    // foe here is Combat 0 vs an armoured Defence — it can NEVER hit — so the ONLY thing that
+    // can persist the round is the new continue-save (no incidental damageStamina autosave).
+    {
+      const rnd162 = Math.random;
+      window.__FL_INSTANT_DICE__ = true;
+      const settle162 = () => new Promise((r) => setTimeout(r, 30));
+      const firstFight = (st) => [...st.ctx.fights.values()][0];
+      const recFights = (g) => (g.data.visit && g.data.visit.ctx && g.data.visit.ctx.fights) || [];
+
+      // Single fight: player wounds a surviving foe (18 vs Def 15 → −3, Stamina 20→17); the
+      // Combat-0 foe misses vs the armoured Defence. Then resume into a fresh state.
+      {
+        const secS = parse('<section name="F162"><p><fight name="Ogre" combat="0" defence="15" stamina="20"/></p></section>');
+        const g = GameState.create({ name:'F162', gender:'m', profession:'Warrior', book:1, adv });
+        g.data.stamina = 30; g.data.staminaMax = 30; g.data.abilities.combat = 6;
+        g.data.items = []; g.addItem(makeItem('armour', 'plate', 10)); // Defence high enough that Combat-0 foes always miss
+        const cont = document.createElement('div');
+        const story = new Story(cont, g, { navigate(){}, onDeath(){}, notify(){} });
+        g.setVisitProvider(() => story.serializeVisit());
+        g.goTo(1, 'F162'); story.begin(secS, 1, 'F162');
+        ok('task162: begin persisted the fight at full enemy Stamina', recFights(g).length === 1 && recFights(g)[0][1].stamina === 20);
+
+        Math.random = () => 0.99; // 2d6 = 12 → player 18 vs 15 hits; foe 12 vs Def >=16 misses
+        Array.from(cont.querySelectorAll('.fight .btn-roll')).find((b) => b.textContent === 'Attack').click();
+        await settle162();
+        Math.random = rnd162;
+
+        const lf = firstFight(story);
+        ok('task162: the round continued — foe wounded (17/20) and alive, player unhurt',
+           lf.stamina === 17 && !lf.outcome && g.data.stamina === 30, `en=${lf.stamina} st=${g.data.stamina}`);
+        ok('task162: the continuing round was persisted (foe Stamina 17, not the pre-round 20)',
+           recFights(g).length === 1 && recFights(g)[0][1].stamina === 17 && recFights(g)[0][1].log.length === lf.log.length,
+           `rec=${recFights(g)[0] && recFights(g)[0][1].stamina}`);
+
+        const g2 = new GameState(sanitizeData(JSON.parse(JSON.stringify({ ...g.data }))));
+        const cont2 = document.createElement('div');
+        const story2 = new Story(cont2, g2, { navigate(){}, onDeath(){}, notify(){} });
+        story2.resume(secS, 1, 'F162', g2.data.visit, null);
+        const rf = firstFight(story2);
+        ok('task162: reload restores the exact foe Stamina/log/flags',
+           rf.stamina === 17 && rf.log.length === lf.log.length && rf.lastStrikeMissed === lf.lastStrikeMissed && rf.attackRerolled === lf.attackRerolled,
+           `en=${rf.stamina} log=${rf.log.length}`);
+        ok('task162: the reloaded widget shows the resumed foe Stamina (17/20)',
+           /Stamina 17\/20/.test(cont2.querySelector('.en-stam').textContent), cont2.querySelector('.en-stam').textContent);
+      }
+
+      // Group fight: player wounds one foe (Orc 20→17); both Combat-0 foes miss; continues.
+      {
+        const secG = parse('<section name="G162"><p><fight group="g" name="Orc" combat="0" defence="15" stamina="20"/><fight group="g" name="Goblin" combat="0" defence="14" stamina="18"/></p></section>');
+        const g = GameState.create({ name:'G162', gender:'m', profession:'Warrior', book:6, adv });
+        g.data.stamina = 40; g.data.staminaMax = 40; g.data.abilities.combat = 6;
+        g.data.items = []; g.addItem(makeItem('armour', 'plate', 10));
+        const cont = document.createElement('div');
+        const story = new Story(cont, g, { navigate(){}, onDeath(){}, notify(){} });
+        g.setVisitProvider(() => story.serializeVisit());
+        g.goTo(6, 'G162'); story.begin(secG, 6, 'G162');
+
+        Math.random = () => 0.99;
+        Array.from(cont.querySelectorAll('button')).find((b) => b.textContent === 'Attack Orc').click();
+        await settle162();
+        Math.random = rnd162;
+
+        const orcLive = [...story.ctx.fights.values()].find((f) => f.name === 'Orc');
+        ok('task162: the group round continued — Orc wounded (17/20), player unhurt',
+           orcLive.stamina === 17 && g.data.stamina === 40, `orc=${orcLive.stamina} st=${g.data.stamina}`);
+        const recOrc = recFights(g).map((e) => e[1]).find((f) => f.name === 'Orc');
+        ok('task162: the continuing group round was persisted (Orc Stamina 17)',
+           !!recOrc && recOrc.stamina === 17, `rec=${recOrc && recOrc.stamina}`);
+
+        const g2 = new GameState(sanitizeData(JSON.parse(JSON.stringify({ ...g.data }))));
+        const cont2 = document.createElement('div');
+        const story2 = new Story(cont2, g2, { navigate(){}, onDeath(){}, notify(){} });
+        story2.resume(secG, 6, 'G162', g2.data.visit, null);
+        const orcR = [...story2.ctx.fights.values()].find((f) => f.name === 'Orc');
+        const gobR = [...story2.ctx.fights.values()].find((f) => f.name === 'Goblin');
+        ok('task162: reload restores both foes (Orc 17/20 wounded, Goblin 18/18 untouched)',
+           orcR.stamina === 17 && gobR.stamina === 18, `orc=${orcR.stamina} gob=${gobR.stamina}`);
+        ok('task162: the reloaded group widget shows the wounded Orc (17/20)',
+           /Stamina 17\/20/.test(cont2.textContent), (cont2.textContent.replace(/\s+/g,' ').match(/Stamina \d+\/\d+/g) || []).join(' '));
+      }
+
+      // COMBAT blessing retry: a missed strike is retried (18 vs 15 → −3); rerollAttack
+      // consumes/saves the blessing BEFORE recording the retry, so only the continue-save
+      // captures the retried Stamina + attackRerolled flag. Resume proves it persisted.
+      {
+        const secR = parse('<section name="R162"><p><fight name="Duellist" combat="0" defence="15" stamina="20"/></p></section>');
+        const g = GameState.create({ name:'R162', gender:'m', profession:'Warrior', book:4, adv });
+        g.data.stamina = 30; g.data.staminaMax = 30; g.data.abilities.combat = 6;
+        g.data.items = []; g.addItem(makeItem('armour', 'plate', 10));
+        g.addBlessing('combat');
+        const cont = document.createElement('div');
+        const story = new Story(cont, g, { navigate(){}, onDeath(){}, notify(){} });
+        g.setVisitProvider(() => story.serializeVisit());
+        g.goTo(4, 'R162'); story.begin(secR, 4, 'R162');
+
+        Math.random = () => 0; // 2d6 = 2 → player 8 vs 15 misses; foe 2 vs Def >=16 misses
+        Array.from(cont.querySelectorAll('.fight .btn-roll')).find((b) => b.textContent === 'Attack').click();
+        await settle162();
+        Math.random = rnd162;
+        const retryBtn = () => Array.from(cont.querySelectorAll('button')).find((b) => /retry your attack/.test(b.textContent));
+        ok('task162: a missed strike offers the COMBAT-blessing retry', !!retryBtn() && firstFight(story).stamina === 20);
+
+        Math.random = () => 0.99; // retry hits: 18 vs 15 → 20→17
+        retryBtn().click();
+        Math.random = rnd162;
+        const lf = firstFight(story);
+        ok('task162: the retry wounded the foe (17), spent the blessing, flagged the reroll',
+           lf.stamina === 17 && lf.attackRerolled === true && !g.hasBlessing('combat'), `en=${lf.stamina} rr=${lf.attackRerolled}`);
+        ok('task162: the retried round was persisted (foe 17, attackRerolled)',
+           recFights(g)[0] && recFights(g)[0][1].stamina === 17 && recFights(g)[0][1].attackRerolled === true);
+
+        const g2 = new GameState(sanitizeData(JSON.parse(JSON.stringify({ ...g.data }))));
+        const cont2 = document.createElement('div');
+        const story2 = new Story(cont2, g2, { navigate(){}, onDeath(){}, notify(){} });
+        story2.resume(secR, 4, 'R162', g2.data.visit, null);
+        const rf = firstFight(story2);
+        ok('task162: reload keeps the retried Stamina + spent reroll (no free re-retry)',
+           rf.stamina === 17 && rf.attackRerolled === true && !g2.hasBlessing('combat')
+           && !Array.from(cont2.querySelectorAll('button')).find((b) => /retry your attack/.test(b.textContent)),
+           `en=${rf.stamina} rr=${rf.attackRerolled}`);
+      }
+
+      Math.random = rnd162;
+    }
+
 }
