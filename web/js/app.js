@@ -609,6 +609,12 @@ async function undo() {
   const el = await data.getSection(target.book, target.section);
   if (!el) { toast('Could not undo.', 'warn'); return; }
   story.state = state;
+  // undo re-enters the section directly (not via the navigate wrapper that sets it), so
+  // the return frame captured when the PRE-undo timeline left its previous section would
+  // otherwise survive: a <return> here would pop a legitimate history entry and re-hydrate
+  // a pre-undo visit (rolls the undo reverted showing as resolved). Drop it — goBack falls
+  // back to the reverted state.data.history, and the post-undo autosave records frame:null. (task 148)
+  story._returnFrame = null;
   story.begin(el, target.book, target.section); // re-applies that section's effects from restored state
   const pane = $('.story-pane'); if (pane) pane.scrollTop = 0;
   window.scrollTo(0, 0);

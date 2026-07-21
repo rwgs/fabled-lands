@@ -355,6 +355,39 @@ export async function run(ctx) {
       ok('task110: a taken revisit="t" source stays reusable on return', !!revBtn2 && revBtn2.disabled === false, 'dis=' + (revBtn2 && revBtn2.disabled));
     }
 
+    // --- task 148: undo re-enters a section via a bare begin(); its stale return frame -----
+    // The navigate wrapper is the only path that (re)sets _returnFrame; app.undo re-enters
+    // the target section with a bare begin(), so the frame captured when the PRE-undo timeline
+    // LEFT its previous section would survive. If the section undone-into carries a <return>,
+    // goBack would consume that stale frame and re-hydrate a pre-undo visit. app.undo now nulls
+    // story._returnFrame before begin(); this locks the Story-level contract that fix relies on.
+    {
+      const g148 = GameState.create({ name:'T148', gender:'m', profession:'Warrior', book:1, adv });
+      const secA148 = parse('<section name="A"><p>A</p><choices><choice section="B">GoB</choice></choices></section>');
+      const secB148 = parse('<section name="B"><p>B</p></section>');
+      const secX148 = parse('<section name="X"><p>X</p><return>Back</return></section>');
+      const secs148 = { A: secA148, B: secB148, X: secX148 };
+      const cont148 = document.createElement('div');
+      let navd148 = null;
+      let story148;
+      const enter148 = (b, s) => { navd148 = { b: Number(b), s: String(s) }; g148.goTo(b, s); story148.begin(secs148[String(s)], b, s); };
+      story148 = new Story(cont148, g148, { navigate: enter148, onDeath(){}, notify(){} });
+      enter148(1, 'A');
+      Array.from(cont148.querySelectorAll('.choice'))[0].click(); // A → B; the wrapper holds frame(A)
+      ok('task148: leaving A for B holds a one-level return frame', !!story148._returnFrame);
+      // A bare begin() — exactly what app.undo does to re-enter — does NOT clear the frame itself.
+      story148.begin(secX148, 1, 'X');
+      ok('task148: a bare begin() (the undo re-entry) leaves the stale frame in place', !!story148._returnFrame);
+      // app.undo's fix nulls the frame before begin(); a <return> in the undone-into section
+      // must then fall back to history navigation instead of restoring the pre-undo frame.
+      story148._returnFrame = null;
+      story148.begin(secX148, 1, 'X');
+      ok('task148: clearing the frame before begin() keeps it null', story148._returnFrame === null);
+      navd148 = null;
+      cont148.querySelector('.goto').click(); // <return>
+      ok('task148: a null-frame <return> after undo falls back to history (no stale-frame restore)', navd148 && navd148.s === 'A', JSON.stringify(navd148));
+    }
+
     // --- task 115: Adventure-Sheet item detours route through the one navigation entry point ---
     // Using an item whose Use effect opens a section detour (treasure map §1.30→§1.200 etc.)
     // must capture the SOURCE section's return frame exactly like a normal choice, so the
