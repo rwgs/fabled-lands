@@ -212,7 +212,7 @@ export class Story {
     // failed fetch); blocks a re-entrant (double-click) navigation. (task 147)
     this._navInFlight = false;
   }
-f
+
   // Snapshot the current visit so a later <return> can restore it (task 110). Null
   // before the first section is entered (nothing to return to). Keeps references to
   // the live ctx/sectionEl (neither is mutated once we leave — begin() builds fresh
@@ -760,6 +760,14 @@ f
     this.appendChildren(container, node, path);
     return null;
   }
+
+  // Cross-view dispatch (task 163): renderBranch (render-rolls) and renderChoices
+  // (render-choices) are mutually recursive — a <choices> table can carry branch children,
+  // and a revealed branch can carry choices. The two view modules reach each other through
+  // these Story-facade methods instead of importing one another, which breaks the
+  // render-rolls <-> render-choices ES-module cycle without moving any rule into a view.
+  dispatchBranch(container, node, path, activeRoll) { return renderBranch(this, container, node, path, activeRoll); }
+  dispatchChoices(container, node, path, only = null, explicitKids = null) { return renderChoices(this, container, node, path, only, explicitKids); }
 
   // ---- small element renderers dispatched from TAG_RENDERERS ---------------
   renderParagraph(container, node, path) {

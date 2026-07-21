@@ -22,10 +22,15 @@ combat, markets, ships, live adventure sheet). Plain HTML/CSS/ES modules —
   (see workflow below).
 
 ## Architecture invariant — keep the rules out of the view
-Game logic lives in DOM-free modules: `engine.js`, `combat.js`, `market.js`,
-`state.js`. `render.js` only builds DOM and wires clicks, delegating every rule
-to those modules. **Do not put game logic in `render.js`.** This is what keeps
-the rules testable headlessly in `web/_test.html`.
+Game logic lives in **DOM-free rule modules**: the core `engine.js`, `combat.js`,
+`market.js`, `state.js`, plus the extracted rule planners `render-rules.js`,
+`render-gates.js` and the per-visit `visit-state.js` (task 119). View construction
+lives in the **`render*.js` view modules** (`render.js` — the `Story` facade +
+core walk — and `render-rolls.js`/`render-rewards.js`/`render-choices.js`/
+`render-combat.js`/`render-market.js`): they only build DOM and wire clicks,
+delegating every rule to a DOM-free module. **Do not put game logic in a view
+module,** and do not import a browser/DOM global into a rule module. This is what
+keeps the rules testable headlessly in `web/_test.html`.
 
 ## Build + test loop — run after every change
 The build scripts **require PowerShell 7 (`pwsh`)** — invoke them with `pwsh`, not

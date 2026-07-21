@@ -19,8 +19,8 @@
     images/world-map.jpg          -> web/assets/world-map.jpg
     books/book<n>/<Region>-Map.*  -> web/assets/maps/book<n>.jpg
 
-  Run from the repository root:
-      powershell -ExecutionPolicy Bypass -File build/build-data.ps1
+  Run from the repository root (requires PowerShell 7 - see #Requires below):
+      pwsh -ExecutionPolicy Bypass -File build/build-data.ps1
 #>
 
 $ErrorActionPreference = 'Stop'

@@ -68,8 +68,8 @@ export function renderGroup(story, container, node, path) {
       });
       story.ctx.applied.add(key);
       if (plan.isRevival) {
-        // Consume the deal and turn to its section (the revive rule — half max
-        // Stamina — lives in engine.js). Guard against a missing deal.
+        // Consume the deal and turn to its section (the revive rule — full
+        // Stamina, task 159 — lives in engine.js). Guard against a missing deal.
         const target = reviveWithResurrection(story.state);
         if (target) { story.navigate(target.book, target.section); return; }
         story.rerender();

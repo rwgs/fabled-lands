@@ -11,7 +11,8 @@ import { boolAttr, applyEffectBody } from './engine.js';
 import { payChoiceCost } from './market.js';
 import { bookTitle, availableBooks } from './data.js';
 import { choiceGate, flagGate, isSpentSource, blessingSpendForGoto } from './render-rules.js';
-import { renderBranch } from './render-rolls.js';
+// renderBranch (render-rolls) is reached through story.dispatchBranch, not a direct import,
+// so render-choices and render-rolls no longer form an ES-module cycle. (task 163)
 
 // ---- choices ----------------------------------------------------------------
 
@@ -21,13 +22,13 @@ export function renderChoices(story, container, choicesNode, path, only = null, 
   // A <choices> table can also hold the roll-branch elements the books place
   // beside the buttons (<success>/<failure>/<outcome>) — the resolution of a
   // <difficulty>/<random> rolled in the prose above (e.g. book1/123 swim). Route
-  // those through renderBranch so they reveal their goto once the roll resolves.
+  // those through the branch renderer so they reveal their goto once the roll resolves.
   const kids = explicitKids || (only ? [only] : Array.from(choicesNode.children));
   kids.forEach((node, i) => {
     const tag = node.tagName.toLowerCase();
     if (tag === 'choice') wrap.appendChild(renderChoice(story, node, path + '.c' + i));
     else if (tag === 'success' || tag === 'failure' || tag === 'outcome' || tag === 'outcomes') {
-      renderBranch(story, wrap, node, path + '.b' + i, story.activeRoll);
+      story.dispatchBranch(wrap, node, path + '.b' + i, story.activeRoll); // renderBranch via the facade (task 163)
     }
   });
   container.appendChild(wrap);

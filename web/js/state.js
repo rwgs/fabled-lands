@@ -304,10 +304,10 @@ export class GameState {
     }
   }
   // The transient per-fight bonus lives off `data`, so a normal save never carries it — but a
-  // mid-fight reload (combat autosaves every round) then resumes with it zeroed while
-  // ctx.applied says the granting <tick special="attack|defence"> already ran and won't
-  // re-fire. The visit record snapshots/restores it so the paid bonus (or the hidden penalty)
-  // survives the reload. Null when there is no bonus, to keep the record small. (task 156)
+  // mid-fight reload (a combat action now persists the visit every round, task 162) would
+  // resume with it zeroed while ctx.applied says the granting <tick special="attack|defence">
+  // already ran and won't re-fire. The visit record snapshots/restores it so the paid bonus
+  // (or the hidden penalty) survives the reload. Null when there is no bonus. (task 156)
   fightBonusSnapshot() {
     const a = this.fightAttackBonus(), d = this.fightDefenceBonus();
     return (a || d) ? { attack: a, defence: d } : null;

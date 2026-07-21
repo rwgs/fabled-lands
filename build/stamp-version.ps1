@@ -19,7 +19,7 @@
   Run after changing anything under web/ (build-data.ps1 calls this for you when
   it rebuilds the bundled data):
 
-      powershell -ExecutionPolicy Bypass -File build/stamp-version.ps1
+      pwsh -ExecutionPolicy Bypass -File build/stamp-version.ps1
 #>
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot

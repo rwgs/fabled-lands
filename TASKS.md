@@ -48,7 +48,7 @@ then real-but-rare player-facing bugs, a11y + info UX, divergences/polish, and
 the latent no-corpus-trigger items last. See the Review log.*
 
 - [ ] 165. Re-archive completed task details 115–160 and clear them out of the priority buckets
-- [ ] 163. Post-refactor module/docs cleanup: break the roll/choice cycle and align the architecture contract
+- [x] 163. Post-refactor module/docs cleanup: break the roll/choice cycle and align the architecture contract
 - [ ] 164. Focused test suites still import the old whole-harness dependency set and boot unrelated app code
 - [x] 142. CI's smoke verdict greps the whole DOM dump — failing runs are misdiagnosed as bootstrap FATALs
 - [x] 143. A failing `ok()` fired after the report is silently lost — a latent silent-pass vector
@@ -1615,6 +1615,26 @@ round; and change both build scripts' embedded example commands from Windows
 `powershell` to required `pwsh` (their `#Requires` guards are already right).
 No production redesign beyond breaking the cycle. Stamp and run the focused
 render/actions suites plus the full smoke test.
+
+*Done 2026-07-21:* surgical grab-bag, no production redesign.
+- **Cycle broken:** `render-rolls.js` no longer imports `renderChoices` and
+  `render-choices.js` no longer imports `renderBranch`; the two mutually-recursive
+  view functions now reach each other through two thin Story-facade methods
+  (`dispatchBranch`/`dispatchChoices` in render.js, which already imports both).
+  Neither view module imports the other (or render.js), so the ES-module cycle is
+  gone with no rule logic moved into a view.
+- **Contract aligned:** AGENTS.md's "Architecture invariant" now names the DOM-free
+  rule modules as the core four **plus** `render-rules.js`/`render-gates.js`/
+  `visit-state.js`, and calls out the `render*.js` view modules — matching README
+  and the implemented design.
+- **Stale bits fixed:** removed the accidental empty class field `f` in render.js;
+  corrected the "revive at half Stamina" comments in render-rewards.js/render-rules.js
+  to "full Stamina (task 159)"; updated state.js's mid-fight comment to reflect that
+  combat now persists every round (task 162); and changed both build scripts' embedded
+  example commands from `powershell` to `pwsh` (the `#Requires` guards were already
+  right; both scripts still parse with zero non-ASCII bytes).
+No new files (facade methods only), so sw.js/README module tables are unchanged.
+Focused render/actions/combat suites + full smoke `RESULT ALL PASS pass=1493`.
 
 ---
 

@@ -10,7 +10,8 @@ import {
   childAdjustment, abilityChoiceOptions,
 } from './engine.js';
 import { branchPlan, blessingSpendForReroll, isRollGate } from './render-rules.js';
-import { renderChoices } from './render-choices.js';
+// renderChoices (render-choices) is reached through story.dispatchChoices, not a direct
+// import, so render-rolls and render-choices no longer form an ES-module cycle. (task 163)
 import { animateDice, freezeButtons } from './ui.js';
 import { diceWord } from './render-util.js';
 
@@ -359,7 +360,7 @@ export function renderBranch(story, container, node, path, activeRoll) {
       }
       // Always-available alternatives inside the table (e.g. "or don't try").
       const choiceKids = Array.from(node.children).filter((c) => c.tagName.toLowerCase() === 'choice');
-      if (choiceKids.length) renderChoices(story, container, node, path, null, choiceKids);
+      if (choiceKids.length) story.dispatchChoices(container, node, path, null, choiceKids); // renderChoices via the facade (task 163)
       return;
     }
     default: if (!roll) story.appendChildren(container, node, path);

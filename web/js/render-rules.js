@@ -272,7 +272,7 @@ export function groupPlan(sectionEl, node) {
   // A death-revival group bundles the "use your deal" trigger (a no-section
   // <resurrection/>) with the price of coming back — erase possessions/money/ship
   // (§3.123/560/6.140/1.680) or just the ship (§1.616). On the group action, apply
-  // those losses, consume the earliest deal (revive at half Stamina) and turn to
+  // those losses, consume the earliest deal (revive at full Stamina, task 159) and turn to
   // the deal's own section — instead of ignoring the resurrection child and leaving
   // the player erased but stranded. (task 98)
   const resNode = node.querySelector('resurrection');
