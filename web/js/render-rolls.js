@@ -150,6 +150,7 @@ export function renderDifficulty(story, container, node, path) {
   const key = 'roll@' + path;
   const widget = document.createElement('div');
   widget.className = 'roll';
+  widget.setAttribute('aria-live', 'polite'); // announce the resolved dice result to screen readers (task 153)
   container.appendChild(widget);
 
   // Pay-to-roll gate (task 51): a flag= roll paired with a [price=] cost is
@@ -214,6 +215,7 @@ export function renderRandom(story, container, node, path) {
   const key = 'roll@' + path;
   const widget = document.createElement('div');
   widget.className = 'roll';
+  widget.setAttribute('aria-live', 'polite'); // announce the resolved dice result to screen readers (task 153)
   container.appendChild(widget);
 
   // Pay-gated roll (book2/157 etc.): the roll enables only once its payment sets
@@ -271,6 +273,7 @@ export function renderRankcheck(story, container, node, path) {
   const key = 'roll@' + path;
   const widget = document.createElement('div');
   widget.className = 'roll';
+  widget.setAttribute('aria-live', 'polite'); // announce the resolved dice result to screen readers (task 153)
   container.appendChild(widget);
   // Pay-to-roll gate (task 51), as for <difficulty>/<random>.
   const { flag, gated, armed } = rollGateState(story, node);
@@ -310,6 +313,7 @@ export function renderTraining(story, container, node, path) {
   const key = 'roll@' + path;
   const widget = document.createElement('div');
   widget.className = 'roll';
+  widget.setAttribute('aria-live', 'polite'); // announce the resolved dice result to screen readers (task 153)
   container.appendChild(widget);
   const stored = story.ctx.rolls.get(key);
   if (story.inWhileIter && !story.inactive && !stored) story.whileIterPending = true; // hold a <while> pass (task 100)

@@ -50,6 +50,7 @@ function toastHost() {
   if (!_toastHost) {
     _toastHost = document.createElement('div');
     _toastHost.className = 'toast-host';
+    _toastHost.setAttribute('aria-live', 'polite'); // announce toasts (codeword gained, save failed…) to screen readers (task 153)
     document.body.appendChild(_toastHost);
   }
   return _toastHost;
@@ -70,24 +71,35 @@ export function modal({ title, body, buttons = [{ label: 'OK', value: true }], d
     overlay.className = 'modal-overlay';
     const box = document.createElement('div');
     box.className = 'modal';
-    if (title) { const h = document.createElement('h2'); h.textContent = title; box.appendChild(h); }
+    // Dialog semantics (task 153): expose the modal as a dialog and name it from the
+    // title, move focus into it, and honour Escape when it's dismissable — so keyboard
+    // and screen-reader users aren't left tabbing through the obscured background.
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-modal', 'true');
+    if (title) { const h = document.createElement('h2'); h.textContent = title; box.appendChild(h); box.setAttribute('aria-label', title); }
     const content = document.createElement('div');
     content.className = 'modal-body';
     if (typeof body === 'string') content.innerHTML = body; else if (body) content.appendChild(body);
     box.appendChild(content);
     const bar = document.createElement('div');
     bar.className = 'modal-buttons';
+    const close = (value) => { document.removeEventListener('keydown', onKey); document.body.removeChild(overlay); resolve(value); };
+    let primaryBtn = null;
     buttons.forEach((b) => {
       const btn = document.createElement('button');
       btn.className = 'btn' + (b.primary ? ' btn-primary' : '');
       btn.textContent = b.label;
-      btn.addEventListener('click', () => { document.body.removeChild(overlay); resolve(b.value); });
+      btn.addEventListener('click', () => close(b.value));
+      if (b.primary && !primaryBtn) primaryBtn = btn;
       bar.appendChild(btn);
     });
     box.appendChild(bar);
     overlay.appendChild(box);
-    if (dismissable) overlay.addEventListener('click', (e) => { if (e.target === overlay) { document.body.removeChild(overlay); resolve(null); } });
+    if (dismissable) overlay.addEventListener('click', (e) => { if (e.target === overlay) close(null); });
+    const onKey = (e) => { if (dismissable && e.key === 'Escape') { e.preventDefault(); close(null); } };
+    document.addEventListener('keydown', onKey);
     document.body.appendChild(overlay);
+    (primaryBtn || bar.querySelector('button'))?.focus();
   });
 }
 

@@ -128,6 +128,7 @@ function drawGroupFight(story, box, fights, dmgNode, group, fleeNode = null) {
 
   const logEl = document.createElement('div');
   logEl.className = 'fight-log';
+  logEl.setAttribute('aria-live', 'polite'); // announce each combat round to screen readers (task 153)
   const merged = fights.flatMap((f) => f.log).slice(-6);
   merged.forEach((l) => { const p = document.createElement('div'); p.textContent = l; logEl.appendChild(p); });
   box.appendChild(logEl);
@@ -278,6 +279,7 @@ function drawFight(story, box, fight, node, dmgNode, fleeNode, key, locked = fal
 
   const logEl = document.createElement('div');
   logEl.className = 'fight-log';
+  logEl.setAttribute('aria-live', 'polite'); // announce each combat round to screen readers (task 153)
   fight.log.slice(-6).forEach((l) => { const p = document.createElement('div'); p.textContent = l; logEl.appendChild(p); });
   box.appendChild(logEl);
 
