@@ -7,7 +7,7 @@
 // engine.js; this only builds the widgets and wires the clicks.
 
 import { applyEffect, applyEffectBody, boolAttr, resolveValue, applyRest, buyResurrectionDeal, readItemEffects, filterMatches, transferPlan } from './engine.js';
-import { shopKind, goodsFrom, ownsGoods, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo, canUpgradeCrew } from './market.js';
+import { shopKind, goodsFrom, ownsGoods, buyTrade, sellTrade, sellPlan, applyInlineBuy, sellInlineItem, sellCargo, canUpgradeCrew } from './market.js';
 import { normalize, parseTags, splitItemName, isShardsCurrency } from './state.js';
 import { canonCargo } from './rules.js';
 import { modal } from './ui.js';
@@ -117,10 +117,19 @@ function renderShopRow(story, node, path, currency = null, marketSolds = []) {
     s.disabled = !owned;
     s.title = owned ? '' : 'You have none to sell';
     s.addEventListener('click', () => {
-      const res = sellTrade(story.state, goods, price, currency);
-      if (!res.ok) return;
-      runSoldHooks(story, node, res.item, marketSolds); // <sold> side-effects, matched on the sold item (tasks 41, 58)
-      story.rerender();
+      // Commit the sale (optionally with the player's pick) and fire <sold> hooks on the
+      // possession actually removed (tasks 41, 58).
+      const commit = (chooser) => {
+        const res = sellTrade(story.state, goods, price, currency, chooser ? { chooser } : {});
+        if (!res.ok) return;
+        runSoldHooks(story, node, res.item, marketSolds);
+        story.rerender();
+      };
+      // Several non-identical matches (two same-type ships, one laden; a mixed weapon rack):
+      // ask which one leaves rather than silently taking the first. (task 134)
+      const plan = sellPlan(story.state, goods);
+      if (plan.needsChoice) { s.disabled = true; showSellPicker(story, row, plan, commit); }
+      else commit(null);
     });
     actions.appendChild(s);
   }
@@ -155,6 +164,36 @@ function soldMatches(soldNode, soldItem) {
   const tags = parseTags(soldNode.getAttribute('tags'));
   const itemTags = soldItem.tags || [];
   return tags.every((t) => itemTags.some((g) => normalize(g) === normalize(t)));
+}
+
+// Reveal a "sell which?" picker when a sale has several non-identical matches, so the exact
+// ship/item the player names is what leaves — not whatever the engine finds first (JaFL
+// "Please select which one you want to sell"). Each button commits with a chooser bound to
+// that candidate; the picker sits just below its market row. (task 134)
+function showSellPicker(story, rowEl, plan, commit) {
+  const box = document.createElement('div');
+  box.className = 'ship-choice sell-choice';
+  box.appendChild(document.createTextNode('Sell which? '));
+  plan.candidates.forEach((cand) => {
+    const b = document.createElement('button');
+    b.className = 'btn-mini';
+    b.textContent = sellCandidateLabel(plan.kind, cand);
+    b.addEventListener('click', () => commit(() => [cand]));
+    box.appendChild(b);
+  });
+  (rowEl.parentNode || rowEl).insertBefore(box, rowEl.nextSibling);
+}
+
+// A short label for a sale candidate: a ship shows its type/name and whether its hold is
+// laden (so selling the wrong vessel — and its cargo — is an informed choice); a cargo pick
+// names the carrying vessel; a carried good uses its item label.
+function sellCandidateLabel(kind, cand) {
+  if (kind === 'ship' || kind === 'cargo') {
+    const named = cand.name && cand.name !== 'Ship' ? ` "${cand.name}"` : '';
+    const load = (cand.cargo || []).length ? ` — carrying ${cand.cargo.map((c) => titleCase(c)).join(', ')}` : ' — empty';
+    return titleCase(cand.type) + named + load;
+  }
+  return itemLabel(cand);
 }
 
 // Inline <buy> in prose: a crew upgrade, a ship, a tool, a carried item, or a

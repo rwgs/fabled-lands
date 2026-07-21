@@ -4,7 +4,7 @@
 // returns { ok, note? } so the renderer can decide whether to redraw and what
 // (if anything) to toast. No DOM — unit-testable headlessly.
 
-import { makeItem, parseTags, splitItemName, isShardsCurrency } from './state.js';
+import { makeItem, parseTags, splitItemName, isShardsCurrency, normalize } from './state.js';
 import { SHIP_TYPES, CREW_LEVELS, canonShipType, canonCargo } from './rules.js';
 import { resolveValue } from './engine.js';
 
@@ -113,33 +113,89 @@ export function buyTrade(state, goods, price, currency = null) {
   return { ok: true };
 }
 
+// --- Selling with several candidates: ask which, don't silently take the first (task 134) ---
+// JaFL refuses a sell whose matches are non-identical and asks the player to pick ("You have
+// multiple ships of this type. Select one…" / "…which one you want to sell."). Taking the
+// wrong one is irreversible — a laden ship is sold with its cargo, a quest weapon is gone —
+// so we enumerate the matches safest-default first, let the view surface a picker for the
+// ambiguous cases (sellPlan.needsChoice), and let headless callers name the exact one via
+// opts.chooser.
+
+const shipLoad = (s) => (s.cargo || []).length;
+// A "least likely to matter" weight so the no-prompt default keeps the significant item:
+// a plain possession outranks one bearing an ability, an <effect>, tags, or an award group.
+const itemWeight = (it) => (it.ability ? 1 : 0) + ((it.effects || []).length ? 1 : 0) + ((it.tags || []).length ? 1 : 0) + (it.group ? 1 : 0);
+
+/** Are two sale candidates interchangeable, so which one leaves makes no difference?
+ *  Mirrors JaFL Item.matches (name+bonus+tags+group) for carried goods, and adds cargo
+ *  load for ships (an empty and a laden vessel of one type are NOT the same sale). */
+function sameCandidate(kind, a, b) {
+  if (kind === 'ship') {
+    return canonShipType(a.type) === canonShipType(b.type)
+      && shipLoad(a) === shipLoad(b)
+      && normalize(a.name || '') === normalize(b.name || '');
+  }
+  const tagSet = (it) => (it.tags || []).map(normalize).sort().join(' ');
+  return normalize(a.name) === normalize(b.name)
+    && (a.bonus || 0) === (b.bonus || 0)
+    && (a.ability || null) === (b.ability || null)
+    && (a.group || null) === (b.group || null)
+    && tagSet(a) === tagSet(b);
+}
+
+/** The possessions a sell of `goods` could take, safest-default first. Ships/cargo need the
+ *  vessel HERE (task 89). Bonus-valued armour/generic weapon rows draw from every owned item
+ *  of that kind+bonus (plainest first); a named row from its name matches; cargo from the
+ *  ships HERE carrying the commodity (emptier holds first). */
+export function sellCandidates(state, goods) {
+  const { kind, name, bonus, named, shipType, cargoName } = goods;
+  if (kind === 'ship') {
+    const type = canonShipType(shipType);
+    return state.shipsHere().filter((s) => canonShipType(s.type) === type).sort((a, b) => shipLoad(a) - shipLoad(b));
+  }
+  if (kind === 'cargo') {
+    const want = canonCargo(cargoName || name);
+    return state.shipsHere().filter((s) => (s.cargo || []).some((c) => canonCargo(c) === want)).sort((a, b) => shipLoad(a) - shipLoad(b));
+  }
+  if (kind === 'armour' || (kind === 'weapon' && !named)) {
+    return state.data.items.filter((it) => it.kind === kind && (it.bonus || 0) === bonus).sort((a, b) => itemWeight(a) - itemWeight(b));
+  }
+  return state.findItems(name);
+}
+
+/** What a sell needs from the view: the `kind`, the ordered `candidates`, and whether the
+ *  player must be asked which one — more than one match and they are not all interchangeable
+ *  (JaFL's "select which one"), or, for cargo, more than one ship carries it. (task 134) */
+export function sellPlan(state, goods) {
+  const cands = sellCandidates(state, goods);
+  const needsChoice = goods.kind === 'cargo'
+    ? cands.length > 1
+    : cands.length > 1 && !cands.every((c) => sameCandidate(goods.kind, cands[0], c));
+  return { kind: goods.kind, candidates: cands, needsChoice };
+}
+
 /** Sell `goods` for `price` in `currency` (Shards by default). Mutates state.
  *  Returns { ok, item? } — `item` is the possession actually removed (for a
  *  carried good), so the caller can fire <sold> hooks against its real tags/name
- *  rather than the shop row's descriptor (task 58). Ship/cargo sells carry no item. */
-export function sellTrade(state, goods, price, currency = null) {
-  const { kind, name, bonus, named, shipType, cargoName } = goods;
+ *  rather than the shop row's descriptor (task 58). Ship/cargo sells carry no item.
+ *  `opts.chooser(candidates, 1, kind)` names the exact possession when several match;
+ *  with no chooser the sale takes the safest default (empty ship / plainest item). */
+export function sellTrade(state, goods, price, currency = null, opts = {}) {
+  const { kind, name, cargoName } = goods;
+  const cands = sellCandidates(state, goods);
+  if (!cands.length) return { ok: false };
+  const pick = (opts.chooser && cands.length > 1) ? (opts.chooser(cands.slice(), 1, kind) || [])[0] : null;
+  const target = pick || cands[0];
   if (kind === 'ship') {
     // Sell a vessel that is HERE — one berthed at another port can't change hands (task 89).
-    const ship = state.shipsHere().find((s) => canonShipType(s.type) === canonShipType(shipType));
-    if (!ship) return { ok: false };
-    state.ships.splice(state.ships.indexOf(ship), 1); walletEarn(state, currency, price); state.changed();
+    state.ships.splice(state.ships.indexOf(target), 1); walletEarn(state, currency, price); state.changed();
   } else if (kind === 'cargo') {
-    const want = canonCargo(cargoName);
-    const ship = state.shipsHere().find((s) => (s.cargo || []).some((c) => canonCargo(c) === want));
-    if (!ship) return { ok: false };
-    ship.cargo.splice(ship.cargo.findIndex((c) => canonCargo(c) === want), 1); walletEarn(state, currency, price); state.changed();
-  } else if (kind === 'armour' || (kind === 'weapon' && !named)) {
-    // Armour (any name) and generic weapons are valued by bonus: sell one of that tier.
-    const it = state.data.items.find((x) => x.kind === kind && (x.bonus || 0) === bonus);
-    if (!it) return { ok: false };
-    state.removeItemById(it.id); walletEarn(state, currency, price);
-    return { ok: true, item: it };
+    const want = canonCargo(cargoName || name);
+    target.cargo.splice(target.cargo.findIndex((c) => canonCargo(c) === want), 1); walletEarn(state, currency, price); state.changed();
   } else {
-    const it = state.findItems(name)[0];
-    if (!it) return { ok: false };
-    state.removeItemById(it.id); walletEarn(state, currency, price);
-    return { ok: true, item: it };
+    // Armour (any name) and generic weapons are valued by bonus; a named row by name.
+    state.removeItemById(target.id); walletEarn(state, currency, price);
+    return { ok: true, item: target };
   }
   return { ok: true };
 }
