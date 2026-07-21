@@ -88,6 +88,17 @@ export function renderChoice(story, node, path) {
         if (story.sectionFight) story.sectionFight.outcome = 'fled';
         if (story.state.isDead()) { story.rerender(); return; }
       }
+      // Sail exit: same chooser/action as a sail goto (task 89) — on click, sets the
+      // chosen vessel at large (prompting when several are here) before navigating. For
+      // a sail choice the payment is deferred into the chooser's commit, so abandoning
+      // the which-ship picker never eats the cost (task 149); payChoiceCost still
+      // re-validates against the live sheet (task 133) at the moment a ship is picked.
+      if (gate.isSail && section != null) {
+        story._pendingSourceNode = node; // record the source action for a possible <return> (task 110)
+        sailThenGo(story, btn.parentElement || story.root, btn, targetBook, section,
+          () => payChoiceCost(story.state, gate.payment).ok);
+        return;
+      }
       // The cost is re-validated against the live sheet (task 133): if the required
       // possession was dropped (or funds spent) since this button rendered, refuse and
       // refresh so the now-ineligible choice greys out instead of crossing for free.
@@ -95,9 +106,6 @@ export function renderChoice(story, node, path) {
       if (!paid.ok) { story.rerender(); return; }
       if (section == null) return; // a cost-only choice: pays and stays, not a source action
       story._pendingSourceNode = node; // record the source action for a possible <return> (task 110)
-      // Sail exit: same chooser/action as a sail goto (task 89) — on click, sets the
-      // chosen vessel at large (prompting when several are here) before navigating.
-      if (gate.isSail) { sailThenGo(story, btn.parentElement || story.root, btn, targetBook, section); return; }
       story.navigate(targetBook, section);
     });
   }
@@ -174,10 +182,14 @@ export function renderGoto(story, container, node, path) {
   link.addEventListener('click', () => {
     if (!bookAvailable) { story.notify(`“${bookTitle(book)}” (Book ${book}) isn’t included in this edition.`, 'warn'); return; }
     story._pendingSourceNode = node; // record the source action for a possible <return> (task 110)
-    if (spendBlessing && story.state.hasBlessing(spendBlessing)) story.state.useBlessing(spendBlessing);
+    // The storm-safe goto spends the guarded blessing on the way out; for a sail goto
+    // defer that spend into the chooser's commit so an abandoned which-ship picker
+    // doesn't waste the blessing (task 149).
+    const spend = () => { if (spendBlessing && story.state.hasBlessing(spendBlessing)) story.state.useBlessing(spendBlessing); return true; };
     // A sail goto puts a ship "at large" before leaving; prompt when more than one
     // ship is at this dock, else sail the single one. (task 73)
-    if (isSail) { sailThenGo(story, container, link, book, section); return; }
+    if (isSail) { sailThenGo(story, container, link, book, section, spend); return; }
+    spend();
     story.navigate(book, section);
   });
   story.tagFightNav(node, link);
@@ -190,11 +202,19 @@ export function renderGoto(story, container, node, path) {
 // Perform a sail action: set a ship "at large", then navigate. When several ships are
 // at this dock, prompt the player to choose which one to sail (JaFL ship selection);
 // otherwise sail the single ship here. (task 73)
-export function sailThenGo(story, container, link, book, section) {
+// `commit` (optional) runs the choice's cost/blessing spend at the moment a ship is
+// picked and returns whether it succeeded. It is deferred to here so an abandoned
+// which-ship chooser never eats the payment — the leak fixed by task 149; a failed
+// commit refreshes without sailing or navigating (mirrors payChoiceCost's { ok:false }).
+export function sailThenGo(story, container, link, book, section, commit) {
   const here = story.state.shipsHere();
-  // Sail the chosen ship, exempt it from this section's todock (it leaves with you),
-  // then navigate. (tasks 73, 81)
-  const go = (ship) => { const s = story.state.sailShip(ship && ship.id); story._sailExempt = s ? s.id : null; story.navigate(book, section); };
+  // Commit the payment first (so an unaffordable cost blocks before anything moves),
+  // then sail the chosen ship, exempt it from this section's todock (it leaves with
+  // you), then navigate. (tasks 73, 81, 149)
+  const go = (ship) => {
+    if (commit && !commit()) { story.rerender(); return; }
+    const s = story.state.sailShip(ship && ship.id); story._sailExempt = s ? s.id : null; story.navigate(book, section);
+  };
   if (here.length <= 1) { go(here[0]); return; }
   link.disabled = true;
   const box = document.createElement('div');

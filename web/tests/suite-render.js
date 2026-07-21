@@ -457,6 +457,26 @@ export async function run(ctx) {
     cpf.querySelector('.choice').click();
     ok('§ pay="f" shards choice does NOT deduct', gpf.data.shards === 50, String(gpf.data.shards));
 
+    // --- task 149: a priced sail choice with several ships docked must DEFER the ----
+    // payment until a ship is actually picked, so abandoning the which-ship chooser
+    // never eats the cost (and a re-render can't charge twice).
+    const g149 = GameState.create({ name:'S149', gender:'m', profession:'Warrior', book:1, adv });
+    g149.data.shards = 50;
+    g149.addShip({ type:'barque', name:'Ship' });
+    g149.addShip({ type:'barque', name:'Ship' });
+    let nav149 = null;
+    const c149 = document.createElement('div');
+    const story149 = new Story(c149, g149, { navigate:(b,s)=>{nav149={b,s};}, onDeath(){}, notify(){} });
+    story149.begin(parse('<section name="x" dock="Kunrir"><choices><choice sail="t" section="9" shards="10" pay="t">Sail on</choice></choices></section>'), 1, 'x');
+    ok('§149 two ships are docked here', g149.shipsHere().length === 2, String(g149.shipsHere().length));
+    c149.querySelector('.choice').click();
+    ok('§149 the sail-choice click raises the which-ship chooser', !!c149.querySelector('.ship-choice'));
+    ok('§149 payment is deferred while the chooser is open', g149.data.shards === 50, String(g149.data.shards));
+    ok('§149 no navigation before a ship is picked', nav149 === null, JSON.stringify(nav149));
+    c149.querySelector('.ship-choice .btn-mini').click();
+    ok('§149 picking a ship finally takes the 10-shard cost', g149.data.shards === 40, String(g149.data.shards));
+    ok('§149 picking a ship navigates to 9', nav149 && String(nav149.s) === '9', JSON.stringify(nav149));
+
     // --- task 56: hidden price nodes arm silently (no phantom Pay button) ---------
     // §6.630: <tick price="a" hidden="t"/> arms the either/or SCOUTING|SANCTITY rolls
     // on entry — no button to find, both rolls live at once.
