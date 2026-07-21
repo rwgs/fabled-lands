@@ -51,10 +51,16 @@ import { run as runCorpus } from './tests/suite-corpus.js';
 // The shared context every suite receives. Deliberately tiny: the reporting counters live
 // here and each suite mutates them through ok(); parse() is the one shared XML helper.
 const out = [];
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, reported = false;
 function ok(name, cond, extra = '') {
   if (cond) { pass++; out.push('PASS ' + name); }
-  else { fail++; out.push('FAIL ' + name + (extra ? (' :: ' + extra) : '')); }
+  else {
+    fail++; out.push('FAIL ' + name + (extra ? (' :: ' + extra) : ''));
+    // A failure fired from un-awaited async work AFTER report() has printed would otherwise
+    // only bump counters and an `out` array nobody re-reads — the RESULT line would stay
+    // ALL PASS. Route it through the sticky-fatal path so the aggregate flips to failure. (task 143)
+    if (reported) flFatal('post-report failure: ' + name + (extra ? (' :: ' + extra) : ''));
+  }
 }
 function parse(xml) { return data.parseXml(xml); }
 const ctx = { ok, parse };
@@ -103,6 +109,7 @@ function report() {
   document.getElementById('results').textContent =
     `RESULT ${head} pass=${pass} fail=${fail}\n` + lead.concat(out).join('\n');
   document.title = passed ? 'TESTS_OK' : 'TESTS_FAIL';
+  reported = true;   // any later failing ok() must now route through flFatal (task 143)
 }
 
 main();
