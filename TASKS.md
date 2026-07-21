@@ -2,11 +2,19 @@
 
 Backlog of recommended improvements. Open tasks are filed under priority buckets
 (**HIGH** / **MEDIUM** / **LOW**) — work the first open (`- [ ]`) item top-down;
-each task's detail section carries the same stable ID. **There are currently no
-open tasks:** every filed task through 165 is complete (listed under **Done**
-below). Completed detail sections are archived in
+each task's detail section carries the same stable ID. **There are currently two
+open tasks:** work **166** first, then **167**. Completed tasks through 165 are
+listed under **Done** below. Completed detail sections are archived in
 [`TASKS-archive.md`](TASKS-archive.md); the Review log at the end of this file
 records each audit pass and is where new work is filed.
+
+**HIGH**
+
+- [ ] 166. Direct visit commits bypass persistence observers — save failures stay silent and activity timestamps go stale
+
+**MEDIUM**
+
+- [ ] 167. Mutation-bearing navigation is not atomic — a failed/pending cross-book load can consume payment without completing the move
 
 **Done**
 
@@ -181,7 +189,75 @@ section below); detail sections remain in filed order, not this order.*
 
 ---
 
-> **Completed task details (tasks 1–165) are archived** in [`TASKS-archive.md`](TASKS-archive.md) (tasks 141, 165) to keep this file focused on open work. The checklist above still carries every task's stable ID and status; a done task's detail lives in the archive under the same `## <N>.` heading. Open-task details (none at present) and the Review log follow below.
+> **Completed task details (tasks 1–165) are archived** in [`TASKS-archive.md`](TASKS-archive.md) (tasks 141, 165) to keep this file focused on open work. The checklist above still carries every task's stable ID and status; a done task's detail lives in the archive under the same `## <N>.` heading. Open-task details and the Review log follow below.
+
+---
+
+## 166. Direct visit commits bypass persistence observers — save failures stay silent and activity timestamps go stale
+
+**Priority: HIGH — reopens the player-facing guarantee from task 7 on every
+ctx-only save path.**
+
+`GameState.changed()` updates `data.updated`, calls `save()`, then notifies the
+listeners through which `app.js` runs `surfaceSaveError()`. The explicit visit
+commits added for tasks 155, 161 and 162 call `save()` directly instead:
+`Story.begin()`, `resumeStale()`, `rerender()`, and eight continuing-combat or
+blessing branches in `render-combat.js`. `save()` only sets `lastSaveError`; it
+does not publish the result. A quota failure that occurs on the final, larger
+visit write can therefore go unwarned even when the preceding state mutation
+saved successfully. A pure combat round can have no `GameState` mutation at
+all, making its direct visit save the only persistence attempt. Direct commits
+also leave `data.updated` unchanged, so the save-card timestamp/order does not
+reflect ctx-only combat or roll progress.
+
+Implement one semantic current-visit commit path at the state/persistence
+boundary and route every raw renderer/combat `save()` through it. It must:
+
+1. advance the persisted `updated` time for real player progress (without
+   causing a sheet rerender or a recursive save);
+2. publish both failure and recovery so the existing warning/export UI shows a
+   direct-commit failure and re-arms after a successful retry; and
+3. retain the provider-written visit record and ephemeral-game behaviour.
+
+Add focused persistence tests that force storage to fail only on a direct
+visit commit, assert that a save-status observer receives the failure and later
+recovery, and verify that a ctx-only combat/roll commit advances the persisted
+metadata timestamp. Keep the existing normal/quota/ephemeral save tests green,
+then run the full build + browser suite.
+
+## 167. Mutation-bearing navigation is not atomic — a failed/pending cross-book load can consume payment without completing the move
+
+**Priority: MEDIUM — an uncommon fetch/reload window can irreversibly take
+Shards, an item, a blessing, or a ship action while leaving the source live.**
+
+The task-161 transition commit makes the destination coherent *after*
+`begin()`, but the source-side transaction is still split. `renderChoice()`
+calls `payChoiceCost()` first (which autosaves the deduction), then records
+`_pendingSourceNode` and starts `Story.navigate()`. The wrapper installs the
+spent-action return frame only in memory and does not save again until the
+destination fetch resolves. If the tab closes during that fetch, the persisted
+source visit has paid but still presents the same unspent choice on reload. If
+`data.getSection()` rejects, the move never completes, the payment is already
+gone, and `_navInFlight` is never released because the wrapper neither returns
+nor catches the raw navigation promise. This is live on paid cross-book routes,
+including §1.123 (1 Shard), §1.495 (50 Shards), §1.656 (100 Shards), §2.190,
+§5.333 and several Book 6 voyages. The same ordering must be audited for flee
+effects, blessing spends, sailing, item-use detours and any combat/action branch
+that mutates state immediately before navigating.
+
+Make a mutation-bearing move transactional across target validation and the
+source/destination visit hand-off. A rejected or missing target must leave the
+source's resources, action availability, return frame and navigation guard in a
+coherent recoverable state; a successful target must apply the mutation once,
+run leave hooks once and persist the destination plus its source frame once.
+Do not solve this with a second uncoordinated save that merely chooses a
+different half-finished state.
+
+Add focused navigation tests with a controllable pending/rejected raw navigate:
+cover a paid cross-book choice and at least one other mutation-before-navigation
+path, inspect the persisted source record while pending and after rejection,
+then resolve successfully and verify one deduction, one turn, one return frame
+and a released `_navInFlight` guard. Run the full build + browser suite.
 
 ---
 
@@ -190,6 +266,32 @@ section below); detail sections remain in filed order, not this order.*
 *Running audit log of the backlog — each pass re-verifies the open items against
 the current code and records what was filed, split, or re-confirmed. Task
 numbers refer to the contents checklist at the top of the file.*
+
+Reviewed 2026-07-21 (seventh full pass): started clean at `793ab8e` after tasks
+161–165. Re-traced the cumulative transition/combat persistence changes,
+renderer lifecycle, state/save API and live navigation call sites; rechecked the
+production/test import graph, rules/view boundary, module ownership, source vs
+generated files, build/SW inputs, documentation and the new Markdown rule-doc
+copies; and scanned the corpus for concrete triggers before filing tasks
+**166–167**. Task 166 (HIGH) is a direct regression in task 7's safety contract:
+the new explicit visit saves bypass `changed()`'s listeners, so final quota
+failures are silent, recovery is not observed, and ctx-only progress does not
+advance the save-card timestamp. Task 167 (MEDIUM) is the remaining pre-arrival
+atomicity gap: paid cross-book choices persist the deduction before the target
+fetch is accepted or the spent source frame is durable, and rejected promises
+also strand the navigation guard. Live paid routes prove this is not synthetic.
+
+Organization verdict: the repository is still arranged the right way. The flat
+dependency-free ES-module layout remains appropriate; the task-119 view split is
+cohesive, task 163 removed the one direct roll/choice module cycle, task 164's
+focused suites no longer boot `app.js`, and rules still live behind DOM-free
+engine/state/planner modules. `engine.js` and `state.js` remain large but have
+single, well-sectioned ownership, so a directory reshuffle or line-count split
+would add indirection rather than clarify responsibilities. The two findings
+are persistence protocol defects, not evidence that the file layout needs a
+redesign. PowerShell 7 build: **4,377 XML files valid**, 4,369 sections
+generated, **no generated-file drift**. Fresh-profile aggregate smoke:
+**`RESULT ALL PASS pass=1493 fail=0`**, including every section of all six books.
 
 Reviewed 2026-07-21 (sixth full pass): started clean at `cb082e1` after the
 task-115–160 burn-down. This pass reviewed the cumulative persistence and
