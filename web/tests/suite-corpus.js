@@ -1,14 +1,8 @@
 // FL test suite — render EVERY section of all six books without throwing (final scan)
 // Extracted verbatim from web/_test.html run() lines 915-928 (task 120).
 import * as data from '../js/data.js';
-import { GameState, readSlotData, importSave, loadSlotMeta, deleteSlot, makeItem, nextFreeSlot, sanitizeData, currencyAward, splitItemName } from '../js/state.js';
-import * as eng from '../js/engine.js';
-import { fightRound, makeFight, groupFightRound, isDefeated, useWrathBlessing, useDefenceBlessing, rerollAttack } from '../js/combat.js';
-import { goodsFrom, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo, canUpgradeCrew, payChoiceCost } from '../js/market.js';
-import { Story, previewProse } from '../js/render.js';
-import { Narrator } from '../js/tts.js';
-import { renderSheet } from '../js/ui.js';
-import { renderStatic } from '../js/app.js';
+import { GameState } from '../js/state.js';
+import { Story } from '../js/render.js';
 
 export async function run(ctx) {
   const { ok, parse } = ctx;

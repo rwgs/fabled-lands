@@ -49,7 +49,7 @@ the latent no-corpus-trigger items last. See the Review log.*
 
 - [ ] 165. Re-archive completed task details 115–160 and clear them out of the priority buckets
 - [x] 163. Post-refactor module/docs cleanup: break the roll/choice cycle and align the architecture contract
-- [ ] 164. Focused test suites still import the old whole-harness dependency set and boot unrelated app code
+- [x] 164. Focused test suites still import the old whole-harness dependency set and boot unrelated app code
 - [x] 142. CI's smoke verdict greps the whole DOM dump — failing runs are misdiagnosed as bootstrap FATALs
 - [x] 143. A failing `ok()` fired after the report is silently lost — a latent silent-pass vector
 - [x] 144. meta.json embeds the build date — a no-op rebuild busts every installed player's cache
@@ -1658,6 +1658,23 @@ an explicit no-boot entry rather than weakening `app.js`'s production boot.
 Keep fixtures local unless two or more suites truly share a stable helper; this
 task is dependency hygiene, not a test-framework rewrite. Run every suite alone
 via `?suite=<name>` and then the aggregate smoke test.
+
+*Done 2026-07-21:* dependency hygiene only, no test-framework change.
+- **`renderStatic` relocated** from `app.js` to `ui.js` (the import-safe UI module,
+  which already had the `el` helper; added a `parseXml` import from data.js — no
+  cycle, data.js imports only state.js). `app.js` now imports it from ui.js for the
+  rules modal; `previewProse`'s "sibling" comment in render.js updated to point at
+  `ui.renderStatic`. So **no test suite imports the side-effectful `app.js` any more**
+  — its unused `renderStatic` import is gone from six suites, and the one genuine
+  user (economy) imports it from ui.js.
+- **Every suite pruned to the symbols it actually uses** (a zero-occurrence report
+  drove the cuts, so only truly-unreferenced imports were removed — nothing used
+  could break). The flagship corpus suite drops from nine modules to three
+  (`data`, `GameState`, `Story`); the others shed the copy-pasted whole-harness
+  block (unused combat/market/tts/state symbols, etc.).
+Fixtures left local (each suite still rebuilds its own). No new files, so
+sw.js/README module tables are unchanged. Every suite passes alone via
+`?suite=<name>` and the aggregate smoke is `RESULT ALL PASS pass=1493`.
 
 ---
 

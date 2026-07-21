@@ -1,6 +1,7 @@
 // ui.js — reusable UI: dice animation, Adventure Sheet, modals, toasts.
 
 import { ABILITIES, ABILITY_LABEL, rankTitle, ordinal, SHIP_TYPES, canonShipType } from './rules.js';
+import { parseXml } from './data.js';
 
 // ---- dice animation --------------------------------------------------------
 export function animateDice(container, small = false) {
@@ -272,6 +273,45 @@ export function renderSheet(state, container, opts = {}) {
     container.appendChild(sectionTitle('Resurrection'));
     container.appendChild(chipList(d.resurrections.map((r) => r.god ? `${r.god}` : `Book ${r.book} §${r.section}`)));
   }
+}
+
+// Minimal read-only renderer for the rules section XML — used by the rules modal (app.js)
+// and exercised directly by the headless tests. Lives here (an import-safe UI module) rather
+// than in app.js, so no caller needs the side-effectful app entry module for it. (tasks 65, 164)
+export function renderStatic(xml) {
+  const wrap = el('div');
+  if (!xml) { wrap.textContent = 'Rules unavailable.'; return wrap; }
+  const root = parseXml(xml);
+  const walk = (node, parent) => {
+    Array.from(node.childNodes).forEach((n) => {
+      if (n.nodeType === Node.TEXT_NODE) { const t = n.nodeValue.replace(/\s+/g, ' '); if (t.trim()) parent.appendChild(document.createTextNode(t)); return; }
+      if (n.nodeType !== Node.ELEMENT_NODE) return;
+      const tag = n.tagName.toLowerCase();
+      if (tag === 'p') { const p = el('p'); walk(n, p); parent.appendChild(p); }
+      else if (/^h[1-6]$/.test(tag)) {
+        // A heading that is a direct child of a <tr> is a spanning header cell —
+        // rendering it as <hN> would nest a heading illegally in the row
+        // (rules/QuickRules.xml: <tr><h3>Quick Rules</h3></tr>). Emit a <th> that
+        // spans the table's widest row; outside a table it stays a real heading. (task 65)
+        if (parent.tagName === 'TR') {
+          const th = el('th');
+          let cols = 1;
+          const srcTable = n.closest && n.closest('table');
+          if (srcTable) srcTable.querySelectorAll('tr').forEach((tr) => { const c = tr.querySelectorAll('td, th').length; if (c > cols) cols = c; });
+          if (cols > 1) th.colSpan = cols;
+          walk(n, th); parent.appendChild(th);
+        } else { const h = el(tag); walk(n, h); parent.appendChild(h); }
+      }
+      else if (tag === 'b') { const b = el('strong'); walk(n, b); parent.appendChild(b); }
+      else if (tag === 'i') { const i = el('em'); walk(n, i); parent.appendChild(i); }
+      else if (tag === 'table') { const t = el('table', 'book-table'); walk(n, t); parent.appendChild(t); }
+      else if (tag === 'tr') { const r = el('tr'); walk(n, r); parent.appendChild(r); }
+      else if (tag === 'td') { const d = el('td'); walk(n, d); parent.appendChild(d); }
+      else walk(n, parent);
+    });
+  };
+  walk(root, wrap);
+  return wrap;
 }
 
 // ---- helpers ---------------------------------------------------------------

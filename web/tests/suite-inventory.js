@@ -1,14 +1,12 @@
 // FL test suite — adventure sheet, afflictions, items, markets, ships, blessings, RNG/expr
 // Extracted verbatim from web/_test.html run() lines 930-2036 (task 120).
 import * as data from '../js/data.js';
-import { GameState, readSlotData, importSave, loadSlotMeta, deleteSlot, makeItem, nextFreeSlot, sanitizeData, currencyAward, splitItemName } from '../js/state.js';
+import { GameState, importSave, deleteSlot, makeItem, nextFreeSlot, sanitizeData } from '../js/state.js';
 import * as eng from '../js/engine.js';
-import { fightRound, makeFight, groupFightRound, isDefeated, useWrathBlessing, useDefenceBlessing, rerollAttack } from '../js/combat.js';
-import { goodsFrom, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo, canUpgradeCrew, payChoiceCost } from '../js/market.js';
-import { Story, previewProse } from '../js/render.js';
-import { Narrator } from '../js/tts.js';
+import { makeFight } from '../js/combat.js';
+import { goodsFrom, buyTrade, applyInlineBuy } from '../js/market.js';
+import { Story } from '../js/render.js';
 import { renderSheet } from '../js/ui.js';
-import { renderStatic } from '../js/app.js';
 
 export async function run(ctx) {
   const { ok, parse } = ctx;

@@ -1,17 +1,13 @@
 // FL test suite — travel gates, transfers, returns, curse lift, blessing veto, reroll storm
 // Extracted verbatim from web/_test.html run() lines 4350-4891 (task 120).
 import * as data from '../js/data.js';
-import { GameState, readSlotData, importSave, loadSlotMeta, deleteSlot, makeItem, nextFreeSlot, sanitizeData, currencyAward, splitItemName } from '../js/state.js';
+import { GameState, makeItem, sanitizeData } from '../js/state.js';
 import * as eng from '../js/engine.js';
-import { fightRound, makeFight, groupFightRound, isDefeated, useWrathBlessing, useDefenceBlessing, rerollAttack } from '../js/combat.js';
-import { goodsFrom, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo, canUpgradeCrew, payChoiceCost } from '../js/market.js';
-import { Story, previewProse } from '../js/render.js';
+import { Story } from '../js/render.js';
 import * as rules from '../js/render-rules.js';
 import * as gates from '../js/render-gates.js';
 import * as visit from '../js/visit-state.js';
-import { Narrator } from '../js/tts.js';
 import { renderSheet } from '../js/ui.js';
-import { renderStatic } from '../js/app.js';
 
 export async function run(ctx) {
   const { ok, parse } = ctx;

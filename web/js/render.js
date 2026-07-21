@@ -124,8 +124,8 @@ const TAG_RENDERERS = {
 // Render a section's prose READ-ONLY for the <sectionview> oracle (§5.114): walk the
 // parsed element keeping paragraphs and inline emphasis, and for every game tag just
 // recurse into its words — so no effect is applied, no control is armed and the player's
-// state/visit is untouched. (A deliberate sibling of app.renderStatic, kept here so the
-// view layer needn't import the app shell.) (task 101)
+// state/visit is untouched. (A deliberate sibling of ui.renderStatic, kept here so the
+// view layer needn't import the app shell.) (tasks 101, 164)
 export function previewProse(sectionEl) {
   const wrap = document.createElement('div');
   wrap.className = 'sectionview-prose';

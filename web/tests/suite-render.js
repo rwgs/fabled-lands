@@ -1,14 +1,13 @@
 // FL test suite — render & interaction: rolls, choices, fights, pays, blessings, choose-one
 // Extracted verbatim from web/_test.html run() lines 514-913 (task 120).
 import * as data from '../js/data.js';
-import { GameState, readSlotData, importSave, loadSlotMeta, deleteSlot, makeItem, nextFreeSlot, sanitizeData, currencyAward, splitItemName } from '../js/state.js';
+import { GameState, makeItem } from '../js/state.js';
 import * as eng from '../js/engine.js';
-import { fightRound, makeFight, groupFightRound, isDefeated, useWrathBlessing, useDefenceBlessing, rerollAttack } from '../js/combat.js';
-import { goodsFrom, buyTrade, sellTrade, applyInlineBuy, buyOptions, sellInlineItem, sellCargo, canUpgradeCrew, payChoiceCost } from '../js/market.js';
-import { Story, previewProse } from '../js/render.js';
+import { fightRound } from '../js/combat.js';
+import { buyOptions, payChoiceCost } from '../js/market.js';
+import { Story } from '../js/render.js';
 import { Narrator } from '../js/tts.js';
-import { renderSheet, modal } from '../js/ui.js';
-import { renderStatic } from '../js/app.js';
+import { modal } from '../js/ui.js';
 
 export async function run(ctx) {
   const { ok, parse } = ctx;
