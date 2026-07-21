@@ -63,16 +63,29 @@ jobs:
             --user-data-dir="$UDD" \
             "http://localhost:8848/web/_test.html" > "$DOM" || true
 
+          # Decide the verdict from the FIRST extracted result line only. --dump-dom
+          # includes _test.html's inline script SOURCE, which carries the literal
+          # "RESULT FATAL pass=0 fail=1" (the bootstrap's provisional-fatal string); a
+          # whole-dump `grep -q 'RESULT FATAL'` therefore matched on every genuinely
+          # failing run and misreported an ordinary assertion failure as a bootstrap
+          # abort. The live verdict lives in <pre id="results"> at the very top of
+          # <body>, so it is always the first match; the source literal only wins when
+          # #results never populated — a true hang, correctly a FATAL. (task 142)
           echo "----- result -----"
-          grep -oE 'RESULT (ALL PASS|FAILURES|FATAL) pass=[0-9]+ fail=[0-9]+' "$DOM" | head -1 || echo "(no RESULT line — the suite did not run)"
-          if grep -q 'RESULT ALL PASS' "$DOM"; then
-            echo "✓ Smoke suite passed."
-          elif grep -q 'RESULT FATAL' "$DOM"; then
-            echo "✗ Smoke suite aborted before running (module parse/bootstrap error, e.g. a duplicate top-level const):"
-            grep -oE 'FATAL [^<]{0,160}' "$DOM" | head -2 || true
-            exit 1
-          else
-            echo "✗ Smoke suite failed. First FAIL lines:"
-            grep -oE 'FAIL [^<]{0,160}' "$DOM" | head -50 || true
-            exit 1
-          fi
+          RESULT_LINE="$(grep -oE 'RESULT (ALL PASS|FAILURES|FATAL) pass=[0-9]+ fail=[0-9]+' "$DOM" | head -1 || true)"
+          echo "${RESULT_LINE:-(no RESULT line — the suite did not run)}"
+          case "$RESULT_LINE" in
+            "RESULT ALL PASS"*)
+              echo "✓ Smoke suite passed." ;;
+            "RESULT FATAL"*)
+              echo "✗ Smoke suite aborted before running (module parse/bootstrap error, e.g. a duplicate top-level const):"
+              grep -oE 'FATAL [^<]{0,160}' "$DOM" | head -2 || true
+              exit 1 ;;
+            "RESULT FAILURES"*)
+              echo "✗ Smoke suite failed. First FAIL lines:"
+              grep -oE 'FAIL [^<]{0,160}' "$DOM" | head -50 || true
+              exit 1 ;;
+            *)
+              echo "✗ No RESULT line — the suite did not run (server down, wrong path, or a hang)."
+              exit 1 ;;
+          esac

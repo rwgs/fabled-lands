@@ -45,7 +45,7 @@ the tasks were filed, not work order).
 then real-but-rare player-facing bugs, a11y + info UX, divergences/polish, and
 the latent no-corpus-trigger items last. See the Review log.*
 
-- [ ] 142. CI's smoke verdict greps the whole DOM dump — failing runs are misdiagnosed as bootstrap FATALs
+- [x] 142. CI's smoke verdict greps the whole DOM dump — failing runs are misdiagnosed as bootstrap FATALs
 - [ ] 143. A failing `ok()` fired after the report is silently lost — a latent silent-pass vector
 - [ ] 144. meta.json embeds the build date — a no-op rebuild busts every installed player's cache
 - [ ] 149. A priced sail choice pays before the ship chooser — an abandoned chooser eats the payment
