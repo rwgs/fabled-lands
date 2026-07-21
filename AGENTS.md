@@ -14,7 +14,9 @@ combat, markets, ships, live adventure sheet). Plain HTML/CSS/ES modules —
   `rules/` by the build. **Never hand-edit them;** change the XML and rebuild.
 - **`web/js/*.js`** — the app (vanilla ES modules; see the module table in `README.md`).
 - **`rules/`** — the original JaFL XML spec, for reference: `JaFL-XML-Tags.html`
-  (full tag list), `JaFL-XML-Intro.html`, `Rules.xml`, `QuickRules.xml`.
+  (full tag list), `JaFL-XML-Intro.html`, `Rules.xml`, `QuickRules.xml`. The two
+  `.html` docs also have readable Markdown copies (`JaFL-XML-Tags.md`,
+  `JaFL-XML-Intro.md`) — prefer those for reading.
 - **`java-engine/`** — the original Java engine (JaFL). **Reference only — never
   edit it and never copy its code.** The JS rules are a clean-room
   reimplementation (licensing: see `NOTICE`).
