@@ -50,7 +50,7 @@ the latent no-corpus-trigger items last. See the Review log.*
 - [x] 144. meta.json embeds the build date — a no-op rebuild busts every installed player's cache
 - [x] 149. A priced sail choice pays before the ship chooser — an abandoned chooser eats the payment
 - [x] 148. undo() leaves a stale return frame — a post-undo `<return>` re-enters a pre-undo visit
-- [ ] 138. Offline navigations with a query string bypass the service-worker cache
+- [x] 138. Offline navigations with a query string bypass the service-worker cache
 - [ ] 153. Accessibility quick wins: aria-live for toasts/rolls/fight log; dialog semantics + Escape for modals
 - [ ] 139. The Adventure Sheet never shows foreign-currency balances
 - [ ] 135. Renouncing a god keeps that god's resurrection deal

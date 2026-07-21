@@ -756,6 +756,31 @@ export async function run(ctx) {
       ok('task64: every precached asset URL is fetchable', missing.length === 0, 'missing: ' + missing.join(', '));
     }
 
+    // --- task 138: an offline navigation carrying a query string must still resolve to ---
+    // the cached shell. The precache stores the query-less shell ('./', './index.html'), so
+    // an exact match on ./?seed=42 (README's deep-link hooks) misses; the fix retries a
+    // navigation with { ignoreSearch: true }, which matches by dropping the search string.
+    // Assert the sw.js source contract plus the URL-normalisation contract ignoreSearch
+    // implements (a live-CacheStorage round-trip hangs under headless Chrome and is left to
+    // the manual offline test the task also prescribes).
+    { // block-scoped
+      const swSrc138 = await (await fetch('./sw.js')).text();
+      ok('task138: sw.js retries a navigation request with ignoreSearch',
+         /req\.mode === 'navigate'.*ignoreSearch: true/.test(swSrc138),
+         (swSrc138.match(/req\.mode === 'navigate'[^\n]*/) || [])[0]);
+      // The precached shell keys carry no query; only ./ and ./index.html back a navigation.
+      const shellKeys = [...swSrc138.matchAll(/'(\.\/(?:index\.html)?)'/g)].map((m) => m[1]);
+      ok('task138: the precache still stores the query-less shell keys',
+         shellKeys.includes('./') && shellKeys.includes('./index.html'), shellKeys.join(','));
+      // ignoreSearch matches by comparing URLs without their search string: a deep-link
+      // navigation differs from the shell key ONLY by that search, so dropping it matches.
+      const shellUrl = new URL('./', location.href).href;
+      const navUrl = new URL('./?seed=42', location.href);
+      ok('task138: a query-string navigation differs from the shell only by its search',
+         navUrl.href !== shellUrl && (navUrl.origin + navUrl.pathname) === shellUrl,
+         navUrl.href + ' vs ' + shellUrl);
+    }
+
     // --- task 33: narrate sections whose prose is bare text (no <p> wrapper) ---
     { // block-scoped
       const nar = new Narrator();

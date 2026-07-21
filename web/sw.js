@@ -105,7 +105,13 @@ self.addEventListener('fetch', (event) => {
 
   // Cache-first, falling back to network then caching the result.
   event.respondWith(
-    caches.match(req).then((cached) => {
+    caches.match(req).then(async (cached) => {
+      // A navigation carrying a query string (./?seed=42, ./?demo=1.10 — README's deep-link
+      // hooks) won't key-match the query-less precached shell ('./', './index.html'), so an
+      // exact match misses and, offline, the network fetch below rejects — leaving a
+      // network-error page. Retry ignoring the search string so such deep links resolve to
+      // the cached shell offline. Installed launches (start_url "./") already match. (task 138)
+      if (!cached && req.mode === 'navigate') cached = await caches.match(req, { ignoreSearch: true });
       if (cached) return cached;
       return fetch(req).then((res) => {
         if (res.ok && (res.type === 'basic')) {
