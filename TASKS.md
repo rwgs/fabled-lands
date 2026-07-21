@@ -55,7 +55,7 @@ the latent no-corpus-trigger items last. See the Review log.*
 - [x] 139. The Adventure Sheet never shows foreign-currency balances
 - [x] 135. Renouncing a god keeps that god's resurrection deal
 - [x] 136. Engine grab-bag #2: `transfer tenth=`, named-cargo loss quantity, `effect description=`, `<set>` identifier edges, `<buy force="t">`
-- [ ] 151. The dead-end fallback counts disabled controls — an unaffordable forced payment can softlock
+- [x] 151. The dead-end fallback counts disabled controls — an unaffordable forced payment can softlock
 - [ ] 152. View-layer polish grab-bag #1: begin() scaffold duplication, modal close handle, demo dead end, TTS nits, buy-parse duplication
 - [ ] 145. payChoiceCost validates a tag/wildcard item payment it can never consume *(latent — no corpus trigger)*
 - [ ] 150. renderIfChain's list path runs `<else>`/`<elseif>` unconditionally *(latent — no corpus trigger)*

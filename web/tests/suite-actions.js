@@ -114,6 +114,25 @@ export async function run(ctx) {
       ok('§4.622 builds no forced-buy gate (group-wrapped pickups are optional)', st622.buyGate === null);
     }
 
+    // --- task 151: the dead-end fallback ignores DISABLED controls ---
+    {
+      // A forced economic payment the player can't afford renders a disabled Pay button and
+      // blocks the rest of the section; a decline goto sitting AFTER it never renders. The
+      // only rendered control is that disabled Pay — which must NOT count as a way forward,
+      // so the "accept your fate" fallback fires instead of stranding the player on Undo.
+      const g151 = GameState.create({ name:'D151', gender:'m', profession:'Warrior', book:1, adv });
+      g151.data.shards = 0;
+      const c151 = document.createElement('div');
+      const st151 = new Story(c151, g151, { navigate(){}, onDeath(){}, notify(){} });
+      const sec151 = parse('<section name="t151"><p>You must pay a heavy toll. <lose shards="9999">Pay the toll</lose>.</p><p>Or turn back: <goto section="142" force="f"/>.</p></section>');
+      st151.begin(sec151, 1, 't151');
+      const payBtn = c151.querySelector('.pay-action');
+      const goto142 = Array.from(c151.querySelectorAll('.goto')).find((b) => b.textContent.trim() === '142');
+      ok('§t151 renders an unaffordable, disabled forced payment', !!payBtn && payBtn.disabled);
+      ok('§t151 the post-payment decline goto is blocked (not rendered)', !goto142);
+      ok('§t151 the dead-end fallback fires when only a disabled control remains', !!c151.querySelector('.end-fate'));
+    }
+
     // --- task 107: <transfer> is a player action (chooser/filter/price/force) ---
     { // block-scoped
       // §4.456: the +1 offering is a price-gated transfer — it must NOT auto-run on

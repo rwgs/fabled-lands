@@ -510,9 +510,14 @@ f
 
     // Dead-end fallback: a fully-resolved section offering no way forward is a
     // narrative death (the original game exposed an "Extra Choice: Death" for this).
-    // Controls inside an untaken (grayed) branch don't count — they're disabled.
+    // Controls inside an untaken (grayed) branch don't count — they're disabled — and
+    // neither does a DISABLED control: an unaffordable forced payment blocks the rest of
+    // the section and renders its Pay button disabled, which must not read as a way
+    // forward (else the section softlocks to Undo-only). A live fight/roll/buy/transfer
+    // gate always leaves its Attack/Roll/action button ENABLED, so this never mis-fires
+    // during one. (task 151)
     const controls = Array.from(flow.querySelectorAll('.goto, .choice, .btn-roll, .btn-secondary, .btn-mini, .fight, .group-action, .pay-action, .reward-pick'))
-      .filter((c) => !c.closest('.cond-inactive'));
+      .filter((c) => !c.closest('.cond-inactive') && !c.disabled);
     if (!controls.length && !this.state.isDead()) {
       const end = document.createElement('button');
       end.className = 'goto goto-primary end-fate';
