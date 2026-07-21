@@ -213,8 +213,11 @@ $allTitles = [ordered]@{}
 foreach ($k in ($titles.Keys | Sort-Object)) { $allTitles["$k"] = $titles[$k] }
 
 # ---- Meta -------------------------------------------------------------------
+# No build date here: nothing in web/js reads it, and a per-run timestamp would
+# make a no-op rebuild (unchanged books/rules) produce a different meta.json, a
+# new version stamp, and a new service-worker cache key -- forcing every installed
+# player to re-download a byte-identical app. meta.json is now purely content. (task 144)
 $meta = [ordered]@{
-    generated  = (Get-Date).ToString('yyyy-MM-dd')
     books      = $bookMeta
     titles     = $allTitles
     rules      = $rulesXml
