@@ -173,6 +173,13 @@ export class Story {
       const frame = this._captureReturnFrame();
       this._applyLeaveHooks();
       this._returnFrame = frame;
+      // Persistence audit (task 161): the leave hooks apply this section's todock (which
+      // autosaves through changed()) while this.section still names the source and _returnFrame
+      // still holds the source's OWN return frame — so the on-disk record stays a coherent
+      // source visit throughout the slow fetch below. The new destination frame installed just
+      // above is in-memory only and is committed atomically by begin() (which now ends in an
+      // explicit save) once the router resolves; nothing autosaves during the await, so the
+      // transition needs no separate commit here.
       rawNavigate(book, section);
     };
     this.onDeath = opts.onDeath || (() => {});
@@ -297,6 +304,14 @@ f
       const f = n.getAttribute('flag'); if (f && this.state.getFlag(f)) this.state.setFlag(f, false);
     });
     this.render();
+    // Commit the transition (task 161). The position was set by goTo() (or state.undo())
+    // BEFORE begin(), but that autosave still named the SOURCE visit; the state-clearing
+    // calls above only save incidentally, so a prose-only destination (nothing to clear,
+    // no entry effect) would make no coherent save at all — leaving {data: destination,
+    // visit: source} on disk, which sanitizeVisit rejects on reload (losing the exact ctx +
+    // return frame). Persist once here, now that the destination's identity/ctx/frame are
+    // fully established, so every entry path leaves position and visit agreeing on disk.
+    this.state.save();
   }
 
   // Re-draw the current visit after an interactive action, then persist it. An action's own
@@ -338,6 +353,15 @@ f
   // and the one-level return frame. Null before the first section (nothing to resume).
   serializeVisit() {
     if (this.section == null || !this.ctx) return null;
+    // Atomicity guard (task 161): a save can fire mid-transition — state.goTo() sets the
+    // destination position and autosaves BEFORE begin() swaps this Story onto it, and
+    // state.undo()/restoreReturn() move the position while the Story still names the old
+    // visit. Serialising in that window would pair the new position with the OLD visit — a
+    // mismatch sanitizeVisit drops on reload, losing the exact ctx + return frame. Emit no
+    // record until the Story identity and the persisted position agree; the transition's own
+    // explicit begin()/goBack commit writes the coherent record the instant they do.
+    const d = this.state && this.state.data;
+    if (!d || String(d.section) !== String(this.section) || Number(d.book) !== Number(this.book)) return null;
     return {
       v: 1,
       book: this.book,
@@ -415,6 +439,11 @@ f
     this.state.setEntryTicks(probeState.entryTickCount());
     this._returnFrame = null;
     this.render();
+    // Commit the migrated visit (task 161). The blob we loaded from carried a legacy /
+    // rejected visit record; adopting the probe's ctx above is a bare field assignment that
+    // fires no changed(). Save once here so the coherent {data: section, visit: migrated ctx}
+    // is on disk immediately, instead of leaving the stale record until the next action.
+    this.state.save();
   }
 
   render() {
@@ -1030,9 +1059,14 @@ f
       if (prev) this.navigate(Number(prev.book), prev.section);
       return;
     }
-    this._applyLeaveHooks();          // leave the temporary detour section
+    this._applyLeaveHooks();          // leave the temporary detour section (uses ITS todock)
+    // Restore the Story's visit identity to the source section BEFORE restoreReturn(), whose
+    // changed() autosaves. serializeVisit reads this.section/ctx/_returnFrame, so establishing
+    // them first makes that autosave pair the restored source position with the source's own
+    // ctx and a null frame — coherent. Doing restoreReturn() first (as before) saved the
+    // restored source position paired with the DETOUR's still-live visit, a mismatch
+    // sanitizeVisit rejects on reload, dropping the exact return state. (task 161)
     this._returnFrame = null;         // one level only — consume it
-    this.state.restoreReturn(frame);  // pop history + restore position/vars/location (no goTo)
     this.book = frame.book;
     this.section = frame.section;
     this.sectionEl = frame.sectionEl;
@@ -1040,6 +1074,7 @@ f
     this.ctx.usedSource = frame.usedSource; // the source action taken (spent unless revisit="t")
     this.sectionTodock = frame.sectionTodock;
     this.deferredCleanups = new Map(); // rebuilt as the restored section re-renders (task 88)
+    this.state.restoreReturn(frame);  // pop history + restore position/vars/location (autosaves — now coherent)
     this.render();
   }
 

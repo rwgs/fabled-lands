@@ -750,6 +750,169 @@ export async function run(ctx) {
       Math.random = rnd155;
     }
 
+    // --- task 161: position + visit are committed atomically at every entry path ---
+    // app.navigate() runs state.goTo() (which autosaves while the Story still names the
+    // SOURCE) then story.begin(); a prose-only destination used to make no coherent second
+    // save, leaving {data: destination, visit: source} on disk — a mismatch sanitizeVisit
+    // rejects on reload, dropping the exact ctx + one-level return frame (the task-110 class
+    // of repeated entry effects / lost rolls / history bounces). begin()/resumeStale now
+    // commit the fully established visit, goBack() restores the Story identity BEFORE its
+    // autosave, and serializeVisit refuses to write while position and Story disagree — so no
+    // record is ever persisted whose identity does not match data.book/section.
+    {
+      // A persisted record is coherent when it is absent, or its identity matches the position.
+      const coherent = (g) => {
+        const v = g.data.visit;
+        return v == null || (String(v.section) === String(g.data.section) && Number(v.book) === Number(g.data.book));
+      };
+      const allMatch = (writes) => writes.every((w) => w.v == null
+        || (String(w.v.section) === String(w.sec) && Number(w.v.book) === Number(w.bk)));
+
+      // Scenario 1 — A → a prose-only B (no entry effects, nothing to clear) carrying <return>.
+      {
+        const secA = parse('<section name="A161"><p>Source.</p><choices><choice section="B161">GoB</choice></choices></section>');
+        const secB = parse('<section name="B161"><p>Prose only.</p><return>Back</return></section>');
+        const secs = { A161: secA, B161: secB };
+        const g = GameState.create({ name:'T161a', gender:'m', profession:'Warrior', book:1, adv });
+        const cont = document.createElement('div');
+        let story;
+        const enter = (b, s) => { g.goTo(b, s); story.begin(secs[String(s)], b, s); };
+        story = new Story(cont, g, { navigate: enter, onDeath(){}, notify(){} });
+        g.setVisitProvider(() => story.serializeVisit());
+        // Capture the (visit, position) pair persisted at every save across the whole transition.
+        const writes = [];
+        const origSave = g.save.bind(g);
+        g.save = function () { const r = origSave(); writes.push({ v: g.data.visit, sec: g.data.section, bk: g.data.book }); return r; };
+
+        enter(1, 'A161');
+        Array.from(cont.querySelectorAll('.choice')).find((b) => /GoB/.test(b.textContent)).click(); // A → B via the wrapper
+        g.save = origSave;
+
+        ok('task161-1: after A → prose-only B the persisted visit names B (matches data.section)',
+           coherent(g) && g.data.visit && g.data.visit.section === 'B161',
+           'visit=' + (g.data.visit && g.data.visit.section) + ' data=' + g.data.section);
+        ok('task161-1: every written record pairs its visit with the matching position (no mismatch)',
+           allMatch(writes), 'writes=' + JSON.stringify(writes.map((w) => (w.v && w.v.section) + '@' + w.sec)));
+        ok('task161-1: the committed B record carries the one-level return frame back to A',
+           !!g.data.visit && !!g.data.visit.frame && g.data.visit.frame.section === 'A161');
+
+        // The record survives the storage sanitizer and resumes the EXACT visit (frame intact),
+        // so <return> restores A rather than falling back to a fresh navigation.
+        const g2 = new GameState(sanitizeData(JSON.parse(JSON.stringify({ ...g.data }))));
+        ok('task161-1: the coherent B visit survives sanitize (not rejected as a mismatch)',
+           !!g2.data.visit && g2.data.visit.section === 'B161' && !!g2.data.visit.frame);
+        const cont2 = document.createElement('div');
+        let story2;
+        story2 = new Story(cont2, g2, { navigate: (b, s) => { g2.goTo(b, s); story2.begin(secs[String(s)], b, s); }, onDeath(){}, notify(){} });
+        g2.setVisitProvider(() => story2.serializeVisit()); // the app installs this on load
+        const frame2 = story2.deserializeFrame(g2.data.visit.frame, secA);
+        story2.resume(secB, 1, 'B161', g2.data.visit, frame2);
+        ok('task161-1: reload resumes B with the return frame restored', story2.section === 'B161' && !!story2._returnFrame);
+        Array.from(cont2.querySelectorAll('.goto')).find((b) => /Back/.test(b.textContent)).click(); // <return>
+        ok('task161-1: post-reload <return> restores the source A (no fresh-visit fallback)',
+           story2.section === 'A161', 'sec=' + story2.section);
+        ok('task161-1: goBack left position and visit agreeing on disk',
+           coherent(g2) && g2.data.visit && g2.data.visit.section === 'A161',
+           'visit=' + (g2.data.visit && g2.data.visit.section) + ' data=' + g2.data.section);
+      }
+
+      // Scenario 2 — B → return to A restores A's resolved roll/action memo, and goBack commits
+      // a coherent record (its restoreReturn autosave now pairs A's position with A's ctx).
+      {
+        window.__FL_INSTANT_DICE__ = true;
+        const settle = () => new Promise((r) => setTimeout(r, 30));
+        const rnd = Math.random;
+        const secA = parse('<section name="A2r"><difficulty ability="COMBAT" level="1" var="m"/><success><p>WON-A</p></success><failure><p>LOST-A</p></failure><choices><choice section="B2r">GoB</choice></choices></section>');
+        const secB = parse('<section name="B2r"><p>Detour.</p><return>Back</return></section>');
+        const secs = { A2r: secA, B2r: secB };
+        const g = GameState.create({ name:'T161b', gender:'m', profession:'Warrior', book:1, adv });
+        g.data.abilities.combat = 8;
+        const cont = document.createElement('div');
+        let story;
+        const enter = (b, s) => { g.goTo(b, s); story.begin(secs[String(s)], b, s); };
+        story = new Story(cont, g, { navigate: enter, onDeath(){}, notify(){} });
+        g.setVisitProvider(() => story.serializeVisit());
+
+        enter(1, 'A2r');
+        Math.random = () => 0.99; // level 1 vs COMBAT 8 → success regardless of the dice
+        cont.querySelector('.btn-roll').click(); await settle();
+        Math.random = rnd;
+        const rollsAtA = story.ctx.rolls.size;
+        ok('task161-2: §A2r resolved its roll before leaving',
+           rollsAtA >= 1 && story.ctx.wroteVars.has('m'), 'rolls=' + rollsAtA);
+
+        Array.from(cont.querySelectorAll('.choice')).find((b) => /GoB/.test(b.textContent)).click(); // A → B
+        ok('task161-2: at B the persisted visit is coherent and holds A\'s frame',
+           coherent(g) && g.data.visit && g.data.visit.section === 'B2r' && g.data.visit.frame && g.data.visit.frame.section === 'A2r');
+
+        const writes = [];
+        const origSave = g.save.bind(g);
+        g.save = function () { const r = origSave(); writes.push({ v: g.data.visit, sec: g.data.section, bk: g.data.book }); return r; };
+        Array.from(cont.querySelectorAll('.goto')).find((b) => /Back/.test(b.textContent)).click(); // <return> B → A
+        g.save = origSave;
+
+        ok('task161-2: <return> restored A with its resolved roll memo intact',
+           story.section === 'A2r' && story.ctx.rolls.size === rollsAtA && story.ctx.wroteVars.has('m'),
+           'sec=' + story.section + ' rolls=' + story.ctx.rolls.size);
+        ok('task161-2: goBack persisted a coherent A visit (position + visit agree)',
+           coherent(g) && g.data.visit && g.data.visit.section === 'A2r',
+           'visit=' + (g.data.visit && g.data.visit.section) + ' data=' + g.data.section);
+        ok('task161-2: every write during the return pairs its visit with the matching position',
+           writes.length >= 1 && allMatch(writes),
+           'writes=' + JSON.stringify(writes.map((w) => (w.v && w.v.section) + '@' + w.sec)));
+
+        // The restored A survives a reload with its roll still resolved (not reset to a re-roll).
+        const g2 = new GameState(sanitizeData(JSON.parse(JSON.stringify({ ...g.data }))));
+        ok('task161-2: the restored A visit survives sanitize with the roll resolved',
+           !!g2.data.visit && g2.data.visit.section === 'A2r'
+           && g2.data.visit.ctx.rolls.some((e) => String(e[0]).startsWith('roll@'))
+           && g2.data.visit.ctx.wroteVars.includes('m'));
+        window.__FL_INSTANT_DICE__ = false;
+        Math.random = rnd;
+      }
+
+      // Scenario 3 — undo() lands on a save-free (prose-only) section. state.undo() autosaves
+      // while the Story still names the pre-undo section; begin() on the reverted section now
+      // commits the coherent record so the persisted visit names it (not the undone one).
+      {
+        const secA = parse('<section name="A3u"><p>Save-free.</p><choices><choice section="B3u">GoB</choice></choices></section>');
+        const secB = parse('<section name="B3u"><gain shards="5"/><p>B.</p></section>');
+        const secs = { A3u: secA, B3u: secB };
+        const g = GameState.create({ name:'T161c', gender:'m', profession:'Warrior', book:1, adv });
+        g.data.shards = 0;
+        const cont = document.createElement('div');
+        let story;
+        const enter = (b, s) => { g.goTo(b, s); g.snapshot(); story.begin(secs[String(s)], b, s); };
+        story = new Story(cont, g, { navigate: enter, onDeath(){}, notify(){} });
+        g.setVisitProvider(() => story.serializeVisit());
+        enter(1, 'A3u');
+        Array.from(cont.querySelectorAll('.choice')).find((b) => /GoB/.test(b.textContent)).click(); // A3 → B3 (wrapper)
+        ok('task161-3: entered B3 (shards gained)', story.section === 'B3u' && g.data.shards === 5);
+
+        // Mirror app.undo(): revert the timeline, drop the stale frame, re-enter via begin().
+        const writes = [];
+        const origSave = g.save.bind(g);
+        g.save = function () { const r = origSave(); writes.push({ v: g.data.visit, sec: g.data.section, bk: g.data.book }); return r; };
+        const target = g.undo();
+        story._returnFrame = null;
+        story.begin(secs[String(target.section)], target.book, target.section);
+        g.save = origSave;
+
+        ok('task161-3: undo reverted to the save-free A3 (entry gain rolled back)',
+           story.section === 'A3u' && g.data.shards === 0, 'sec=' + story.section + ' shards=' + g.data.shards);
+        ok('task161-3: the persisted visit names the reverted section (not the undone B3)',
+           coherent(g) && g.data.visit && g.data.visit.section === 'A3u',
+           'visit=' + (g.data.visit && g.data.visit.section) + ' data=' + g.data.section);
+        ok('task161-3: no write during undo pairs a foreign visit with the reverted position',
+           allMatch(writes), 'writes=' + JSON.stringify(writes.map((w) => (w.v && w.v.section) + '@' + w.sec)));
+
+        // The reverted A3 visit survives a reload (coherent record, resumable — not a mismatch).
+        const g2 = new GameState(sanitizeData(JSON.parse(JSON.stringify({ ...g.data }))));
+        ok('task161-3: the reverted A3 visit survives sanitize (resumable, not a mismatch)',
+           !!g2.data.visit && g2.data.visit.section === 'A3u');
+      }
+    }
+
     // --- task 117: priced equipment/cargo losses can't arm a reward without taking payment ---
     // §2.90 forfeits a weapon OR armour (price=x) to renounce Elnir; §3.569 trades a named
     // Cargo Unit (price=x) for two textiles. An ineligible forfeit button (no such

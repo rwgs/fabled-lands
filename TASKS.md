@@ -7,7 +7,7 @@ the tasks were filed, not work order).
 
 **HIGH**
 
-- [ ] 161. Visit transitions can persist a destination position with the source visit memo — reload drops exact return/undo state
+- [x] 161. Visit transitions can persist a destination position with the source visit memo — reload drops exact return/undo state
 - [x] 123. "Immunity to Disease and Poison" is stored under two un-aliased names — the blessing never protects
 - [x] 124. Loading/importing a save clamps Stamina to the written max — aura Stamina (ring of ultimate power) is silently stripped
 - [x] 120. Split the 4,790-line single-scope browser test into focused ES-module suites *(before the test-heavy 115–117 chain)*
@@ -1515,6 +1515,36 @@ entry effects to call `changed()`. Add save-slot round trips for (1) A → a
 prose-only B with `<return>`, (2) B → return to A with A's resolved roll/action
 memo intact, and (3) undo to a save-free section; assert every written visit's
 identity matches `data.book/section`. Web-only; stamp and run all sections.
+
+*Done 2026-07-21:* made every entry path commit position + visit atomically, in
+render.js:
+- **begin()** now ends with an explicit `this.state.save()` (the "one explicit
+  transition commit"). goTo()/undo() set the position and autosave while the Story
+  still names the source, and begin()'s state-clearing calls only save
+  incidentally — so a prose-only destination previously made no coherent save,
+  leaving `{data: destination, visit: source}` on disk. The commit persists the
+  fully-established destination visit. This also cures undo() (its correcting
+  begin() now commits) with no app.js change.
+- **resumeStale()** ends with the same commit, so a legacy/rejected-record
+  migration persists its adopted ctx immediately rather than leaving the stale
+  record until the next action.
+- **goBack()** now restores the Story identity (book/section/sectionEl/ctx/frame/
+  todock) BEFORE `restoreReturn(frame)`, whose `changed()` autosaves — so that
+  save pairs the restored source position with the source's own ctx and a null
+  frame (coherent), instead of the detour's still-live visit. `_applyLeaveHooks()`
+  still runs first so it reads the detour's todock.
+- **serializeVisit()** gained an atomicity guard: it returns null whenever the
+  Story identity disagrees with the persisted `data.book/section` (the transient
+  goTo/undo/restoreReturn window) — so no mismatched record is *ever* written; the
+  transition's own commit writes the coherent one the instant they agree.
+- Audited the navigate wrapper: its leave-hook todock save and the source's own
+  return frame keep the on-disk record a coherent source visit throughout the slow
+  cross-book fetch; the new destination frame is in-memory only and is committed by
+  begin(). Documented, no behaviour change.
+Added three save-slot round-trip tests to `suite-actions` (task 161-1/2/3) driving
+the full wrapper/goBack/undo seams and asserting every persisted record's identity
+matches its position. Smoke `RESULT ALL PASS pass=1480`; focused `suite=actions`
+also green.
 
 ---
 
