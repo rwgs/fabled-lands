@@ -545,6 +545,16 @@ export async function run(ctx) {
       const curKvs = Array.from(curBox.querySelectorAll('.sheet-line .kv')).map((k) => k.textContent);
       ok('sheet shows a non-zero foreign balance (Mithral 15)', curKvs.some((t) => /Mithral/.test(t) && /15/.test(t)), `kvs=${JSON.stringify(curKvs)}`);
       ok('sheet hides a zero foreign balance (Scila)', !curKvs.some((t) => /Scila/.test(t)));
+
+      // task 145: a paid item="?" tags= choice must CONSUME through the same tag-aware
+      // matcher it validates with — a name-only take would validate then leave the item.
+      const gpc = GameState.create({ name: 'Pc', gender: 'm', profession: 'Warrior', book: 1, adv });
+      gpc.data.items = [];
+      gpc.addItem(makeItem('item', 'brass lantern', 0, null, ['light']));
+      const beforePc = gpc.itemCount();
+      const resPc = payChoiceCost(gpc, { pay: true, item: '?', itemTags: 'light' });
+      ok('task145: paid item="?" tags= choice validates', resPc.ok === true);
+      ok('task145: ...and actually consumes the tagged item', gpc.itemCount() === beforePc - 1 && !gpc.hasItemMatch('?', 'light'));
     }
 
     // --- save-slot exhaustion never silently overwrites slot 0 (task 4) ---

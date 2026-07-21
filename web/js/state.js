@@ -458,6 +458,11 @@ export class GameState {
    *  uses, so a <choice item="?" tags="light"> is no longer permanently locked. (task 47) */
   hasItemMatch(pattern, tags, group) { return matchItemQuery(this.data.items, pattern, tags, group).length > 0; }
 
+  /** The possessions satisfying an item= requirement (same tag/"?"/glob-aware matcher as
+   *  hasItemMatch), so a paid choice CONSUMES exactly what it VALIDATED against — a name-only
+   *  lookup would validate a `item="?" tags=…` payment then take nothing. (task 145) */
+  findItemMatch(pattern, tags, group) { return matchItemQuery(this.data.items, pattern, tags, group); }
+
   // ---- caches: named stashes / banks (money + items, lockable) --------
   // A cache is a stash the books address by name: an investment box, a bank
   // account (e.g. "MerchantBank"), a gambling pot, or a villa strongroom where

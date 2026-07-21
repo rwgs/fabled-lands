@@ -287,7 +287,9 @@ export function payChoiceCost(state, { pay, cost = 0, currency = null, foreignCo
   if (cost && have < cost) return { ok: false };
   if (item != null && !state.hasItemMatch(item, itemTags)) return { ok: false };
   if (cost) { if (foreignCoin) state.adjustCurrency(currency, -cost); else state.adjustMoney(-cost); }
-  if (item != null) { const it = state.findItems(item)[0]; if (it) state.removeItemById(it.id); }
+  // Consume through the SAME tag/"?"-aware matcher the gate validated with (task 145):
+  // a name-only findItems would silently take nothing for a `item="?" tags=…` payment.
+  if (item != null) { const it = state.findItemMatch(item, itemTags)[0]; if (it) state.removeItemById(it.id); }
   return { ok: true };
 }
 
