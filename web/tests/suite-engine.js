@@ -616,4 +616,22 @@ export async function run(ctx) {
          `chosen=${JSON.stringify(chosen)} left=${JSON.stringify(gChoose.data.resurrections)}`);
     }
 
+    // task 135: renouncing a god cancels that god's resurrection deal; a deal bought
+    // while NOT a worshipper is stored godless and survives any renouncement.
+    {
+      const gg = GameState.create({ name:'G', gender:'m', profession:'Warrior', book:1, adv });
+      gg.setGod('Tyrnai');
+      eng.buyResurrectionDeal(gg, { book:1, section:'33', text:'Tyrnai deal', god:'Tyrnai' });
+      ok('task135: a worshipper\'s deal is stamped with the god', gg.data.resurrections[0].god === 'Tyrnai');
+      gg.removeGod('Tyrnai');
+      ok('task135: renouncing the god cancels its resurrection deal', !gg.hasResurrection());
+
+      const gh = GameState.create({ name:'H', gender:'m', profession:'Warrior', book:1, adv });
+      eng.buyResurrectionDeal(gh, { book:1, section:'33', text:'godless deal', god:'Tyrnai' }); // not a worshipper
+      ok('task135: a deal bought while not worshipping is stored godless',
+         gh.hasResurrection() && gh.data.resurrections[0].god === null);
+      gh.setGod('Nagil'); gh.removeGod('Nagil'); // renounce a different god
+      ok('task135: renouncing another god leaves the godless deal', gh.hasResurrection());
+    }
+
 }

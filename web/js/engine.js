@@ -1477,7 +1477,11 @@ export function applyRest(state, perUse, cost) {
 /** Purchase a resurrection deal: pay the (optional) cost and record the deal. */
 export function buyResurrectionDeal(state, { book, section, text, god, cost = 0, supplemental = false }) {
   if (cost) state.adjustMoney(-cost);
-  state.addResurrection({ book, section, text, god: god || null, supplemental: !!supplemental });
+  // JaFL stamps the god only when the buyer worships it at purchase time; a deal
+  // bought as a non-worshipper is stored godless, so renouncing anything leaves it
+  // intact (Adventurer.addResurrection). Renounce cancels god-tied deals — task 135.
+  const dealGod = god && state.hasGod(god) ? god : null;
+  state.addResurrection({ book, section, text, god: dealGod, supplemental: !!supplemental });
 }
 
 /** Cash in a resurrection deal on death: consume the chosen deal (default the earliest)

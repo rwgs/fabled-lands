@@ -786,7 +786,14 @@ export class GameState {
     const strippedEffects = kept.length !== this.data.effects.length;
     if (i >= 0) this.data.gods.splice(i, 1);
     if (strippedEffects) this.data.effects = kept;
-    if (i >= 0 || strippedEffects) this.changed();
+    // Renouncing a god also cancels any resurrection deal tied to it — JaFL's
+    // removeAGod forfeits that god's extra life. A godless deal (god:null), bought
+    // while not a worshipper, is not tied to any god and survives. (task 135)
+    const gk = normalize(g);
+    const keptRes = this.data.resurrections.filter((r) => !(r.god && normalize(r.god) === gk));
+    const strippedRes = keptRes.length !== this.data.resurrections.length;
+    if (strippedRes) this.data.resurrections = keptRes;
+    if (i >= 0 || strippedEffects || strippedRes) this.changed();
   }
 
   hasTitle(name) { return this.data.titles.some((t) => t.name === name); }
