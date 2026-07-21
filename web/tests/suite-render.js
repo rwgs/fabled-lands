@@ -540,4 +540,18 @@ export async function run(ctx) {
       ok('152.5: buyOptions canonicalises an abbreviated cargo', opts.cargo === 'grain', `cargo=${opts.cargo}`);
       ok('152.5: buyOptions reads |-alt buytags', Array.isArray(opts.tags) && opts.tags.includes('a') && opts.tags.includes('b'));
     }
+
+    // task 150: an if/elseif/else inside a choice label is dispatched per-node via
+    // renderElement (appendChildrenList), with no cross-sibling chain state — a bare
+    // <else>/<elseif> must be inert, not rendered (and its effects run) unconditionally.
+    {
+      const g150 = GameState.create({ name:'C150', gender:'m', profession:'Warrior', book:1, adv });
+      const c150 = document.createElement('div');
+      const st150 = new Story(c150, g150, { navigate(){}, onDeath(){}, notify(){} });
+      st150.begin(parse('<section name="t150"><choices><choice section="10"><if codeword="Nope">SEEN-IF</if><else>SEEN-ELSE</else> go on</choice></choices></section>'), 1, 't150');
+      const choice150 = c150.querySelector('.choice');
+      ok('task150: the choice renders', !!choice150);
+      ok('task150: a false <if> in a choice label shows nothing', !!choice150 && choice150.textContent.indexOf('SEEN-IF') < 0);
+      ok('task150: the trailing <else> does NOT render unconditionally', !!choice150 && choice150.textContent.indexOf('SEEN-ELSE') < 0);
+    }
 }

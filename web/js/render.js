@@ -968,13 +968,17 @@ f
 
   // ---- conditionals --------------------------------------------------------
   renderIfChain(container, node, path) {
-    // Walk the if/elseif/else run. `node` is the first <if>. Its elseif/else
-    // siblings follow it in the parent; but in this corpus they are usually
-    // nested/sequential. Evaluate this node; render children if true.
+    // Per-node entry point, reached ONLY when an if/elseif/else is dispatched individually
+    // via renderElement — appendChildrenList (choice labels) and renderGroupWithRoll's child
+    // loop. There is no cross-sibling chain state here, so a bare <elseif>/<else> cannot know
+    // whether a prior branch matched: running it unconditionally would double-run a branch.
+    // A standalone <if> is a self-contained conditional and evaluates normally; <elseif>/<else>
+    // are inert on this path. The real chain semantics live in appendChildren's walker
+    // (renderConditionalBranch); the corpus has no elseif/else inside <choice>/<group>, so this
+    // only hardens a latent path. (task 150)
     const tag = node.tagName.toLowerCase();
-    if (tag === 'else') { this.appendChildren(container, node, path); return null; }
+    if (tag === 'elseif' || tag === 'else') return null;
     const ok = evaluateCondition(node, this.state);
-    // mark chain state on the element run using a data attr in ctx
     const chainKey = 'chain@' + path;
     if (ok) {
       this.ctx.applied.add(chainKey); // this branch taken
