@@ -22,7 +22,7 @@ the tasks were filed, not work order).
 
 **MEDIUM**
 
-- [ ] 134. Market sells with several candidates silently take the first match — JaFL asks which ship/item to sell
+- [x] 134. Market sells with several candidates silently take the first match — JaFL asks which ship/item to sell
 - [ ] 137. A save blob can persist without its `fl_meta` entry — the orphaned slot turns invisible and gets overwritten
 - [x] 129. Free fixed-amount `<rest stamina="N">` is infinitely repeatable — every hospitality rest heals to full
 - [x] 130. Inline `<buy>` allows one purchase per visit; JaFL's default is unlimited ("buy as many as you can afford")

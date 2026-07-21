@@ -4,7 +4,7 @@ import * as data from '../js/data.js';
 import { GameState, readSlotData, importSave, loadSlotMeta, deleteSlot, makeItem, nextFreeSlot, sanitizeData, currencyAward, splitItemName } from '../js/state.js';
 import * as eng from '../js/engine.js';
 import { fightRound, makeFight, groupFightRound, isDefeated, useWrathBlessing, useDefenceBlessing, rerollAttack } from '../js/combat.js';
-import { goodsFrom, buyTrade, sellTrade, applyInlineBuy, sellInlineItem, sellCargo, canUpgradeCrew, payChoiceCost } from '../js/market.js';
+import { goodsFrom, buyTrade, sellTrade, sellPlan, applyInlineBuy, sellInlineItem, sellCargo, canUpgradeCrew, payChoiceCost } from '../js/market.js';
 import { Story, previewProse } from '../js/render.js';
 import { isRollGate } from '../js/render-rules.js';
 import { renderGoto } from '../js/render-choices.js';
@@ -1323,6 +1323,74 @@ export async function run(ctx) {
       ok('task98: §123 revival erases possessions, money and ship', g123.itemCount() === 0 && g123.data.shards === 0 && g123.data.ships.length === 0, `items=${g123.itemCount()} sh=${g123.data.shards} ships=${g123.data.ships.length}`);
       ok('task98: §123 revival consumes the deal and revives to full Stamina (task 159)', g123.data.resurrections.length === 0 && g123.data.stamina === 20, `res=${g123.data.resurrections.length} stam=${g123.data.stamina}`);
       ok('task98: §123 revival turns to the deal section (3/351)', nav123 && nav123.b === 3 && String(nav123.s) === '351', JSON.stringify(nav123));
+    }
+
+    // --- task 134: a sell with several non-identical matches must ask which one leaves ---
+    const shipRow = () => goodsFrom(parse('<trade ship="brigantine" sell="800"/>'), 'ship', 'brigantine', 0);
+    {
+      // Two brigantines here, one laden: sellPlan flags the ambiguity, and the headless
+      // default sells the EMPTY vessel — never silently destroying a cargo-laden ship.
+      const g = GameState.create({ name:'SH', gender:'m', profession:'Warrior', book:2, adv });
+      g.data.ships = [];
+      g.addShip({ type:'brigantine', name:'Empty', crew:'poor', cargo:[], docked:null });
+      g.addShip({ type:'brigantine', name:'Laden', crew:'poor', cargo:['grain','grain'], docked:null });
+      ok('task134: two same-type ships (one laden) need a which-one choice', sellPlan(g, shipRow()).needsChoice === true);
+      const shBefore = g.data.shards;
+      const res = sellTrade(g, shipRow(), 800);
+      ok('task134: headless default sells the empty ship, the laden one survives', res.ok && g.data.ships.length === 1 && g.data.ships[0].name === 'Laden' && g.data.shards === shBefore + 800, JSON.stringify(g.data.ships.map((s) => s.name)));
+
+      // An explicit chooser names the exact vessel (headless determinism, task note).
+      const g2 = GameState.create({ name:'SH2', gender:'m', profession:'Warrior', book:2, adv });
+      g2.data.ships = [];
+      g2.addShip({ type:'brigantine', name:'Empty', crew:'poor', cargo:[], docked:null });
+      g2.addShip({ type:'brigantine', name:'Laden', crew:'poor', cargo:['grain'], docked:null });
+      sellTrade(g2, shipRow(), 800, null, { chooser: (cands) => [cands.find((s) => s.name === 'Laden')] });
+      ok('task134: an explicit chooser sells the named (laden) vessel', g2.data.ships.length === 1 && g2.data.ships[0].name === 'Empty', JSON.stringify(g2.data.ships.map((s) => s.name)));
+
+      // Two same-type EMPTY ships are interchangeable — no prompt needed.
+      const g3 = GameState.create({ name:'SH3', gender:'m', profession:'Warrior', book:2, adv });
+      g3.data.ships = [];
+      g3.addShip({ type:'brigantine', name:'Ship', crew:'poor', cargo:[], docked:null });
+      g3.addShip({ type:'brigantine', name:'Ship', crew:'poor', cargo:[], docked:null });
+      ok('task134: two identical empty ships need no choice', sellPlan(g3, shipRow()).needsChoice === false);
+    }
+
+    // A generic weapon row (sold by bonus) with a mixed rack keeps the significant weapon.
+    const wRow = () => goodsFrom(parse('<weapon bonus="1" sell="50"/>'), 'weapon', 'weapon', 1);
+    {
+      const g = GameState.create({ name:'WP', gender:'m', profession:'Warrior', book:1, adv });
+      g.data.items = [];
+      g.addItem(makeItem('weapon', 'sword', 1)); // plain bonus-1
+      g.addItem(makeItem('weapon', 'Singing Sword', 1, 'magic', ['quest'])); // special bonus-1
+      ok('task134: a mixed bonus-1 rack needs a which-one choice', sellPlan(g, wRow()).needsChoice === true);
+      const res = sellTrade(g, wRow(), 50);
+      ok('task134: headless default sells the plain weapon, the named one survives', res.ok && res.item.name === 'sword' && g.findItems('Singing Sword').length === 1 && g.findItems('sword').length === 0, JSON.stringify(g.data.items.map((i) => i.name)));
+
+      const g2 = GameState.create({ name:'WP2', gender:'m', profession:'Warrior', book:1, adv });
+      g2.data.items = [];
+      g2.addItem(makeItem('weapon', 'sword', 1));
+      g2.addItem(makeItem('weapon', 'sword', 1));
+      ok('task134: two identical weapons need no choice', sellPlan(g2, wRow()).needsChoice === false);
+    }
+
+    // Web picker: a ship-sale market with two same-type ships (one laden). Clicking Sell
+    // reveals a which-one picker; picking the empty ship leaves the laden one aboard.
+    {
+      const g = GameState.create({ name:'UI', gender:'m', profession:'Warrior', book:2, adv });
+      g.data.ships = [];
+      g.addShip({ type:'brigantine', name:'Empty', crew:'poor', cargo:[], docked:null });
+      g.addShip({ type:'brigantine', name:'Laden', crew:'poor', cargo:['grain'], docked:null });
+      const cUI = document.createElement('div');
+      const stUI = new Story(cUI, g, { navigate(){}, onDeath(){}, notify(){} });
+      stUI.begin(parse('<section><market><trade ship="brigantine" sell="800"/></market></section>'), 2, 'x134');
+      const sellBtn = Array.from(cUI.querySelectorAll('.btn-mini')).find((b) => /^Sell/.test(b.textContent));
+      ok('task134: ship-sale row renders a Sell button', !!sellBtn && !sellBtn.disabled);
+      sellBtn.click();
+      const picker = cUI.querySelector('.sell-choice');
+      ok('task134: Sell reveals a which-one picker with both ships', !!picker && picker.querySelectorAll('button').length === 2, picker ? picker.textContent : 'none');
+      const emptyBtn = Array.from(picker.querySelectorAll('button')).find((b) => !/carrying/.test(b.textContent));
+      emptyBtn.click();
+      ok('task134: picking the empty ship leaves the laden one', g.data.ships.length === 1 && g.data.ships[0].name === 'Laden', JSON.stringify(g.data.ships.map((s) => s.name)));
     }
 
 }
