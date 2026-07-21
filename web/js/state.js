@@ -5,6 +5,7 @@ import { ABILITIES, MAX_ITEMS, clampAbility, rankTitle, canonCargo } from './rul
 
 const SAVE_PREFIX = 'fl_save_';
 const META_KEY = 'fl_meta';
+const MAX_SLOTS = 20;
 const SCHEMA = 3;
 
 // A cursed ability auto-fails any check that uses it (JaFL returns -1000 for
@@ -1320,6 +1321,27 @@ export function loadSlotMeta() {
   try { return JSON.parse(localStorage.getItem(META_KEY) || '{}'); } catch { return {}; }
 }
 
+/** Meta reconciled against the actual save blobs. save() writes `fl_save_<slot>` and then
+ *  `fl_meta`; if the meta write throws (quota reached between the two, or the whole meta
+ *  JSON is corrupt), a persisted adventurer has no meta entry — it vanishes from "Your
+ *  Adventurers" and the next New Adventure/import claims the slot over it. So for any slot
+ *  whose blob is readable but whose meta entry is missing, reconstruct the entry from the
+ *  blob's own fields, and best-effort persist the repair. Unreadable blobs are left as-is —
+ *  nextFreeSlot still treats them as occupied so they are never overwritten. (task 137) */
+export function reconcileSlotMeta() {
+  const meta = loadSlotMeta();
+  let repaired = false;
+  for (let i = 0; i < MAX_SLOTS; i++) {
+    if (meta[i]) continue;
+    const d = readSlotData(i);
+    if (!d) continue;
+    meta[i] = { name: d.name, profession: d.profession, rank: d.rank, book: d.book, section: d.section, updated: d.updated };
+    repaired = true;
+  }
+  if (repaired) { try { localStorage.setItem(META_KEY, JSON.stringify(meta)); } catch (_) { /* still returned for display */ } }
+  return meta;
+}
+
 export function deleteSlot(slot) {
   localStorage.removeItem(SAVE_PREFIX + slot);
   const meta = loadSlotMeta();
@@ -1327,10 +1349,17 @@ export function deleteSlot(slot) {
   localStorage.setItem(META_KEY, JSON.stringify(meta));
 }
 
-/** Raw saved data for a slot (for export). */
+/** Raw saved data for a slot (for export). Returns null for an absent OR unreadable blob
+ *  (corrupt JSON), so exporting a corrupt slot fails gracefully with a toast instead of
+ *  throwing uncaught from the click handler. (tasks 7, 137) */
 export function readSlotData(slot) {
-  const raw = localStorage.getItem(SAVE_PREFIX + slot);
-  return raw ? JSON.parse(raw) : null;
+  try {
+    const raw = localStorage.getItem(SAVE_PREFIX + slot);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    console.error('readSlotData failed', e);
+    return null;
+  }
 }
 
 /** Import a save-data object into a new free slot. Returns {slot, meta}. Throws if invalid. */
@@ -1357,10 +1386,13 @@ export function importSave(data) {
   return { slot, meta };
 }
 
-/** First unoccupied save slot (0..19), or null if all 20 are full. Callers must
- *  handle null — previously this returned 0, silently overwriting the first save. */
+/** First unoccupied save slot (0..MAX_SLOTS-1), or null if all are full. Callers must
+ *  handle null — previously this returned 0, silently overwriting the first save. A slot
+ *  counts as occupied if it has a meta entry OR a raw blob: a blob can outlive its meta
+ *  (a quota error between save()'s two writes), and that orphan must never be overwritten
+ *  by the next New Adventure/import. (tasks 4, 137) */
 export function nextFreeSlot() {
   const meta = loadSlotMeta();
-  for (let i = 0; i < 20; i++) if (!meta[i]) return i;
+  for (let i = 0; i < MAX_SLOTS; i++) if (!meta[i] && localStorage.getItem(SAVE_PREFIX + i) == null) return i;
   return null;
 }

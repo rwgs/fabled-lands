@@ -1,7 +1,7 @@
 // FL test suite — markets, rest, TTS, persistence, item effects, rewards, quantity/replace
 // Extracted verbatim from web/_test.html run() lines 3176-4349 (task 120).
 import * as data from '../js/data.js';
-import { GameState, readSlotData, importSave, loadSlotMeta, deleteSlot, makeItem, nextFreeSlot, sanitizeData, currencyAward, splitItemName } from '../js/state.js';
+import { GameState, readSlotData, importSave, loadSlotMeta, reconcileSlotMeta, deleteSlot, makeItem, nextFreeSlot, sanitizeData, currencyAward, splitItemName } from '../js/state.js';
 import * as eng from '../js/engine.js';
 import { fightRound, makeFight, groupFightRound, isDefeated, useWrathBlessing, useDefenceBlessing, rerollAttack } from '../js/combat.js';
 import { goodsFrom, buyTrade, sellTrade, sellPlan, applyInlineBuy, sellInlineItem, sellCargo, canUpgradeCrew, payChoiceCost } from '../js/market.js';
@@ -591,6 +591,49 @@ export async function run(ctx) {
       ok('importSave() recovers with a real slot and named meta',
         impOkSlot != null && impOkMeta && impOkMeta.name === 'ImpFail');
       deleteSlot(impOkSlot);
+    }
+
+    // --- task 137: a save blob orphaned from its fl_meta entry must not vanish or be overwritten ---
+    {
+      const S = 'fl_save_', M = 'fl_meta';
+      const savedMeta = localStorage.getItem(M);
+      const usedSlots = [16, 17, 18, 19, 0, 4];
+      const savedBlobs = usedSlots.map((i) => localStorage.getItem(S + i));
+      const restore = () => {
+        if (savedMeta == null) localStorage.removeItem(M); else localStorage.setItem(M, savedMeta);
+        usedSlots.forEach((i, k) => { if (savedBlobs[k] == null) localStorage.removeItem(S + i); else localStorage.setItem(S + i, savedBlobs[k]); });
+      };
+
+      // 1) A blob whose meta entry was lost mid-save is reconstructed and re-listed.
+      const g = GameState.create({ name: 'Orphan', gender: 'm', profession: 'Sage', book: 2, adv });
+      g.slot = 17; g.data.shards = 321; g.save();
+      const meta1 = loadSlotMeta(); delete meta1[17]; localStorage.setItem(M, JSON.stringify(meta1));
+      ok('task137: an orphaned blob is present but missing from raw meta', !loadSlotMeta()[17] && !!readSlotData(17));
+      const recon = reconcileSlotMeta();
+      ok('task137: reconcile rebuilds the orphaned meta entry from the blob', !!recon[17] && recon[17].name === 'Orphan' && recon[17].profession === 'Sage', JSON.stringify(recon[17]));
+      ok('task137: reconcile persists the repair', !!loadSlotMeta()[17]);
+
+      // 2) nextFreeSlot treats a blob-only slot as occupied (never offered for overwrite).
+      localStorage.removeItem(M);
+      usedSlots.forEach((i) => localStorage.removeItem(S + i));
+      localStorage.setItem(S + 0, JSON.stringify({ name: 'BlobOnly', abilities: {}, stamina: 5 }));
+      ok('task137: nextFreeSlot never offers a blob-only slot', nextFreeSlot() !== 0);
+      localStorage.removeItem(S + 0);
+
+      // 3) A corrupt blob makes readSlotData return null (no uncaught throw on export).
+      localStorage.setItem(S + 16, '{not valid json');
+      let readThrew = false, readVal = 'x';
+      try { readVal = readSlotData(16); } catch { readThrew = true; }
+      ok('task137: readSlotData returns null for a corrupt blob, no throw', readThrew === false && readVal === null);
+      localStorage.removeItem(S + 16);
+
+      // 4) Corrupt meta JSON no longer orphans every slot — reconcile rebuilds from blobs.
+      localStorage.setItem(M, 'totally-not-json');
+      localStorage.setItem(S + 4, JSON.stringify({ name: 'Rebuilt', profession: 'Warrior', rank: 2, book: 1, section: '1', updated: 1, abilities: {}, stamina: 9 }));
+      const recon2 = reconcileSlotMeta();
+      ok('task137: corrupt meta is rebuilt from readable blobs', !!recon2[4] && recon2[4].name === 'Rebuilt', JSON.stringify(recon2[4]));
+
+      restore();
     }
 
     // --- task 12: focused unit tests for the extracted rules --------------

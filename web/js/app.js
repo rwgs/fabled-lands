@@ -1,7 +1,7 @@
 // app.js — bootstrap, screens, routing, character creation, death handling.
 
 import * as data from './data.js';
-import { GameState, loadSlotMeta, deleteSlot, nextFreeSlot, readSlotData, importSave } from './state.js';
+import { GameState, reconcileSlotMeta, deleteSlot, nextFreeSlot, readSlotData, importSave } from './state.js';
 import { ABILITIES, ABILITY_LABEL, ABILITY_BLURB, PROFESSIONS, rankTitle, ordinal } from './rules.js';
 import { Story } from './render.js';
 import { seedRng, reviveWithResurrection } from './engine.js';
@@ -164,7 +164,9 @@ function creditsHtml() {
 // ---- Title screen ----------------------------------------------------------
 function showTitle() {
   narrator.stop(); // [TTS]
-  const slots = loadSlotMeta();
+  // Reconcile so an adventurer whose meta entry was lost (a quota error mid-save) still
+  // shows and still counts as a save — otherwise it would silently vanish here. (task 137)
+  const slots = reconcileSlotMeta();
   const hasSaves = Object.keys(slots).length > 0;
   const app = $('#app');
   app.className = 'screen-title';
@@ -391,7 +393,7 @@ function showSaves() {
   app.innerHTML = '';
   const wrap = el('div', 'create-wrap');
   wrap.appendChild(el('h1', 'create-title', 'Your Adventurers'));
-  const slots = loadSlotMeta();
+  const slots = reconcileSlotMeta(); // list orphaned-meta adventurers too (task 137)
   const list = el('div', 'save-list');
   const entries = Object.entries(slots).sort((a, b) => (b[1].updated || 0) - (a[1].updated || 0));
   if (!entries.length) list.appendChild(el('div', 'empty', 'No saved games yet.'));
