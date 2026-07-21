@@ -7,6 +7,7 @@ the tasks were filed, not work order).
 
 **HIGH**
 
+- [ ] 161. Visit transitions can persist a destination position with the source visit memo — reload drops exact return/undo state
 - [x] 123. "Immunity to Disease and Poison" is stored under two un-aliased names — the blessing never protects
 - [x] 124. Loading/importing a save clamps Stamina to the written max — aura Stamina (ring of ultimate power) is silently stripped
 - [x] 120. Split the 4,790-line single-scope browser test into focused ES-module suites *(before the test-heavy 115–117 chain)*
@@ -22,6 +23,7 @@ the tasks were filed, not work order).
 
 **MEDIUM**
 
+- [ ] 162. Continuing combat redraws without persisting the updated fight memo — reload rewinds the round
 - [x] 134. Market sells with several candidates silently take the first match — JaFL asks which ship/item to sell
 - [x] 137. A save blob can persist without its `fl_meta` entry — the orphaned slot turns invisible and gets overwritten
 - [x] 129. Free fixed-amount `<rest stamina="N">` is infinitely repeatable — every hospitality rest heals to full
@@ -45,6 +47,9 @@ the tasks were filed, not work order).
 then real-but-rare player-facing bugs, a11y + info UX, divergences/polish, and
 the latent no-corpus-trigger items last. See the Review log.*
 
+- [ ] 165. Re-archive completed task details 115–160 and clear them out of the priority buckets
+- [ ] 163. Post-refactor module/docs cleanup: break the roll/choice cycle and align the architecture contract
+- [ ] 164. Focused test suites still import the old whole-harness dependency set and boot unrelated app code
 - [x] 142. CI's smoke verdict greps the whole DOM dump — failing runs are misdiagnosed as bootstrap FATALs
 - [x] 143. A failing `ok()` fired after the report is silently lost — a latent silent-pass vector
 - [x] 144. meta.json embeds the build date — a no-op rebuild busts every installed player's cache
@@ -1475,11 +1480,176 @@ and run all sections.
 
 ---
 
+## 161. Visit transitions can persist a destination position with the source visit memo — reload drops exact return/undo state — HIGH (state/app/render)
+
+*(Filed 2026-07-21 from a sixth full repository review; follow-up to tasks 110,
+116, 154 and 155.)* The persisted game position and the persisted `Story` visit
+are still not committed as one transition. `app.navigate()` calls
+`state.goTo()` before `story.begin()` (app.js:594-605); `goTo()` autosaves while
+the Story still names the source section. `begin()` establishes the correct
+destination identity before any *possible* entry autosaves, but ends with only
+`this.render()` (render.js:247-300). A prose-only destination can therefore make
+no second save at all, leaving `{data: destination, visit: source}` on disk.
+`sanitizeVisit()` rejects that mismatch on load (state.js:1091-1108), so the
+conservative stale-resume path loses the exact ctx and one-level return frame.
+This is live for pure/no-save `<return>` destinations including §4.69,
+§5.410 and §6.448a: reload before returning falls back to a fresh source visit,
+re-opening the task-110 class of repeated entry effects, lost rolls and history
+bounces.
+
+The reverse transition has the same ordering flaw. `goBack()` clears the frame
+and calls `state.restoreReturn(frame)` — which autosaves — *before* replacing
+`Story.book/section/ctx` with the restored source (render.js:1025-1043). Its
+saved record therefore pairs the restored state position with the detour's visit
+and remains mismatched because the final render does not save. `undo()` likewise
+autosaves before its awaited section load and correcting `begin()`.
+
+Make position + visit changes atomic at every entry path: ensure a successful
+`begin()`/stale migration always persists the fully-established destination
+visit, and make return/undo save only after the Story identity, ctx, frame and
+state position agree. Also audit the navigation wrapper's slow cross-book fetch
+window: it applies leave hooks and installs the new return frame before the raw
+router has resolved the destination, but does not persist that coherent source
+state itself. Prefer one explicit transition commit over relying on incidental
+entry effects to call `changed()`. Add save-slot round trips for (1) A → a
+prose-only B with `<return>`, (2) B → return to A with A's resolved roll/action
+memo intact, and (3) undo to a save-free section; assert every written visit's
+identity matches `data.book/section`. Web-only; stamp and run all sections.
+
+---
+
+## 162. Continuing combat redraws without persisting the updated fight memo — reload rewinds the round — MEDIUM (combat/render/state)
+
+*(Filed 2026-07-21 from a sixth full repository review; follow-up to tasks 116,
+155 and 156.)* A fight is part of `Story.ctx`, not `GameState.data`. A continuing
+single round mutates enemy Stamina, log and reroll flags in `fightRound()`, then
+calls `drawFight()` directly (render-combat.js:310-332); a continuing group round
+does the same through `drawGroupFight()` (lines 151-171). Neither path calls
+`story.rerender()` or `state.save()`. If the player wounds the enemy and every
+enemy misses, no persistent state mutation occurs at all, so reload restores the
+enemy's pre-round Stamina. If an enemy hits, its `damageStamina()` autosave lands
+*during* the round and captures only a partial fight/log. The direct-redraw
+COMBAT-reroll and blessing branches (lines 199-243 and 359-397) have the same
+ordering problem; notably `rerollAttack()` consumes/saves the blessing before it
+records the retry result.
+
+Persist the visit after every completed combat action, once all fight and player
+mutations are final, without forcing a full section render merely to save. Keep
+the existing full rerender for win/lose/death so navigation gates still
+re-evaluate. Add deterministic single- and group-fight tests where the player
+damages a surviving foe and the replies miss, then inspect the provider-written
+visit record and resume it into a fresh state; cover a continuing COMBAT blessing
+retry too. The restored enemy Stamina, log and once-per-round flags must exactly
+match the live widget. Web-only; stamp and run all sections.
+
+---
+
+## 163. Post-refactor module/docs cleanup: break the roll/choice cycle and align the architecture contract — LOW (architecture/docs)
+
+*(Filed 2026-07-21 from a sixth full repository review — organization pass.)*
+Task 119 produced a much healthier renderer split, but left one direct ES-module
+cycle: `render-rolls.js` imports `renderChoices`, while `render-choices.js`
+imports `renderBranch`. It currently works because both are function exports used
+only after module initialization, but it makes two view modules order-coupled and
+turns future top-level setup into a temporal-dead-zone risk. Route nested content
+through the Story dispatcher or extract the genuinely shared branch/choice seam;
+do not move rules back into the views.
+
+Align the written contract with the implemented (reasonable) design. AGENTS.md
+still says game logic lives only in `engine.js`, `combat.js`, `market.js` and
+`state.js`, while README.md correctly identifies DOM-free rule planners in
+`render-rules.js` and `render-gates.js` (plus visit state in `visit-state.js`).
+Either include those planners in the invariant or relocate/rename them; the
+simpler choice is to state that rule logic belongs in *DOM-free rule modules*,
+and view construction in `render*.js` view modules. During the same surgical
+cleanup remove the accidental empty class field `f` at render.js:208; correct the
+stale "revive at half Stamina" comments in `render-rewards.js`/`render-rules.js`
+after task 159; correct `state.js`'s claim that combat already autosaves every
+round; and change both build scripts' embedded example commands from Windows
+`powershell` to required `pwsh` (their `#Requires` guards are already right).
+No production redesign beyond breaking the cycle. Stamp and run the focused
+render/actions suites plus the full smoke test.
+
+---
+
+## 164. Focused test suites still import the old whole-harness dependency set and boot unrelated app code — LOW (tests/organization)
+
+*(Filed 2026-07-21 from a sixth full repository review — organization pass;
+follow-up to task 120.)* The suite extraction copied the original harness import
+block into nearly every `web/tests/suite-*.js`. Most suites consequently import
+engine, combat, market, renderer, TTS, UI and `app.js` whether they use them or
+not. The clearest case is the 31-line corpus suite: it uses only `data`,
+`GameState` and `Story`, but imports nine modules and dozens of symbols. Its
+unused `renderStatic` import evaluates `app.js`, whose module tail calls `boot()`
+when `#app` exists, so `?suite=corpus` performs unrelated metadata, service-worker
+and title-screen work. A focused suite can therefore fail from a subsystem it
+does not test, and the import lists obscure its real ownership.
+
+Prune every suite to the symbols it actually uses and verify that no suite needs
+the side-effectful app entry module merely for a helper. If `renderStatic` needs
+isolated testing, move that pure formatter to an import-safe UI module or expose
+an explicit no-boot entry rather than weakening `app.js`'s production boot.
+Keep fixtures local unless two or more suites truly share a stable helper; this
+task is dependency hygiene, not a test-framework rewrite. Run every suite alone
+via `?suite=<name>` and then the aggregate smoke test.
+
+---
+
+## 165. Re-archive completed task details 115–160 and clear them out of the priority buckets — LOW (process/docs)
+
+*(Filed 2026-07-21 from a sixth full repository review; recurring maintenance
+after task 141.)* Task 141 archived completed details 1–114, but the subsequent
+burn-down completed every detailed task 115–160. Their checked items still fill
+the HIGH/MEDIUM/LOW work queues, and roughly 1,280 lines of completed detail now
+sit in the active backlog before the Review log. That makes the "first open task"
+workflow harder to scan and leaves TASKS.md close to its pre-archive size.
+
+Move completed detail sections 115–160 into TASKS-archive.md under their stable
+IDs, move their summary rows into **Done**, and leave only open-task detail plus
+the current Review log in TASKS.md. Update the archive-range note without losing
+completion notes or historical review text. Documentation-only; validate every
+checklist ID has exactly one detail heading across the two files, then commit.
+
+---
+
 ## Review log
 
 *Running audit log of the backlog — each pass re-verifies the open items against
 the current code and records what was filed, split, or re-confirmed. Task
 numbers refer to the contents checklist at the top of the file.*
+
+Reviewed 2026-07-21 (sixth full pass): started clean at `cb082e1` after the
+task-115–160 burn-down. This pass reviewed the cumulative persistence and
+renderer changes since the fifth audit, traced every visit-transition/combat
+save boundary against the provider-written record, checked the production and
+test import graphs, re-read the module/build/SW/docs contracts, rebuilt all
+bundled data, and ran the aggregate browser suite on a fresh Chrome profile.
+Filed tasks **161–165**. The severe finding is the remaining visit-transition
+atomicity hole (161, HIGH): `goTo()`/`restoreReturn()`/`undo()` can autosave the
+new state position while Story still serializes the old visit, and neither
+`begin()` nor `goBack()` guarantees a final correcting save. A no-entry-effect
+destination therefore reloads through stale migration; pure `<return>` sections
+§4.69/§5.410/§6.448a lose their frame and can fresh-re-enter the source. The
+independent combat gap (162, MEDIUM) is the same invariant at an action boundary:
+continuing single/group rounds and blessing retries redraw directly without a
+post-mutation visit save, so reload can heal the foe or restore a partial round.
+
+Organization verdict: the production layout is still fundamentally sound. The
+task-119 split made `render.js` a 1,210-line lifecycle/dispatch facade and left
+cohesive view modules; `engine.js` and `state.js` are large but internally
+sectioned around one rule engine and one aggregate game model, so splitting them
+for line count alone would add indirection without a cleaner ownership boundary.
+No directory reshuffle or framework/build layer is warranted. The concrete
+post-split debts are bounded: break the direct `render-rolls` ↔ `render-choices`
+ES-module cycle and align AGENTS/README plus stale comments/help text (163); prune
+the copied whole-harness imports so focused suites stop evaluating unrelated
+`app.js` boot code (164); and repeat task 141's archive maintenance now that
+115–160 are complete (165). Source/generated ownership, the flat no-dependency
+module scheme, core rules/view separation, service-worker required-module list,
+content-hash inputs and licence boundary all checked clean. PowerShell 7 build:
+**4,377 XML files valid**, 4,369 sections generated, **no generated-file drift**.
+Fresh-profile smoke: **`RESULT ALL PASS pass=1462 fail=0`**, including every
+section of all six books.
 
 Re-prioritised 2026-07-20 (backlog re-review — no new code audit; the fifth-pass
 verdicts stand). The burn-down cleared every HIGH and MEDIUM task, leaving all 17
