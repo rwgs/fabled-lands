@@ -2,15 +2,11 @@
 
 Backlog of recommended improvements. Open tasks are filed under priority buckets
 (**HIGH** / **MEDIUM** / **LOW**) — work the first open (`- [ ]`) item top-down;
-each task's detail section carries the same stable ID. **There are currently two
-open tasks:** work **166** first, then **167**. Completed tasks through 165 are
+each task's detail section carries the same stable ID. **There is currently one
+open task:** work **167**. Completed tasks through 166 are
 listed under **Done** below. Completed detail sections are archived in
 [`TASKS-archive.md`](TASKS-archive.md); the Review log at the end of this file
 records each audit pass and is where new work is filed.
-
-**HIGH**
-
-- [ ] 166. Direct visit commits bypass persistence observers — save failures stay silent and activity timestamps go stale
 
 **MEDIUM**
 
@@ -186,6 +182,7 @@ section below); detail sections remain in filed order, not this order.*
 - [x] 163. Post-refactor module/docs cleanup: break the roll/choice cycle and align the architecture contract
 - [x] 164. Focused test suites still import the old whole-harness dependency set and boot unrelated app code
 - [x] 165. Re-archive completed task details 115–160 and clear them out of the priority buckets
+- [x] 166. Direct visit commits bypass persistence observers — save failures stay silent and activity timestamps go stale
 
 ---
 

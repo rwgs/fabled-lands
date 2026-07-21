@@ -530,7 +530,12 @@ function buildGameScreen() {
   // resumes the exact visit instead of re-entering the section and repeating its effects.
   state.setVisitProvider(() => (story ? story.serializeVisit() : null));
 
-  state.onChange(() => { refreshSheet(); surfaceSaveError(); });
+  // A full state mutation refreshes the sheet AND publishes its save result; a direct
+  // current-visit commit (commitVisit) publishes only its save result. Register the two
+  // observer channels separately so a ctx-only combat/roll/transition commit surfaces a
+  // save failure (and recovery) without a needless mid-render sheet rerender. (task 166)
+  state.onChange(() => refreshSheet());
+  state.onSaveStatus(() => surfaceSaveError());
   refreshSheet();
 }
 

@@ -172,7 +172,7 @@ function drawGroupFight(story, box, fights, dmgNode, group, fleeNode = null) {
       // Persist the completed round — enemy Stamina/log/flags live on the fights in
       // story.ctx.fights, which serializeVisit stores; a reload then resumes this round,
       // not the pre-round state. (Resolution/death take rerender, which also saves.) (task 162)
-      story.state.save();
+      story.state.commitVisit();
     });
     controls.appendChild(attack);
   });
@@ -211,7 +211,7 @@ function drawGroupFight(story, box, fights, dmgNode, group, fleeNode = null) {
       if (!rerollAttack(story.state, missed)) return;
       if (fights.every((f) => isDefeated(f)) || story.state.isDead()) { story.rerender(); return; }
       drawGroupFight(story, box, fights, dmgNode, group, fleeNode);
-      story.state.save(); // persist the retried round (rerollAttack saved the blessing pre-retry) (task 162)
+      story.state.commitVisit(); // persist the retried round (rerollAttack saved the blessing pre-retry) (task 162)
     });
     controls.appendChild(rr);
   }
@@ -232,7 +232,7 @@ function drawGroupFight(story, box, fights, dmgNode, group, fleeNode = null) {
         story.notify(`Divine Wrath strikes the ${target.name} for ${dmg}!`);
         if (fights.every((f) => isDefeated(f)) || story.state.isDead()) { story.rerender(); return; }
         drawGroupFight(story, box, fights, dmgNode, group, fleeNode);
-        story.state.save(); // persist the wrath round (task 162)
+        story.state.commitVisit(); // persist the wrath round (task 162)
       });
       controls.appendChild(w);
     });
@@ -247,7 +247,7 @@ function drawGroupFight(story, box, fights, dmgNode, group, fleeNode = null) {
       // One encounter: the mark lives on the group proxy, the +3 on every member. (task 91)
       useDefenceBlessing(story.state, story.sectionFight, 3, fights);
       drawGroupFight(story, box, fights, dmgNode, group, fleeNode);
-      story.state.save(); // persist the Defence buff (+3 stored on every member) (task 162)
+      story.state.commitVisit(); // persist the Defence buff (+3 stored on every member) (task 162)
     });
     controls.appendChild(d);
   }
@@ -341,7 +341,7 @@ function drawFight(story, box, fight, node, dmgNode, fleeNode, key, locked = fal
     // the log and the once-per-round reroll/blessing flags all ride on the fight in
     // story.ctx.fights, which serializeVisit persists. Save so a reload resumes the exact
     // round instead of rewinding it. (Win/lose/fled/death take rerender, which also saves.) (task 162)
-    story.state.save();
+    story.state.commitVisit();
   });
   controls.appendChild(attack);
 
@@ -378,7 +378,7 @@ function drawFight(story, box, fight, node, dmgNode, fleeNode, key, locked = fal
       if (!rerollAttack(story.state, fight)) return;
       if (fight.outcome || story.state.isDead()) { story.rerender(); return; }
       drawFight(story, box, fight, node, dmgNode, fleeNode, key, false, roundNode);
-      story.state.save(); // persist the retried round (rerollAttack saved the blessing pre-retry) (task 162)
+      story.state.commitVisit(); // persist the retried round (rerollAttack saved the blessing pre-retry) (task 162)
     });
     controls.appendChild(rr);
   }
@@ -397,7 +397,7 @@ function drawFight(story, box, fight, node, dmgNode, fleeNode, key, locked = fal
       story.notify(`Divine Wrath strikes the ${fight.name} for ${dmg}!`);
       if (fight.outcome || story.state.isDead()) { story.rerender(); return; }
       drawFight(story, box, fight, node, dmgNode, fleeNode, key, false, roundNode);
-      story.state.save(); // persist the wrath round (task 162)
+      story.state.commitVisit(); // persist the wrath round (task 162)
     });
     controls.appendChild(w);
   }
@@ -408,7 +408,7 @@ function drawFight(story, box, fight, node, dmgNode, fleeNode, key, locked = fal
     d.addEventListener('click', () => {
       useDefenceBlessing(story.state, fight);
       drawFight(story, box, fight, node, dmgNode, fleeNode, key, false, roundNode);
-      story.state.save(); // persist the Defence buff (once-per-fight flag lives in ctx) (task 162)
+      story.state.commitVisit(); // persist the Defence buff (once-per-fight flag lives in ctx) (task 162)
     });
     controls.appendChild(d);
   }

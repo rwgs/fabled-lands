@@ -134,6 +134,13 @@ export class GameState {
     // UI watches this to warn that progress is no longer being saved (task 7).
     this.lastSaveError = null;
     this._listeners = new Set();
+    // Save-status observers, distinct from _listeners (the change/sheet-refresh channel).
+    // Fired after EVERY persistence attempt — both changed()'s full mutations and the
+    // direct current-visit commits (commitVisit) — so the warn/export UI (task 7) sees a
+    // failure and re-arms on recovery no matter which path wrote or failed. Splitting the
+    // channel lets a ctx-only commit publish its save result WITHOUT triggering a sheet
+    // rerender (there was no sheet-visible mutation to reflect). (task 166)
+    this._saveListeners = new Set();
     // Callback the Story installs (setVisitProvider) that serialises the current
     // visit's execution record; save() calls it so data.visit is always current at
     // persist time — no matter which of the many mid-render mutations triggered the
@@ -164,6 +171,11 @@ export class GameState {
   }
 
   onChange(fn) { this._listeners.add(fn); return () => this._listeners.delete(fn); }
+  // Observe save-status transitions (task 166): fired after every persistence attempt —
+  // changed()'s full mutations and commitVisit()'s direct visit commits alike — so the UI
+  // can warn on failure and re-arm on recovery whichever path wrote (or failed) last.
+  onSaveStatus(fn) { this._saveListeners.add(fn); return () => this._saveListeners.delete(fn); }
+  _publishSaveStatus() { for (const fn of this._saveListeners) fn(this); }
   // Install the current-visit serialiser (task 116). save() invokes it to refresh
   // data.visit just before writing, so the persisted record reflects every applied
   // effect / resolved roll up to this instant.
@@ -171,7 +183,24 @@ export class GameState {
   changed() {
     this.data.updated = Date.now();
     this.save();
+    this._publishSaveStatus();
     for (const fn of this._listeners) fn(this);
+  }
+
+  // Commit the current visit's execution progress without a full changed() (task 166).
+  // The renderer/combat direct-save sites use this — the transition commit (begin), the
+  // resume migration (resumeStale), the interactive rerender tail, and ctx-only combat
+  // rounds — where the player's sheet stats may not have changed but the persisted visit
+  // record and activity time still must move. It advances `updated` so save-card order
+  // reflects the progress, persists via save(), and publishes the save result to the
+  // save-status observers (so a direct-commit quota failure warns and a later success
+  // re-arms) — but runs NO change observers, so it neither rerenders the sheet nor recurses.
+  // Ephemeral previews still no-op the write inside save(). Returns save()'s ok flag.
+  commitVisit() {
+    this.data.updated = Date.now();
+    const ok = this.save();
+    this._publishSaveStatus();
+    return ok;
   }
 
   // ---- creation --------------------------------------------------------

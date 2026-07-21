@@ -311,7 +311,9 @@ export class Story {
     // visit: source} on disk, which sanitizeVisit rejects on reload (losing the exact ctx +
     // return frame). Persist once here, now that the destination's identity/ctx/frame are
     // fully established, so every entry path leaves position and visit agreeing on disk.
-    this.state.save();
+    // commitVisit (task 166) advances the activity time and publishes the save result to
+    // the save-status observers, so a quota failure on this final larger write is warned.
+    this.state.commitVisit();
   }
 
   // Re-draw the current visit after an interactive action, then persist it. An action's own
@@ -323,7 +325,7 @@ export class Story {
   // of every interactive handler, so persisting once here — after the memo is in place —
   // keeps the saved visit record in step with the state it guards (the interactive
   // counterpart to the passive path, which already memoises before applying). (task 155)
-  rerender() { this.render(); this.state.save(); }
+  rerender() { this.render(); this.state.commitVisit(); }
 
   // Use a usable Adventure-Sheet item effect (task 41) and route any section detour it
   // opens through the SAME navigation entry point as a choice/goto (task 115). Applying
@@ -443,7 +445,7 @@ export class Story {
     // rejected visit record; adopting the probe's ctx above is a bare field assignment that
     // fires no changed(). Save once here so the coherent {data: section, visit: migrated ctx}
     // is on disk immediately, instead of leaving the stale record until the next action.
-    this.state.save();
+    this.state.commitVisit();
   }
 
   render() {

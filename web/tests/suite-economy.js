@@ -336,6 +336,38 @@ export async function run(ctx) {
     gsv.ephemeral = false;
     deleteSlot(12); // cleanup
 
+    // --- task 166: direct current-visit commits publish save status + advance activity time ---
+    // The renderer/combat direct-save sites route through commitVisit(), not raw save(), so a
+    // ctx-only combat/roll commit warns on a quota failure, re-arms on recovery, and moves the
+    // save-card timestamp even when no GameState.data mutation fired changed().
+    {
+      const gcv = GameState.create({ name: 'CV', gender: 'm', profession: 'Warrior', book: 1, adv });
+      gcv.slot = 13;
+      const seen = []; // each published lastSaveError (null = healthy)
+      const off = gcv.onSaveStatus((s) => seen.push(s.lastSaveError));
+      // A ctx-only commit advances the persisted activity timestamp (was left stale by raw save()).
+      gcv.data.updated = 1;
+      const okc = gcv.commitVisit();
+      ok('commitVisit persists and advances updated', okc === true && gcv.data.updated > 1, `updated=${gcv.data.updated}`);
+      ok('commitVisit writes the advanced updated to slot meta', !!loadSlotMeta()[13] && loadSlotMeta()[13].updated === gcv.data.updated, JSON.stringify(loadSlotMeta()[13]));
+      ok('commitVisit publishes a healthy save status', seen.length === 1 && seen[0] === null, JSON.stringify(seen));
+      // Force storage to fail on the direct commit only: the save-status observer must see it.
+      localStorage.setItem = () => { const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e; };
+      const okFail = gcv.commitVisit();
+      delete localStorage.setItem; // revert to Storage.prototype.setItem
+      ok('commitVisit returns false when the direct write fails', okFail === false);
+      ok('save-status observer receives the direct-commit failure', seen.length === 2 && typeof seen[1] === 'string' && /full/i.test(seen[1]), seen[1]);
+      // A successful retry re-arms — the observer sees recovery (null).
+      const okRec = gcv.commitVisit();
+      ok('save-status observer receives recovery after a successful retry', okRec === true && seen.length === 3 && seen[2] === null, JSON.stringify(seen));
+      off();
+      // Ephemeral previews still no-op the write and report success, like save() (task 4/7).
+      gcv.ephemeral = true; gcv.lastSaveError = 'stale';
+      ok('ephemeral commitVisit reports success and clears the error', gcv.commitVisit() === true && gcv.lastSaveError === null);
+      gcv.ephemeral = false;
+      deleteSlot(13); // cleanup
+    }
+
     // --- alternate-currency markets: <market currency="Mithral"> (task 40) ---
     {
       const gcy = GameState.create({ name: 'Cy', gender: 'm', profession: 'Warrior', book: 2, adv });
