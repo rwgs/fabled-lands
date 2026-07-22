@@ -1003,6 +1003,127 @@ export async function run(ctx) {
       }
     }
 
+    // --- task 168: an open navigation transaction isolates itself; unrelated UI is inert ----
+    // While a mutation-bearing move's target fetch is pending the source stays rendered, but a
+    // concurrent story action, an item-use detour and an explicit save must not mutate or
+    // misreport state that a rollback would discard or a commit would misroute. The transition
+    // guard swallows source-pane clicks, useItem() refuses mid-move, and an explicit save() no
+    // longer reports a success the suppressed txn never wrote.
+    {
+      const tick = () => new Promise((r) => setTimeout(r, 0)); // flush the navigate microtasks
+      const controllable = (g, storyRef, dstEl) => {
+        const box = { pending: null };
+        box.enter = (b, s) => new Promise((resolve, reject) => {
+          box.pending = {
+            ok: () => { g.goTo(b, s); g.snapshot(); storyRef().begin(dstEl, b, s); resolve(true); },
+            reject: () => reject(new Error('book fetch failed')),
+          };
+        });
+        return box;
+      };
+
+      // (a) a concurrent non-navigation mutation (a Rest) during a pending paid cross-book move,
+      //     on BOTH the rollback and the success path.
+      {
+        const secSrc = parse('<section name="SRC168a"><p>Source.</p><rest/><choices><choice section="9" book="2" shards="50">Cross over</choice></choices></section>');
+        const secDst = parse('<section name="9"><p>Arrived.</p></section>');
+        const g = GameState.create({ name:'T168a', gender:'m', profession:'Warrior', book:1, adv });
+        g.slot = 21; g.data.shards = 100; g.data.stamina = g.data.staminaMax - 5;
+        const cont = document.createElement('div');
+        let story;
+        const nav = controllable(g, () => story, secDst);
+        story = new Story(cont, g, { navigate: nav.enter, onDeath(){}, notify(){} });
+        g.setVisitProvider(() => story.serializeVisit());
+        g.goTo(1, 'SRC168a'); story.begin(secSrc, 1, 'SRC168a');
+        const stam0 = g.data.stamina;
+        const restBtn = () => Array.from(cont.querySelectorAll('button')).find((b) => /Rest/.test(b.textContent));
+        const crossBtn = () => Array.from(cont.querySelectorAll('.choice')).find((b) => /Cross over/.test(b.textContent));
+        ok('task168-a: the source offers both a Rest and the paid move at rest', !!restBtn() && !!crossBtn());
+
+        crossBtn().click(); // charges the price IN MEMORY; the fetch is now pending
+        ok('task168-a: the move is in flight', story._navInFlight === true && g.data.shards === 50);
+        restBtn().click(); // concurrent Rest — must be swallowed by the transition guard
+        ok('task168-a: a concurrent Rest is blocked while the move is in flight', g.data.stamina === stam0, 'stamina=' + g.data.stamina);
+
+        nav.pending.reject(); await tick(); // the target fetch fails
+        ok('task168-a: after rollback the source is coherent (price refunded, no stray heal)', g.data.shards === 100 && g.data.stamina === stam0 && story.section === 'SRC168a');
+        ok('task168-a: controls recover after rollback', story._navInFlight === false && !!restBtn() && !!crossBtn());
+
+        crossBtn().click(); // retry — pending again
+        restBtn().click(); // concurrent Rest again — still blocked
+        ok('task168-a: a concurrent Rest is still blocked on the retry (pre-success)', g.data.stamina === stam0, 'stamina=' + g.data.stamina);
+        nav.pending.ok(); await tick(); // this time succeed
+        ok('task168-a: a successful move reaches the destination', story.section === '9' && Number(g.data.book) === 2);
+        ok('task168-a: a successful move takes the price exactly once', g.data.shards === 50, 'shards=' + g.data.shards);
+        ok('task168-a: the blocked Rest never applied (no misrouted heal at the destination)', g.data.stamina === stam0, 'stamina=' + g.data.stamina);
+        ok('task168-a: the destination persists with the one deduction', (readSlotData(21) || {}).shards === 50 && String((readSlotData(21) || {}).section) === '9');
+        deleteSlot(21);
+      }
+
+      // (b) a charged item whose OWN detour is attempted during a pending move: the use must be
+      //     refused so the charge is not spent for a navigation the guard would drop.
+      {
+        const secSrc = parse('<section name="SRC168b"><p>Source.</p><choices><choice section="9" book="2" shards="50">Cross over</choice></choices></section>');
+        const secDst = parse('<section name="9"><p>Arrived.</p></section>');
+        const g = GameState.create({ name:'T168b', gender:'m', profession:'Warrior', book:1, adv });
+        g.slot = 22; g.data.shards = 100;
+        const cont = document.createElement('div');
+        let story;
+        const nav = controllable(g, () => story, secDst);
+        story = new Story(cont, g, { navigate: nav.enter, onDeath(){}, notify(){} });
+        g.setVisitProvider(() => story.serializeVisit());
+        g.goTo(1, 'SRC168b'); story.begin(secSrc, 1, 'SRC168b');
+        const crossBtn = () => Array.from(cont.querySelectorAll('.choice')).find((b) => /Cross over/.test(b.textContent));
+        const item = makeItem('tool', 'Vade Mecum', 0, null, []);
+        g.data.items.push(item);
+        const effect = { uses: 1, body: '<goto section="600" book="3"/>' }; // a consult detour
+        const bodyNode = data.parseXml('<effect>' + effect.body + '</effect>');
+
+        crossBtn().click(); // a move is now in flight
+        ok('task168-b: the move is in flight', story._navInFlight === true);
+        const res = story.useItem(item, effect, bodyNode); // player consults the item mid-move
+        ok('task168-b: an item use during a pending move is refused', res && res.blocked === true);
+        ok('task168-b: the item charge is NOT consumed by the refused use', effect.uses === 1);
+        ok('task168-b: the item is not removed and no detour is taken', g.data.items.some((it) => it.id === item.id) && story.section === 'SRC168b');
+
+        nav.pending.ok(); await tick(); // the original move still completes normally
+        ok('task168-b: the original move reaches its destination', story.section === '9' && Number(g.data.book) === 2);
+        ok('task168-b: the original move took its price exactly once', g.data.shards === 50, 'shards=' + g.data.shards);
+        ok('task168-b: the item-use guard has released with the move', story._navInFlight === false);
+        // and once the move has settled a use is no longer refused (here a detour-free potion use)
+        const potion = story.useItem(item, { uses: 1, ability: 'combat', bonus: 1 }, null);
+        ok('task168-b: an item use is accepted once the transition settles', !(potion && potion.blocked));
+        deleteSlot(22);
+      }
+
+      // (c) an explicit save during a pending move must not claim a success the suppressed txn
+      //     never wrote (an autosave stays silently deferred).
+      {
+        const secSrc = parse('<section name="SRC168c"><p>Source.</p><choices><choice section="9" book="2" shards="50">Cross over</choice></choices></section>');
+        const secDst = parse('<section name="9"><p>Arrived.</p></section>');
+        const g = GameState.create({ name:'T168c', gender:'m', profession:'Warrior', book:1, adv });
+        g.slot = 23; g.data.shards = 100;
+        const cont = document.createElement('div');
+        let story;
+        const nav = controllable(g, () => story, secDst);
+        story = new Story(cont, g, { navigate: nav.enter, onDeath(){}, notify(){} });
+        g.setVisitProvider(() => story.serializeVisit());
+        g.goTo(1, 'SRC168c'); story.begin(secSrc, 1, 'SRC168c'); // commits the on-disk source (shards 100)
+        const crossBtn = () => Array.from(cont.querySelectorAll('.choice')).find((b) => /Cross over/.test(b.textContent));
+
+        crossBtn().click(); // txn open: price deducted in memory (50), nothing persisted
+        ok('task168-c: an autosave during the txn reports success but writes nothing', g.save() === true && (readSlotData(23) || {}).shards === 100);
+        ok('task168-c: an EXPLICIT save during the txn does NOT claim success', g.save(true) === false);
+        ok('task168-c: the explicit save wrote nothing (persisted source unchanged)', (readSlotData(23) || {}).shards === 100);
+        ok('task168-c: the explicit save leaves a player-facing reason to surface', typeof g.lastSaveError === 'string' && g.lastSaveError.length > 0);
+
+        nav.pending.ok(); await tick(); // the move commits once
+        ok('task168-c: after the move commits an explicit save succeeds and clears the error', g.save(true) === true && g.lastSaveError == null);
+        ok('task168-c: the committed destination persists with the one deduction', (readSlotData(23) || {}).shards === 50 && String((readSlotData(23) || {}).section) === '9');
+        deleteSlot(23);
+      }
+    }
+
     // --- task 117: priced equipment/cargo losses can't arm a reward without taking payment ---
     // §2.90 forfeits a weapon OR armour (price=x) to renounce Elnir; §3.569 trades a named
     // Cargo Unit (price=x) for two textiles. An ineligible forfeit button (no such

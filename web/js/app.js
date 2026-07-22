@@ -440,6 +440,19 @@ function buildGameScreen() {
   app.className = 'screen-game';
   app.innerHTML = '';
 
+  // App-wide transition lock (task 168): while a mutation-bearing move is in flight, swallow
+  // every click in the game shell — Adventure Sheet, header and menu — so a concurrent
+  // buy/drop/use/rest or "Save & quit" cannot mutate or misreport state that a rollback would
+  // discard or a commit would misroute. The Story installs the matching guard for its own
+  // pane. Installed once (buildGameScreen reuses the same #app element); it never blocks the
+  // click that STARTS a move (story._navInFlight is still false then).
+  if (!app._txnGuardInstalled) {
+    app._txnGuardInstalled = true;
+    app.addEventListener('click', (e) => {
+      if (story && story._navInFlight) { e.stopImmediatePropagation(); e.preventDefault(); }
+    }, true);
+  }
+
   const header = el('header', 'game-header');
   const menuBtn = iconBtn('☰', 'More…', showGameMenu);
   const title = el('div', 'header-title', 'Fabled Lands');
@@ -502,7 +515,7 @@ function buildGameScreen() {
     syncSpeedBtn();
     actions.appendChild(speedBtn);
   }
-  actions.appendChild(iconBtn('💾', 'Save & quit to title', () => { if (state.save()) showTitle(); else surfaceSaveError(true); }));
+  actions.appendChild(iconBtn('💾', 'Save & quit to title', () => { if (state.save(true)) showTitle(); else surfaceSaveError(true); }));
   actions.appendChild(sheetBtn); // sheet drawer toggle (mobile only)
   header.appendChild(actions);
   app.appendChild(header);
@@ -735,7 +748,7 @@ async function showGameMenu() {
   add('📤', 'Export this save', () => exportSave(null, null));
   add('📥', 'Import a save', () => importSaveFile());
   if (state.ephemeral) add('💾', 'Keep this adventure', () => keepDemo());
-  else add('💾', 'Save & quit to title', () => { if (state.save()) showTitle(); else surfaceSaveError(true); });
+  else add('💾', 'Save & quit to title', () => { if (state.save(true)) showTitle(); else surfaceSaveError(true); });
   const menuCredits = el('div', 'menu-credits');
   menuCredits.innerHTML = creditsHtml();
   body.appendChild(menuCredits);

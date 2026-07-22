@@ -257,6 +257,18 @@ export class Story {
     // Set by navigate() for the duration of a transition and released by begin() (or a
     // failed fetch); blocks a re-entrant (double-click) navigation. (task 147)
     this._navInFlight = false;
+    // App-wide transition lock (task 168). _navInFlight blocks only a second navigate();
+    // it leaves the source section's OTHER controls live during a slow cross-book fetch, so
+    // a concurrent buy/rest/roll would be discarded by a rollback (or committed against the
+    // pre-move return frame on success), and a second navigation would be silently dropped
+    // after its effect ran. One capture-phase click listener on the story root swallows
+    // EVERY click while a move is in flight — so no per-handler guard can drift out of sync —
+    // and lifts automatically when begin()/abort() clears the flag. It never blocks the click
+    // that STARTS a move (the flag is still false then). app.js installs the matching guard
+    // for the Adventure Sheet, header and menu (the rest of the shell).
+    this.root.addEventListener('click', (e) => {
+      if (this._navInFlight) { e.stopImmediatePropagation(); e.preventDefault(); }
+    }, true);
   }
 
   // Snapshot the current visit so a later <return> can restore it (task 110). Null
@@ -381,6 +393,12 @@ export class Story {
   // stale/blank frame and its <return> re-entered the wrong section. Returns the engine
   // result so the caller can surface a revealed illustration (the map of Bazalek, task 62).
   useItem(item, effect, bodyNode = null) {
+    // Blocked while another move is in flight (task 168): applying the effect and consuming
+    // the charge now, only to have this item's own inner detour (this.navigate below) dropped
+    // by the in-flight guard, would spend the charge for nothing. The Adventure-Sheet Use
+    // button is already swallowed by the app-wide transition guard; this covers the direct
+    // call. Returns a harmless result (no image/goto) so onUseItem is a no-op.
+    if (this._navInFlight) return { blocked: true };
     const res = useItemEffect(this.state, item, effect, bodyNode);
     if (res.removeItem) this.state.removeItemById(item.id);
     if (res.goto && res.goto.section != null) {

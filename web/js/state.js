@@ -220,11 +220,11 @@ export class GameState {
     return snap;
   }
   commitTxn() {
+    // End suppression, then flush through the shared current-visit commit so the timestamp,
+    // save and status-publish logic lives in exactly one place — not a second copy of
+    // commitVisit()'s body. (tasks 166, 168)
     this._txnSuppress = false;
-    this.data.updated = Date.now();
-    const ok = this.save();
-    this._publishSaveStatus();
-    return ok;
+    return this.commitVisit();
   }
   rollbackTxn(snap) {
     this._txnSuppress = false;
@@ -1001,8 +1001,10 @@ export class GameState {
   // ---- persistence -----------------------------------------------------
   /** Persist to localStorage. Returns true on success, false on failure (and
    *  sets lastSaveError to a player-facing message so the UI can warn). An
-   *  ephemeral preview game reports success without writing. */
-  save() {
+   *  ephemeral preview game reports success without writing. Pass explicit=true
+   *  for a user-initiated save (Save & quit / keep) so a navigation transaction
+   *  cannot fool it into reporting a success that never wrote (task 168). */
+  save(explicit = false) {
     if (this.ephemeral) { this.lastSaveError = null; return true; } // preview game: not persisted until kept
     // Refresh the current-visit record so the write captures execution state as of now
     // (task 116). Guarded: a provider fault must never block persisting the game itself.
@@ -1013,8 +1015,15 @@ export class GameState {
     // destination fetch (task 167): the price of the move mutates in memory but must not
     // reach storage until the destination is confirmed, so an interrupted/rejected fetch
     // leaves the on-disk record the coherent pre-move source. commitTxn() flushes; a
-    // rollback discards. The in-memory data.visit refresh above still runs.
-    if (this._txnSuppress) { this.lastSaveError = null; return true; }
+    // rollback discards. The in-memory data.visit refresh above still runs. An AUTOsave is
+    // silently deferred (returns true); an EXPLICIT save must NOT claim success it didn't
+    // achieve — report failure with a reason so the caller warns instead of, e.g., quitting
+    // to the title screen believing progress was written (task 168). The app-wide transition
+    // lock normally stops an explicit save from being reached mid-transition at all.
+    if (this._txnSuppress) {
+      if (explicit) { this.lastSaveError = 'A move is still loading — please try saving again in a moment.'; return false; }
+      this.lastSaveError = null; return true;
+    }
     try {
       localStorage.setItem(SAVE_PREFIX + this.slot, JSON.stringify(this.data));
       const meta = loadSlotMeta();
@@ -1059,7 +1068,7 @@ export class GameState {
     const prevSlot = this.slot;
     this.slot = slot;
     this.ephemeral = false;
-    if (!this.save()) {
+    if (!this.save(true)) { // explicit: a suppressed txn must not fake this promotion write (task 168)
       this.slot = prevSlot;
       this.ephemeral = true;
       throw new Error(this.lastSaveError || 'Could not save this adventure.');
