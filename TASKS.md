@@ -2,15 +2,22 @@
 
 Backlog of recommended improvements. Open tasks are filed under priority buckets
 (**HIGH** / **MEDIUM** / **LOW**) — work the first open (`- [ ]`) item top-down;
-each task's detail section carries the same stable ID. **There is currently one
-open task:** work **168**. Completed tasks through 167 are listed under **Done**
-below. Completed detail sections are archived in
+each task's detail section carries the same stable ID. **There are currently five
+open tasks:** work **168**, then **169**, followed by **170–172**. Completed tasks
+through 167 are listed under **Done** below. Completed detail sections are archived in
 [`TASKS-archive.md`](TASKS-archive.md); the Review log at the end of this file
 records each audit pass and is where new work is filed.
 
+**MEDIUM**
+
+- [ ] 168. An open navigation transaction leaves unrelated UI live and globally suppresses its saves
+- [ ] 169. Durable-consequence navigation has no abort/retry contract — failed resurrection, flee, combat or item detours can strand the action
+
 **LOW**
 
-- [ ] 168. Navigation-txn rollback discards a concurrent non-navigating mutation on a failed cross-book move
+- [ ] 170. Centralise duplicated display helpers already owned by `render-util.js`
+- [ ] 171. Deduplicate the single/group combat control shell without merging their rules
+- [ ] 172. Deduplicate roll-widget/gate/memo scaffolding without building a generic roll renderer
 
 **Done**
 
@@ -257,30 +264,144 @@ path, inspect the persisted source record while pending and after rejection,
 then resolve successfully and verify one deduction, one turn, one return frame
 and a released `_navInFlight` guard. Run the full build + browser suite.
 
-## 168. Navigation-txn rollback discards a concurrent non-navigating mutation on a failed cross-book move
+## 168. An open navigation transaction leaves unrelated UI live and globally suppresses its saves
 
-**Priority: LOW — a very narrow, self-introduced window from task 167; near-impossible
-in normal play, filed for transparency.**
+**Priority: MEDIUM — the task-167 transaction is global while the rest of the game
+remains interactive, so a slow cross-book load can lose, misroute or falsely report
+unrelated progress even when the original move succeeds.**
 
-The task-167 navigation transaction snapshots the whole `GameState.data` at the start
-of a move and, on a rejected/missing target, calls `rollbackTxn(snap)` which restores
-that snapshot wholesale. While the transaction is open, `save()` suppresses the storage
-write for *every* mutation, not only the move's own price. So if — during the async
-destination fetch of a **cross-book** move that then **fails** — the player makes an
-unrelated, non-navigating state change (e.g. drinking/dropping a sheet item, which fires
-`changed()` but does not navigate, so the `_navInFlight` guard does not block it), that
-change is applied in memory but not persisted, and the failure rollback then discards it
-along with refunding the price. Same-book moves resolve their fetch synchronously (the
-section is cached), so the window only exists for a cross-book fetch that rejects, which
-is itself rare; the intersection with a concurrent sheet action is negligible. Still,
-before task 167 that concurrent mutation would have been persisted immediately.
+`beginTxn()` snapshots the whole `GameState.data` and sets one global `_txnSuppress`
+flag. Until the target settles, **every** `save()` refreshes the in-memory visit, clears
+`lastSaveError` and returns `true` without touching storage. `_navInFlight` blocks only a
+second `Story.navigate()` call; it does not disable the current section's non-navigation
+actions, Adventure-Sheet controls, app header or game menu. During a slow cross-book
+fetch the player can therefore drink/drop/use an item, buy/rest/resolve another immediate
+action, or press **Save & quit**:
 
-Options: scope the transaction/rollback to only the move's own mutations (harder — the
-price is applied through the same `changed()` path as everything else); or re-apply a
-captured "concurrent delta" after rollback; or accept it and document the window. Decide
-and either fix or explicitly close as won't-fix with rationale. If touched, add a test
-that mutates unrelated state during a pending-then-rejected cross-book navigate and
-asserts the unrelated change survives. Run the full build + browser suite.
+- on rejection, `rollbackTxn(snap)` replaces the whole data object and discards every
+  concurrent mutation along with the move's price;
+- on success, a concurrent mutation can be committed at the destination even though its
+  source-visit memo/return frame was captured before it; an item use that tries its own
+  detour applies/consumes first, then has that second navigation silently ignored by the
+  guard; and
+- explicit Save & quit sees the suppressed `save()` return `true` and can leave the game
+  screen claiming success despite no write for that action.
+
+This is broader than the originally filed failed-fetch/drop intersection. Same-book
+moves still have only a microtask-sized window because their book is cached, but a slow
+or failing cross-book request leaves the live controls exposed long enough to matter.
+
+Make the transition isolate only its own tentative mutations, or enter one explicit
+app-wide transition state that blocks every state-mutating story/sheet/menu action until
+the move settles. A raw persistence primitive must never report a successful explicit
+save merely because a transaction suppressed it. Keep destination+price atomicity,
+failure refund, return-frame semantics and the navigation guard from task 167. While
+touching the commit path, have `commitTxn()` reuse the identical timestamp/save/status
+logic in `commitVisit()` rather than maintaining a second four-line copy.
+
+Add focused tests for a pending cross-book move plus (a) a concurrent non-navigation
+mutation on rejection and success, (b) a charged item whose own detour is attempted, and
+(c) an explicit save attempt. Assert that no action is silently lost/misrouted, no save
+claims success without a write, the original move still commits/rolls back once, and all
+controls/guards recover. Run the full build + browser suite.
+
+## 169. Durable-consequence navigation has no abort/retry contract — failed resurrection, flee, combat or item detours can strand the action
+
+**Priority: MEDIUM — a target-load failure is uncommon, but these paths can consume a
+resurrection or item, apply a wound/reward, and then leave no way to reach or retry the
+section that consequence was meant to open.**
+
+Task 167 transacts only the move's deferred `opts.pay`. Several callers deliberately
+apply and autosave a legitimate consequence **before** calling `Story.navigate()`, so
+`beginTxn()` snapshots the already-mutated state and `abort()` restores only to that
+post-consequence point:
+
+- `handleDeath()` and `renderGroup()` call `reviveWithResurrection()` first, consuming
+  the chosen deal and healing, then navigate to its recorded section. A deal from another
+  book makes this a real cross-book fetch whenever the player dies elsewhere.
+- `Story.useItem()` applies the effect, decrements/removes its charge, then follows an
+  inner goto (Vade Mecum/books/boxes). A failed target can leave the charge spent with no
+  durable pending detour.
+- the duplicated single/group flee handlers apply the parting consequence and mark the
+  fight fled before navigating; a failed target rerenders a spent/fled source with no
+  retry control.
+- combat `roundGoto` and group-action goto paths clear or memoise the triggering action
+  before navigation, so abort can retain the effect while losing the redirect.
+
+Define an abort policy for consequence-bearing moves. Either validate/enter the target
+before committing the consequence, roll the whole action back safely, or persist a
+pending transition/retry control that reaches the target without reapplying the effect.
+Different actions may need different policies (a flee wound may be durable while its
+redirect remains retryable); do not treat them all as refundable prices. Audit every
+`story.navigate()`/`this.navigate()` caller, including resurrection, item use, combat and
+group actions, and document the chosen boundary.
+
+Add rejected/missing-target tests for at least a cross-book resurrection and a charged
+item or flee/round redirect. After failure the player must be in one coherent state:
+either the full action is restored, or the consequence is present exactly once with a
+working retry that cannot repeat it. Success must still consume/apply once and preserve
+the return frame. Run the full build + browser suite.
+
+## 170. Centralise duplicated display helpers already owned by `render-util.js`
+
+**Priority: LOW — small exact copies have already drifted in null/type and bonus-label
+behaviour, but this is presentation/maintenance debt rather than a rules defect.**
+
+The duplication scan found two string helpers in both `ui.js` and
+`render-util.js`: `titleCase()` and `escapeHtml()`. The escape variants already differ
+(`render-util` safely stringifies numbers/null; `ui` assumes a truthy value has
+`.replace`). Item bonus suffixes are also hand-built three times (`ui.js`,
+`render-market.js`, `render-rewards.js`) despite `render-util.itemLabel()` owning the
+same weapon/armour/tool vocabulary; the copies disagree about title casing and whether
+zero bonuses print as `+0`.
+
+Keep `render-util.js` dependency-free and make the view/shell import one canonical
+escape/title implementation. Extract/reuse the smallest bonus-label helper that preserves
+each caller's intentional item-name casing while standardising bonus text; do not force
+all item rendering through one DOM builder. Add direct string tests covering null,
+numbers, HTML metacharacters, weapon/armour/tool bonuses and zero bonus, then keep the
+sheet, award and market render assertions green. Stamp and run the full browser suite.
+
+## 171. Deduplicate the single/group combat control shell without merging their rules
+
+**Priority: LOW — the current duplication works, but it has repeatedly produced parity
+bugs and doubles every persistence/blessing/flee maintenance change.**
+
+`drawGroupFight()` and `drawFight()` correctly use different headless combat rules, but
+their view shells duplicate player stats, live log setup, animated attack guards, flee
+target routing, COMBAT retry, Divine Wrath, Defence through Faith, redraw and
+`commitVisit()` tails. Tasks 83, 87, 91, 162 and 166 all had to repair or update the two
+branches separately; the current file still carries eight parallel commit calls and two
+nearly identical flee handlers. This is now a demonstrated drift risk, not a reason to
+merge `fightRound()` with `groupFightRound()`.
+
+Extract only small local view helpers inside `render-combat.js`: shared player/log rows,
+the animation/visit guard, flee-target routing, and/or a control builder driven by
+explicit callbacks for “living targets”, “resolved”, “redraw” and “commit”. Keep target
+selection, outcome aggregation, group proxy state and the single/group headless rule
+calls visibly separate. Do not create a generic combat framework or move rules into the
+view. Add parity assertions that both widgets expose/consume each blessing, route a flee
+once, drop a stale animated strike and persist a continuing action once. Stamp and run
+the full browser suite.
+
+## 172. Deduplicate roll-widget/gate/memo scaffolding without building a generic roll renderer
+
+**Priority: LOW — bounded view duplication is currently correct, but gate and memo
+changes must be repeated across four roll types and have already diverged.**
+
+`renderDifficulty`, `renderRandom`, `renderRankcheck` and `renderTraining` repeat the
+same keyed `.roll`/`aria-live` widget construction; difficulty/random repeat description
+rendering; difficulty/rankcheck use `rollGateState()` while random reimplements its three
+lines; and result-to-var writes repeat the `setVar` + `wroteVars` + `rolledVars` sequence.
+The exact-window scan found the widget block at four sites and the gate block at two.
+The roll calculations and labels are genuinely different and should remain explicit.
+
+Extract narrow helpers for widget creation, pay-gate/re-arm state and result/memo writes.
+Do not replace the four renderers with a configuration-driven generic roll function —
+that would hide the meaningful differences (ability picker/mode, random var replay and
+travel blessing, rank comparison, training gain). Add focused parity tests for a gated
+difficulty/random/rank check, while-loop pending state, var memo sets and blessing reroll,
+then stamp and run the full browser suite.
 
 ---
 
@@ -289,6 +410,47 @@ asserts the unrelated change survives. Run the full build + browser suite.
 *Running audit log of the backlog — each pass re-verifies the open items against
 the current code and records what was filed, split, or re-confirmed. Task
 numbers refer to the contents checklist at the top of the file.*
+
+Reviewed 2026-07-21 (eighth full pass, including duplication audit): started
+clean at `eac1790` after tasks 166–167 and the initial filing of 168. Re-read
+both implementations line-by-line, traced every `Story.navigate` caller and
+save/commit/status boundary, checked all story/sheet/menu interactions that stay
+live during an async move, and re-audited engine/state/combat/market, renderer
+ownership, production/test imports, content/source-generated boundaries,
+build/SW inputs and documentation. Task **168** is confirmed but upgraded LOW →
+MEDIUM and materially rescoped: `_txnSuppress` is global while unrelated story,
+sheet and explicit Save & quit controls remain active, so the risk includes
+successful moves, ignored secondary detours and false-success explicit saves —
+not only a dropped sheet mutation on a rejected fetch. Filed **169** (MEDIUM):
+task 167 transacts prices but consequence-first resurrection/item/flee/combat
+paths have no rollback-or-retry contract; a cross-book resurrection proves a
+live target can fail after the deal is already consumed.
+
+Duplication verdict: there is **bounded duplication, not repository-wide
+copy-paste sprawl**. A normalized exact-window scan found no eight-line clones
+across the seven focused test suites and only four production windows at that
+size. The actionable copies are filed as LOW maintenance tasks **170–172**:
+canonicalise the duplicated `titleCase`/`escapeHtml` and three item-bonus label
+implementations (170); extract small shared controls from the parallel
+single/group combat views, whose drift already caused tasks 83/87/91/162/166
+(171); and share roll widget/gate/memo primitives while keeping the four roll
+algorithms explicit (172). `commitTxn()`'s exact copy of `commitVisit()` is
+folded into 168 because that transaction must change anyway. Deliberately left
+alone: the purpose-specific `previewProse`/`renderStatic` tree walkers, the
+forced-buy/transfer gate collectors and small market/reward button tails — their
+similarity is local, their policies differ, and another abstraction would cost
+more clarity than it saves. Test fixture rebuilding is intentional suite
+isolation; generated JSON and ignored `*temp.xml`/`*old.xml` source files are not
+production-code duplication.
+
+Organization verdict: the flat dependency-free ES-module structure remains the
+right shape. Rules still live in DOM-free engine/state/planner modules, view
+files remain responsibility-based, the production import graph has no direct
+cycle, and `engine.js`/`state.js` are large but cohesive. No directory move,
+framework, build layer or broad file split is recommended; the targeted tasks
+above are enough. PowerShell 7 build: **4,377 XML files valid**, 4,369 sections
+generated, **no generated-file drift**. Fresh-profile aggregate smoke:
+**`RESULT ALL PASS pass=1526 fail=0`**, including every section of all six books.
 
 Reviewed 2026-07-21 (seventh full pass): started clean at `793ab8e` after tasks
 161–165. Re-traced the cumulative transition/combat persistence changes,
