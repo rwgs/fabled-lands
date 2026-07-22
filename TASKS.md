@@ -2,11 +2,18 @@
 
 Backlog of recommended improvements. Open tasks are filed under priority buckets
 (**HIGH** / **MEDIUM** / **LOW**) — work the first open (`- [ ]`) item top-down;
-each task's detail section carries the same stable ID. **All filed tasks are
-complete** — the backlog has no open items; new findings are filed in the Review
-log below. Completed tasks through 172 are listed under **Done**. Completed detail
-sections are archived in [`TASKS-archive.md`](TASKS-archive.md); the Review log at
-the end of this file records each audit pass and is where new work is filed.
+each task's detail section carries the same stable ID. Completed tasks through 172
+are listed under **Done**. Completed detail sections are archived in
+[`TASKS-archive.md`](TASKS-archive.md); the Review log at the end of this file
+records each audit pass and is where new work is filed.
+
+**MEDIUM**
+
+- [ ] 173. Persist durable-navigation retry targets across save/load
+
+**LOW**
+
+- [ ] 174. Reuse the controllable async-navigation test fixture
 
 **Done**
 
@@ -397,6 +404,53 @@ travel blessing, rank comparison, training gain). Add focused parity tests for a
 difficulty/random/rank check, while-loop pending state, var memo sets and blessing reroll,
 then stamp and run the full browser suite.
 
+## 173. Durable-navigation retry targets disappear on reload — the spent consequence can become a permanent dead end
+
+**Priority: MEDIUM — a destination failure is uncommon, but reloading is a natural
+recovery attempt; it currently keeps the irreversible wound/item/group/combat effect
+while deleting the only control that can finish the move.**
+
+Task 169 keeps an already-applied consequence and arms `Story._pendingRetry` when its
+destination rejects or is missing. `abort()` then calls `rerender()`, whose
+`commitVisit()` correctly persists the post-consequence state. The retry target itself
+is only a transient Story field, however: `serializeVisit()` writes the ctx/frame but no
+pending target, `sanitizeVisit()` only whitelists the existing visit fields, and
+`resume()` never restores `_pendingRetry`. Closing/reloading at the retry screen therefore
+resumes the source with the item charge gone, flee/combat outcome resolved or group action
+memoised, but with neither the original action nor “Try again” available. Task 169's tests
+exercise an in-memory retry only and do not cover this persisted boundary.
+
+Add an optional, validated `{ book, section }` durable-retry field to the v1 visit record
+(or an equivalently coherent persisted transition record), serialise it while the retry
+screen is armed, pass it through `sanitizeVisit()`, and restore it before `resume()` renders.
+Keep the existing boundaries: a fresh/successful `begin()` clears it; refundable failures
+do not create it; a malformed/imported target is discarded; clicking the restored retry
+captures the current source as the return frame and must not re-apply the consequence.
+Do not persist `_navInFlight` or reopen a navigation transaction on load.
+
+Extend the task-169 charged-item or flee fixture through a real save/sanitize/new-Story
+resume: reject the target, assert the saved visit contains the retry, reload and assert the
+retry-only screen is restored, then succeed and verify the target/return frame plus exactly
+one spent charge/wound. Add malformed-field sanitisation coverage and keep a legacy v1
+record without the optional field resumable. Run the full build + browser suite.
+
+## 174. The controllable async-navigation test fixture is copied three times in one suite
+
+**Priority: LOW — test-only maintenance duplication; behaviour is correct, but the mock
+defines the transition contract and can drift when that contract changes again.**
+
+The fresh eight-line window scan finds three overlapping duplicate windows in
+`suite-actions.js`, all from the same `controllable(g, storyRef, dstEl)` helper copied into
+the task-167, task-168 and task-169 blocks (currently near lines 920, 1014 and 1135). Each
+copy builds the identical pending Promise with `ok()` performing `goTo()`/`snapshot()`/
+`begin()` and `reject()` simulating a failed book fetch. This is not intentional suite
+isolation: all three copies are inside the same module and test the same navigation seam.
+
+Move that mock to one suite-local helper and reuse it from the three blocks. Keep each
+scenario's GameState/Story/destination independent, retain the explicit success/rejection
+controls and do not introduce a production abstraction or a shared cross-suite fixture
+framework. Run the focused `actions` suite and the full browser suite.
+
 ---
 
 ## Review log
@@ -404,6 +458,37 @@ then stamp and run the full browser suite.
 *Running audit log of the backlog — each pass re-verifies the open items against
 the current code and records what was filed, split, or re-confirmed. Task
 numbers refer to the contents checklist at the top of the file.*
+
+Reviewed 2026-07-22 (ninth full pass): started clean at `68f7b8f` after tasks
+168–172. Re-read the five implementations and their regressions line-by-line,
+re-traced every navigation consequence/transaction/save/resume boundary, then
+rechecked the unchanged engine/state/combat/market ownership, renderer split,
+production/test imports, source/generated boundary, build/SW inputs and docs.
+Filed **173** (MEDIUM): task 169 persists the durable consequence after a failed
+target but leaves its retry in `Story._pendingRetry`; the v1 visit serializer,
+sanitizer and resume path all omit it, so a reload at the recovery screen keeps
+the spent item/wound/outcome and permanently loses the destination. Existing
+tests prove only the same in-memory Story instance.
+
+Duplication verdict remains **bounded**. A fresh normalized eight-line scan now
+finds one production clone: the local click/append/return tail shared by the
+equipment and profession pickers in `render-rewards.js`; extracting that tail
+would obscure two short, policy-specific controls, so it stays. The only
+actionable copy is the identical controllable navigation Promise repeated three
+times inside `suite-actions.js`; filed as test-only LOW task **174**. Tasks
+170–172 otherwise removed the display/combat/roll copies without creating a
+generic framework, and their rules remain explicit.
+
+Organization verdict: the flat dependency-free ES-module structure is still the
+right shape. The production import graph has no direct cycle; rules modules do
+not construct UI DOM; `render.js` remains a lifecycle/walk facade while the five
+focused view modules own their named controls; and the large `engine.js` and
+`state.js` are well-sectioned single owners rather than candidates for a
+line-count split. Every shipped module is documented and precached. No folder
+move, framework, build layer or broad refactor is recommended. PowerShell 7
+build: **4,377 XML files valid**, 4,369 sections generated, **no generated-file
+drift**. Fresh-profile aggregate smoke: **`RESULT ALL PASS pass=1605 fail=0`**,
+including every section of all six books.
 
 Reviewed 2026-07-21 (eighth full pass, including duplication audit): started
 clean at `eac1790` after tasks 166–167 and the initial filing of 168. Re-read
