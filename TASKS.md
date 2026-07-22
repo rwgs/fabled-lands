@@ -3,14 +3,13 @@
 Backlog of recommended improvements. Open tasks are filed under priority buckets
 (**HIGH** / **MEDIUM** / **LOW**) — work the first open (`- [ ]`) item top-down;
 each task's detail section carries the same stable ID. **All filed tasks are
-complete through 175**; the remaining review findings are filed below as tasks
-176–179. Completed detail sections are archived in
+complete through 176**; the remaining review findings are filed below as tasks
+177–179. Completed detail sections are archived in
 [`TASKS-archive.md`](TASKS-archive.md); the Review log at the end records each
 audit pass.
 
 **MEDIUM**
 
-- [ ] 176. Unavailable-book demo links and imported saves reject outside the recoverable UI
 - [ ] 177. Complete modal keyboard isolation/focus restoration, including the section-view oracle
 
 **LOW**
@@ -198,6 +197,7 @@ section below); detail sections remain in filed order, not this order.*
 - [x] 173. Durable-navigation retry targets disappear on reload — the spent consequence can become a permanent dead end
 - [x] 174. The controllable async-navigation test fixture is copied three times in one suite
 - [x] 175. Blessing rerolls keep the rejected roll's branch effects — damage/rewards can survive or stack
+- [x] 176. Unavailable-book demo links and imported saves reject outside the recoverable UI
 
 ---
 

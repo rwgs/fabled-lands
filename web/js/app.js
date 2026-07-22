@@ -54,14 +54,24 @@ async function startDemo(spec) {
   const section = s || 1;
   // Validate the spec BEFORE building the game screen: a bad ?demo= (e.g. 9.99999) would
   // otherwise toast "Section not found" and strand a blank story pane — fall back to the
-  // title screen instead. (task 152)
-  const sectionEl = await data.getSection(book, section);
-  if (!sectionEl) { toast(`Section ${section} not found in Book ${book}.`, 'warn'); showTitle(); return; }
-  const adv = await getAdvData(book);
-  state = GameState.create({ name: 'Wanderer', gender: 'm', profession: 'Warrior', book, adv });
-  state.ephemeral = true; // a preview: don't create a persistent save unless kept
-  buildGameScreen();
-  await navigate(book, section);
+  // title screen instead. (task 152) An unavailable book (?demo=999.1) REJECTS in the data
+  // layer rather than resolving null, so guard it explicitly against availableBooks() and
+  // wrap the load so a fetch failure can't become an unhandled rejection over a blank
+  // screen — recover to the title screen with a message either way. (task 176)
+  if (!data.availableBooks().includes(book)) {
+    toast(`Book ${book} isn’t available in this edition.`, 'warn'); showTitle(); return;
+  }
+  try {
+    const sectionEl = await data.getSection(book, section);
+    if (!sectionEl) { toast(`Section ${section} not found in Book ${book}.`, 'warn'); showTitle(); return; }
+    const adv = await getAdvData(book);
+    state = GameState.create({ name: 'Wanderer', gender: 'm', profession: 'Warrior', book, adv });
+    state.ephemeral = true; // a preview: don't create a persistent save unless kept
+    buildGameScreen();
+    await navigate(book, section);
+  } catch (e) {
+    toast(`Could not load Book ${book}.`, 'warn'); showTitle();
+  }
 }
 
 /** Modal shown when the player has all 20 save slots occupied. */
@@ -380,7 +390,7 @@ function importSaveFile(after) {
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const { meta } = importSave(JSON.parse(String(reader.result)));
+        const { meta } = importSave(JSON.parse(String(reader.result)), data.availableBooks());
         toast(`Imported “${meta.name}”.`);
         after && after();
       } catch (e) {
@@ -655,14 +665,36 @@ async function startGame(section) {
 }
 
 async function loadCurrent() {
+  // A hand-edited/corrupt slot can name a book this edition doesn't bundle; getSection would
+  // then REJECT (loadBook throws) after buildGameScreen(), stranding a blank game screen. Guard
+  // the current book up front and, defensively, catch any book-load failure — recover to the
+  // saves screen with an actionable message and leave the bad save untouched (no overwrite,
+  // relocate or delete). (task 176)
+  const book = Number(state.data.book);
+  if (!data.availableBooks().includes(book)) {
+    modal({
+      title: 'Adventure unavailable',
+      body: `This adventure is set in ${escapeHtml(data.bookTitle(book))}, which isn’t available in this edition. Your save has not been changed.`,
+      buttons: [{ label: 'Back to saves', value: null, primary: true }],
+    }).then(() => showSaves());
+    return;
+  }
   buildGameScreen();
-  const sec = state.data.section;
-  if (sec == null) { await navigate(state.data.book, 1); return; }
-  const sectionEl = await data.getSection(state.data.book, sec);
-  if (!sectionEl) { await navigate(state.data.book, 1); return; }
-  state.snapshot(); // baseline entry state for undo after a load
-  await resumeOrBegin(sectionEl, state.data.book, sec);
-  narrator.autoplayIfEnabled(currentFlow()); // [TTS]
+  try {
+    const sec = state.data.section;
+    if (sec == null) { await navigate(state.data.book, 1); return; }
+    const sectionEl = await data.getSection(state.data.book, sec);
+    if (!sectionEl) { await navigate(state.data.book, 1); return; }
+    state.snapshot(); // baseline entry state for undo after a load
+    await resumeOrBegin(sectionEl, state.data.book, sec);
+    narrator.autoplayIfEnabled(currentFlow()); // [TTS]
+  } catch (e) {
+    modal({
+      title: 'Could not open adventure',
+      body: `Something went wrong loading this adventure. Your save has not been changed.<br><small>${escapeHtml(String((e && e.message) || e))}</small>`,
+      buttons: [{ label: 'Back to saves', value: null, primary: true }],
+    }).then(() => showSaves());
+  }
 }
 
 // Resume the persisted current visit exactly (task 116). With a matching visit record we

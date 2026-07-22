@@ -644,6 +644,34 @@ export async function run(ctx) {
       deleteSlot(impOkSlot);
     }
 
+    // --- task 176: unavailable-book input rejects inside the recovery UI ---
+    // An import whose current book isn't bundled must be rejected BEFORE a slot is claimed or
+    // written, so Play can never build a game screen that then strands on the rejected fetch.
+    {
+      const avail = data.availableBooks();
+      const impBad = { abilities: { combat: 5 }, stamina: 9, name: 'FarBook', book: 999, section: 1 };
+      const beforeMeta = JSON.stringify(loadSlotMeta());
+      const targetSlot = nextFreeSlot();
+      let badThrew = false, badMsg = '';
+      try { importSave(impBad, avail); } catch (e) { badThrew = true; badMsg = e.message; }
+      ok('task176: import of an unavailable-book save throws', badThrew === true);
+      ok('task176: the message names the unavailable book', /999/.test(badMsg), badMsg);
+      ok('task176: unavailable-book import claims no slot and writes nothing',
+        JSON.stringify(loadSlotMeta()) === beforeMeta && readSlotData(targetSlot) === null);
+      // a bundled-book save still imports normally when availableBooks is supplied
+      const impOk = { abilities: { combat: 5 }, stamina: 9, name: 'HomeBook', book: 1, section: 1 };
+      const { slot: okSlot, meta: okMeta } = importSave(impOk, avail);
+      ok('task176: a bundled-book import still succeeds', okSlot != null && okMeta && okMeta.name === 'HomeBook');
+      deleteSlot(okSlot);
+      // The data-layer seam the demo (startDemo) and load (loadCurrent) guards rely on: an
+      // unavailable book is absent from availableBooks() and getSection() REJECTS for it (it
+      // does NOT resolve null), which is exactly why app.js must guard before fetching.
+      ok('task176: availableBooks() excludes an unbundled book', !avail.includes(999));
+      let secRejected = false;
+      try { await data.getSection(999, '1'); } catch { secRejected = true; }
+      ok('task176: getSection() rejects for an unavailable book', secRejected === true);
+    }
+
     // --- task 137: a save blob orphaned from its fl_meta entry must not vanish or be overwritten ---
     {
       const S = 'fl_save_', M = 'fl_meta';

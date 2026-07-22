@@ -1475,7 +1475,7 @@ export function readSlotData(slot) {
 }
 
 /** Import a save-data object into a new free slot. Returns {slot, meta}. Throws if invalid. */
-export function importSave(data) {
+export function importSave(data, availableBooks = null) {
   // Reject anything that isn't shaped like a save before we bother sanitizing —
   // a plausible FL save is a plain object carrying an `abilities` object and a
   // Stamina value. sanitizeData() then hardens every field (see above).
@@ -1484,9 +1484,19 @@ export function importSave(data) {
       || data.stamina == null) {
     throw new Error('That file is not a valid Fabled Lands save.');
   }
+  const migrated = migrate(data);
+  // Reject a save whose current book isn't bundled in this edition BEFORE claiming or
+  // writing a slot: otherwise Play would build the game screen and then strand it when the
+  // unavailable-book fetch rejects (getSection loads the book, which throws rather than
+  // resolving null). The caller (app.js) supplies availableBooks so this DOM-free model
+  // never imports the data module; omit it and no book gate is applied. (task 176)
+  if (Array.isArray(availableBooks) && availableBooks.length
+      && !availableBooks.map(Number).includes(Number(migrated.book))) {
+    throw new Error(`This adventure is set in Book ${migrated.book}, which isn’t available in this edition.`);
+  }
   const slot = nextFreeSlot();
   if (slot == null) throw new Error('All 20 save slots are full. Delete or export a save before importing.');
-  const gs = new GameState(migrate(data), slot);
+  const gs = new GameState(migrated, slot);
   if (!gs.save()) {
     // The write failed (storage full/blocked). Don't claim the slot or report
     // success: roll back any partial write and raise the storage error so the
