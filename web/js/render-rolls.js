@@ -79,14 +79,56 @@ export function appendBlessingReroll(story, widget, opts, reroll) {
   }
 }
 
-// Pay-to-roll gate state shared by the roll renderers (tasks 30, 51): a flag= roll
-// paired with a [price="k"] cost is armed only while flag k is set. Returns the
-// flag name and whether the roll is gated / currently armed.
-function rollGateState(story, node) {
+// The keyed `.roll`/aria-live widget every roll renderer opens (task 172): the memo key for
+// this node's result (roll@<path>) and the live-region div the result/button lands in.
+function makeRollWidget(container, path) {
+  const widget = document.createElement('div');
+  widget.className = 'roll';
+  widget.setAttribute('aria-live', 'polite'); // announce the resolved dice result to screen readers (task 153)
+  container.appendChild(widget);
+  return { key: 'roll@' + path, widget };
+}
+
+// The descriptive text a <difficulty>/<random> node carries before its widget (task 172):
+// rendered only when it actually has words, so an empty node adds no stray span.
+function appendRollDescription(story, container, node, path) {
+  const desc = document.createElement('span');
+  story.appendChildren(desc, node, path);
+  if (desc.textContent.trim()) container.appendChild(desc);
+}
+
+// Pay-to-roll gate + re-arm state shared by the roll renderers (tasks 30, 51, 172): a flag=
+// roll paired with a [price="k"] cost is armed only while flag k is set. Also drops a stale
+// stored result once the flag is (re-)armed, so a fresh payment starts the per-visit "spin
+// again" cycle. Returns the flag name, whether the roll is gated/armed, and the live stored
+// result (null once re-armed or never rolled).
+function rollGate(story, node, key) {
   const flag = node.getAttribute('flag');
   const gated = flag != null && isRollGate(story.sectionEl, flag);
   const armed = gated ? story.state.getFlag(flag) : true;
-  return { flag, gated, armed };
+  let stored = story.ctx.rolls.get(key);
+  if (gated && armed && stored) { story.ctx.rolls.delete(key); stored = null; }
+  return { flag, gated, armed, stored };
+}
+
+// Hold the enclosing <while> pass on an unrolled roll (task 100): the loop can't advance until
+// the player rolls it, and (for a <random> feeding a var) that var is marked stale so a
+// downstream effect waits for THIS pass's value, not the previous one.
+function markWhilePending(story, stored, varName = null) {
+  if (story.inWhileIter && !story.inactive && !stored) {
+    story.whileIterPending = true;
+    if (varName && story.whileIterPendingVars) story.whileIterPendingVars.add(varName);
+  }
+}
+
+// Write a roll's result into its var= and mark it wrote/rolled this visit (task 172): the
+// setVar + wroteVars + rolledVars sequence every difficulty/random/rankcheck roll repeats.
+// A no-op when the node has no var=.
+function writeRollVar(story, varName, value) {
+  if (!varName) return;
+  story.state.setVar(varName, value);
+  story.ctx.wroteVars.add(varName);
+  story.ctx.rolledVars.add(varName);
 }
 
 // Infer die count from the outcome table this random feeds: if every range
@@ -143,33 +185,24 @@ export function renderDifficulty(story, container, node, path) {
   const mode = ['natural', 'noweapon', 'notool', 'affected'].includes(modRaw) ? modRaw : null;
   const modifier = (node.getAttribute('modifier') != null && !mode) ? resolveValue(story.state, node.getAttribute('modifier')) : 0;
 
-  // its own descriptive text
-  const desc = document.createElement('span');
-  story.appendChildren(desc, node, path);
-  if (desc.textContent.trim()) container.appendChild(desc);
+  appendRollDescription(story, container, node, path); // its own descriptive text
 
-  const key = 'roll@' + path;
-  const widget = document.createElement('div');
-  widget.className = 'roll';
-  widget.setAttribute('aria-live', 'polite'); // announce the resolved dice result to screen readers (task 153)
-  container.appendChild(widget);
+  const { key, widget } = makeRollWidget(container, path);
 
   // Pay-to-roll gate (task 51): a flag= roll paired with a [price=] cost is
   // disabled until the payment sets the flag; rolling consumes it, and a fresh
   // payment re-arms (dropping any stale result). Extends task 30's <random> gate
   // to <difficulty> — book6/731 CHARISMA boon, book2/122/book6/630 "MAGIC or …".
-  const { flag, gated, armed } = rollGateState(story, node);
-  let stored = story.ctx.rolls.get(key);
-  if (gated && armed && stored) { story.ctx.rolls.delete(key); stored = null; }
+  const { flag, gated, armed, stored } = rollGate(story, node, key);
   // An unresolved roll inside a <while> pass holds the loop until the player rolls
   // it (§5.218's per-pass COMBAT re-attempt to wriggle free). (task 100)
-  if (story.inWhileIter && !story.inactive && !stored) story.whileIterPending = true;
+  markWhilePending(story, stored);
   if (stored) {
     const abLabel = (stored.ability || spec.split('|')[0] || '').toUpperCase();
     showDiceResult(widget, stored.dice, `${abLabel} ${stored.abilityScore >= 0 ? '+' : ''}${stored.abilityScore} = ${stored.total} vs ${level}`, stored.success ? 'Success' : 'Failure', stored.success);
     appendBlessingReroll(story, widget, { ability: stored.ability, success: stored.success, kind: 'check' }, () => {
       const res = rollDifficulty(story.state, stored.ability, level, modifier + childAdjustment(node, story.state), mode);
-      if (node.getAttribute('var')) { story.state.setVar(node.getAttribute('var'), res.margin); story.ctx.wroteVars.add(node.getAttribute('var')); story.ctx.rolledVars.add(node.getAttribute('var')); }
+      writeRollVar(story, node.getAttribute('var'), res.margin);
       story.ctx.rolls.set(key, res);
     });
     return widget;
@@ -193,7 +226,7 @@ export function renderDifficulty(story, container, node, path) {
   const btn = rollButton(story, `Roll ${diceLabel} + ${abLabel}`, widget, () => {
     if (gated) story.state.setFlag(flag, false); // consume the payment — re-pay to re-attempt
     const res = rollDifficulty(story.state, ability, level, modifier + childAdjustment(node, story.state), mode);
-    if (node.getAttribute('var')) { story.state.setVar(node.getAttribute('var'), res.margin); story.ctx.wroteVars.add(node.getAttribute('var')); story.ctx.rolledVars.add(node.getAttribute('var')); }
+    writeRollVar(story, node.getAttribute('var'), res.margin);
     story.ctx.rolls.set(key, res);
     story.rerender();
   });
@@ -209,31 +242,27 @@ export function renderRandom(story, container, node, path) {
   if (story.rollGate && node === story.rollGate.rollNode) story.rollGate.rollPath = path;
   const dice = node.hasAttribute('dice') ? parseInt(node.getAttribute('dice'), 10) : inferDice(story, node, 2);
   const varName = node.getAttribute('var');
-  const desc = document.createElement('span');
-  story.appendChildren(desc, node, path);
-  if (desc.textContent.trim()) container.appendChild(desc);
+  appendRollDescription(story, container, node, path);
 
-  const key = 'roll@' + path;
-  const widget = document.createElement('div');
-  widget.className = 'roll';
-  widget.setAttribute('aria-live', 'polite'); // announce the resolved dice result to screen readers (task 153)
-  container.appendChild(widget);
+  const { key, widget } = makeRollWidget(container, path);
 
-  // Pay-gated roll (book2/157 etc.): the roll enables only once its payment sets
-  // the flag; rolling consumes the flag, and a fresh payment re-arms it. (task 30)
-  const flag = node.getAttribute('flag');
-  const gated = flag != null && isRollGate(story.sectionEl, flag);
-  const armed = gated ? story.state.getFlag(flag) : true;
-  let stored = story.ctx.rolls.get(key);
-  // Re-arm: a new payment (flag set again) after a prior spin drops the old result
-  // so the player can roll afresh — the per-visit "spin again" cycle.
-  if (gated && armed && stored) { story.ctx.rolls.delete(key); stored = null; }
+  // Pay-gated roll (book2/157 etc.): the roll enables only once its payment sets the flag;
+  // rolling consumes the flag, and a fresh payment re-arms it (dropping the old result). (task 30)
+  const { flag, gated, armed, stored } = rollGate(story, node, key);
   // A <while> pass that has not yet rolled blocks the loop and marks its var stale
   // (so its downstream `<lose stamina="x">` waits for THIS six, not the last). (task 100)
-  if (story.inWhileIter && !story.inactive && !stored) {
-    story.whileIterPending = true;
-    if (varName && story.whileIterPendingVars) story.whileIterPendingVars.add(varName);
-  }
+  markWhilePending(story, stored, varName);
+
+  // One shared "spin the dice" action: consume the payment if gated, roll + apply the node's
+  // <adjust> children, and store the result under its var. Reused by the first roll and by a
+  // blessing reroll (which does not itself re-render — appendBlessingReroll does).
+  const spin = () => {
+    if (gated) story.state.setFlag(flag, false); // consume the payment — re-pay to spin again
+    const r = rollDice(dice);
+    const total = r.total + childAdjustment(node, story.state);
+    writeRollVar(story, varName, total);
+    story.ctx.rolls.set(key, { kind: 'random', dice: r.dice, total });
+  };
 
   if (stored) {
     // Re-assert this roll's value into its var on every render so a var re-rolled
@@ -243,27 +272,13 @@ export function renderRandom(story, container, node, path) {
     showDiceResult(widget, stored.dice, `Rolled ${stored.total}`, '', true);
     // Luck rerolls any dice result; Safe Travel rerolls a type="travel" encounter.
     const travel = (node.getAttribute('type') || '').toLowerCase() === 'travel';
-    appendBlessingReroll(story, widget, { kind: 'random', travel }, () => {
-      const r = rollDice(dice);
-      const total = r.total + childAdjustment(node, story.state);
-      const res = { kind: 'random', dice: r.dice, total };
-      if (varName) { story.state.setVar(varName, total); story.ctx.wroteVars.add(varName); story.ctx.rolledVars.add(varName); }
-      story.ctx.rolls.set(key, res);
-    });
+    appendBlessingReroll(story, widget, { kind: 'random', travel }, spin);
   } else if (gated && !armed) {
     const btn = rollButton(story, `Roll ${diceWord(dice)}`, widget, () => {});
     btn.disabled = true; btn.title = 'Pay first to make this roll.';
     widget.appendChild(btn);
   } else {
-    widget.appendChild(rollButton(story, `Roll ${diceWord(dice)}`, widget, () => {
-      if (gated) story.state.setFlag(flag, false); // consume the payment — re-pay to spin again
-      const r = rollDice(dice);
-      const total = r.total + childAdjustment(node, story.state);
-      const res = { kind: 'random', dice: r.dice, total };
-      if (varName) { story.state.setVar(varName, total); story.ctx.wroteVars.add(varName); story.ctx.rolledVars.add(varName); }
-      story.ctx.rolls.set(key, res);
-      story.rerender();
-    }));
+    widget.appendChild(rollButton(story, `Roll ${diceWord(dice)}`, widget, () => { spin(); story.rerender(); }));
   }
   return widget;
 }
@@ -271,21 +286,15 @@ export function renderRandom(story, container, node, path) {
 export function renderRankcheck(story, container, node, path) {
   const dice = parseInt(node.getAttribute('dice') || '1', 10);
   const add = parseInt(node.getAttribute('add') || '0', 10);
-  const key = 'roll@' + path;
-  const widget = document.createElement('div');
-  widget.className = 'roll';
-  widget.setAttribute('aria-live', 'polite'); // announce the resolved dice result to screen readers (task 153)
-  container.appendChild(widget);
+  const { key, widget } = makeRollWidget(container, path);
   // Pay-to-roll gate (task 51), as for <difficulty>/<random>.
-  const { flag, gated, armed } = rollGateState(story, node);
-  let stored = story.ctx.rolls.get(key);
-  if (gated && armed && stored) { story.ctx.rolls.delete(key); stored = null; }
-  if (story.inWhileIter && !story.inactive && !stored) story.whileIterPending = true; // hold a <while> pass (task 100)
+  const { flag, gated, armed, stored } = rollGate(story, node, key);
+  markWhilePending(story, stored); // hold a <while> pass (task 100)
   if (stored) {
     showDiceResult(widget, stored.dice, `Rolled ${stored.total} vs Rank ${story.state.rankValue()}`, stored.success ? 'Success' : 'Failure', stored.success);
     appendBlessingReroll(story, widget, { success: stored.success, kind: 'check' }, () => {
       const res = rollRankCheck(story.state, dice, add, childAdjustment(node, story.state));
-      if (node.getAttribute('var')) { story.state.setVar(node.getAttribute('var'), res.margin); story.ctx.wroteVars.add(node.getAttribute('var')); story.ctx.rolledVars.add(node.getAttribute('var')); }
+      writeRollVar(story, node.getAttribute('var'), res.margin);
       story.ctx.rolls.set(key, res);
     });
   } else if (gated && !armed) {
@@ -296,7 +305,7 @@ export function renderRankcheck(story, container, node, path) {
     widget.appendChild(rollButton(story, `Rank check (roll ${diceWord(dice)})`, widget, () => {
       if (gated) story.state.setFlag(flag, false); // consume the payment
       const res = rollRankCheck(story.state, dice, add, childAdjustment(node, story.state));
-      if (node.getAttribute('var')) { story.state.setVar(node.getAttribute('var'), res.margin); story.ctx.wroteVars.add(node.getAttribute('var')); story.ctx.rolledVars.add(node.getAttribute('var')); }
+      writeRollVar(story, node.getAttribute('var'), res.margin);
       story.ctx.rolls.set(key, res);
       story.rerender();
     }));
@@ -311,13 +320,9 @@ export function renderTraining(story, container, node, path) {
   const multi = spec === '' || spec === '?' || spec.includes('|');
   const dice = parseInt(node.getAttribute('dice') || '2', 10);
   const add = parseInt(node.getAttribute('add') || '0', 10);
-  const key = 'roll@' + path;
-  const widget = document.createElement('div');
-  widget.className = 'roll';
-  widget.setAttribute('aria-live', 'polite'); // announce the resolved dice result to screen readers (task 153)
-  container.appendChild(widget);
-  const stored = story.ctx.rolls.get(key);
-  if (story.inWhileIter && !story.inactive && !stored) story.whileIterPending = true; // hold a <while> pass (task 100)
+  const { key, widget } = makeRollWidget(container, path);
+  const stored = story.ctx.rolls.get(key); // <training> has no pay gate — a plain memo lookup
+  markWhilePending(story, stored); // hold a <while> pass (task 100)
   if (stored) {
     const ab = stored.ability;
     showDiceResult(widget, stored.dice, `Rolled ${stored.total} vs ${ab.toUpperCase()} ${stored.natural}`, stored.success ? `+1 ${ab.toUpperCase()}` : 'No gain', stored.success);

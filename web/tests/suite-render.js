@@ -205,6 +205,65 @@ export async function run(ctx) {
       window.__FL_INSTANT_DICE__ = false; // restore
     }
 
+    // --- task 172: the four roll renderers share widget/gate/memo scaffolding (parity) -----
+    // renderDifficulty/renderRandom/renderRankcheck/renderTraining now build their keyed
+    // .roll widget, pay-gate/re-arm state, while-pending hold and result→var memo through
+    // shared helpers (their DIFFERENT calculations stay explicit). These assert the pay gate,
+    // the var memo, the while-loop hold and the blessing reroll behave the same across types.
+    {
+      window.__FL_INSTANT_DICE__ = true;
+      const settle172 = () => new Promise((r) => setTimeout(r, 20));
+      const mkRoll = (xml, name) => {
+        const g = GameState.create({ name:'R172', gender:'m', profession:'Warrior', book:1, adv });
+        g.ephemeral = true; g.data.stamina = 30; g.data.staminaMax = 30; g.data.abilities.combat = 8;
+        const c = document.createElement('div');
+        const st = new Story(c, g, { navigate(){}, onDeath(){}, notify(){} });
+        g.setVisitProvider(() => st.serializeVisit());
+        st.begin(parse(xml), 1, name);
+        return { g, c, st };
+      };
+      const rollBtn = (c) => Array.from(c.querySelectorAll('.roll .btn-roll')).find((b) => /Roll|Rank check/.test(b.textContent));
+
+      // (gated parity) each roll type is disabled until its flag is paid, then armed; rolling
+      // consumes the flag and writes its var into the visit memo (wroteVars + rolledVars).
+      const gatedCases = [
+        { xml: '<section name="GD"><difficulty ability="COMBAT" level="4" flag="g" var="m"/></section>', name: 'GD', v: 'm' },
+        { xml: '<section name="GR"><random dice="2" flag="g" var="r"/></section>', name: 'GR', v: 'r' },
+        { xml: '<section name="GK"><rankcheck dice="1" flag="g" var="k"/></section>', name: 'GK', v: 'k' },
+      ];
+      for (const tc of gatedCases) {
+        const r = mkRoll(tc.xml, tc.name);
+        ok(`task172-gate(${tc.name}): unpaid the roll button is disabled`, !!rollBtn(r.c) && rollBtn(r.c).disabled === true);
+        r.g.setFlag('g', true); r.st.rerender();
+        ok(`task172-gate(${tc.name}): paying arms the roll button`, !!rollBtn(r.c) && rollBtn(r.c).disabled === false);
+        rollBtn(r.c).click(); await settle172();
+        ok(`task172-gate(${tc.name}): rolling consumes the payment flag`, r.g.getFlag('g') === false);
+        ok(`task172-gate(${tc.name}): rolling writes + memoises its var`, r.g.hasVar(tc.v) && r.st.ctx.wroteVars.has(tc.v) && r.st.ctx.rolledVars.has(tc.v));
+      }
+
+      // (while-pending parity) an unrolled roll inside a <while> holds the loop: the roll is
+      // shown, the loop blocks the section, and the post-loop content stays hidden.
+      {
+        const w = mkRoll('<section name="W172"><while var="w"><p>TRYING</p><random var="w" dice="1"/></while><p>ESCAPED</p></section>', 'W172');
+        ok('task172-while: an unrolled roll holds the loop and hides the post-loop content',
+           w.st.blocked === true && !!w.c.querySelector('.roll .btn-roll') && !/ESCAPED/.test(w.c.textContent), w.c.textContent.replace(/\s+/g, ' ').slice(0, 80));
+      }
+
+      // (blessing reroll parity) a FAILED check offers a Luck reroll that re-rolls and consumes
+      // the blessing (an unbeatable level forces the failure so the reroll is offered).
+      {
+        const b = mkRoll('<section name="B172"><difficulty ability="COMBAT" level="99" var="m"/></section>', 'B172');
+        b.g.addBlessing('luck');
+        rollBtn(b.c).click(); await settle172();
+        const rr = () => Array.from(b.c.querySelectorAll('.blessing-reroll')).find((x) => /reroll/i.test(x.textContent));
+        ok('task172-reroll: a failed roll offers a Luck reroll', !!rr());
+        rr().click(); await settle172();
+        ok('task172-reroll: using the reroll consumes the Luck blessing', !b.g.hasBlessing('luck'));
+      }
+
+      window.__FL_INSTANT_DICE__ = false;
+    }
+
     // --- interaction: clicking a choice navigates ---
     let navd = null;
     const story3 = new Story(container, gs, { navigate:(b,s)=>{navd={b,s};}, onDeath(){}, notify(){} });
