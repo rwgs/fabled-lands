@@ -13,6 +13,21 @@ export async function run(ctx) {
   const { ok, parse } = ctx;
   await data.loadMeta();
   const adv = data.parseAdventurers(data.bookInfo(1).adventurers);
+  // A controllable raw navigate mirroring app.navigate (tasks 167–169/173, shared per task
+  // 174): it returns a promise the test settles as success (enter the destination) or
+  // rejection (the book fetch failed). Each scenario passes its own GameState/Story/destination
+  // and drives box.pending.ok()/reject() explicitly, so the navigation seam's contract lives in
+  // one place instead of four copies.
+  const controllable = (g, storyRef, dstEl) => {
+    const box = { pending: null };
+    box.enter = (b, s) => new Promise((resolve, reject) => {
+      box.pending = {
+        ok: () => { g.goTo(b, s); g.snapshot(); storyRef().begin(dstEl, b, s); resolve(true); },
+        reject: () => reject(new Error('book fetch failed')),
+      };
+    });
+    return box;
+  };
     // --- task 104: travel/encounter roll gates the onward choices ---
     // A mandatory <random> → <outcomes> → <choices> section must be rolled before the
     // onward destinations unlock, and a "get lost" outcome carrying its own <goto>
@@ -915,18 +930,6 @@ export async function run(ctx) {
     // source live with the in-flight guard released; a successful fetch takes it exactly once.
     {
       const tick = () => new Promise((r) => setTimeout(r, 0)); // flush the navigate microtasks
-      // A controllable raw navigate mirroring app.navigate: it returns a promise the test
-      // settles as success (enter the destination) or rejection (the book fetch failed).
-      const controllable = (g, storyRef, dstEl) => {
-        const box = { pending: null };
-        box.enter = (b, s) => new Promise((resolve, reject) => {
-          box.pending = {
-            ok: () => { g.goTo(b, s); g.snapshot(); storyRef().begin(dstEl, b, s); resolve(true); },
-            reject: () => reject(new Error('book fetch failed')),
-          };
-        });
-        return box;
-      };
 
       // Scenario A — a paid cross-book <choice>: reject the target, then retry and succeed.
       {
@@ -1011,16 +1014,6 @@ export async function run(ctx) {
     // longer reports a success the suppressed txn never wrote.
     {
       const tick = () => new Promise((r) => setTimeout(r, 0)); // flush the navigate microtasks
-      const controllable = (g, storyRef, dstEl) => {
-        const box = { pending: null };
-        box.enter = (b, s) => new Promise((resolve, reject) => {
-          box.pending = {
-            ok: () => { g.goTo(b, s); g.snapshot(); storyRef().begin(dstEl, b, s); resolve(true); },
-            reject: () => reject(new Error('book fetch failed')),
-          };
-        });
-        return box;
-      };
 
       // (a) a concurrent non-navigation mutation (a Rest) during a pending paid cross-book move,
       //     on BOTH the rollback and the success path.
@@ -1132,16 +1125,6 @@ export async function run(ctx) {
     // and preserves the return frame.
     {
       const tick = () => new Promise((r) => setTimeout(r, 0));
-      const controllable = (g, storyRef, dstEl) => {
-        const box = { pending: null };
-        box.enter = (b, s) => new Promise((resolve, reject) => {
-          box.pending = {
-            ok: () => { g.goTo(b, s); g.snapshot(); storyRef().begin(dstEl, b, s); resolve(true); },
-            reject: () => reject(new Error('book fetch failed')),
-          };
-        });
-        return box;
-      };
       const retryBtn = (cont) => Array.from(cont.querySelectorAll('button')).find((b) => /Try again/.test(b.textContent));
 
       // (res) cross-book resurrection on death: a rejected target refunds the deal (still dead);
@@ -1243,16 +1226,6 @@ export async function run(ctx) {
     // consequence. A malformed target is discarded; a legacy record with no field still loads.
     {
       const tick = () => new Promise((r) => setTimeout(r, 0));
-      const controllable = (g, storyRef, dstEl) => {
-        const box = { pending: null };
-        box.enter = (b, s) => new Promise((resolve, reject) => {
-          box.pending = {
-            ok: () => { g.goTo(b, s); g.snapshot(); storyRef().begin(dstEl, b, s); resolve(true); },
-            reject: () => reject(new Error('book fetch failed')),
-          };
-        });
-        return box;
-      };
       const retryBtn = (cont) => Array.from(cont.querySelectorAll('button')).find((b) => /Try again/.test(b.textContent));
       const fleeBtn = (cont) => Array.from(cont.querySelectorAll('button')).find((b) => b.textContent.trim() === 'Flee');
       const attackBtn = (cont) => Array.from(cont.querySelectorAll('.btn-roll')).find((b) => /Attack/.test(b.textContent));

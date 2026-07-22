@@ -2,14 +2,11 @@
 
 Backlog of recommended improvements. Open tasks are filed under priority buckets
 (**HIGH** / **MEDIUM** / **LOW**) — work the first open (`- [ ]`) item top-down;
-each task's detail section carries the same stable ID. Completed tasks through 173
-are listed under **Done**. Completed detail sections are archived in
-[`TASKS-archive.md`](TASKS-archive.md); the Review log at the end of this file
-records each audit pass and is where new work is filed.
-
-**LOW**
-
-- [ ] 174. Reuse the controllable async-navigation test fixture
+each task's detail section carries the same stable ID. **All filed tasks are
+complete** — the backlog has no open items; new findings are filed in the Review
+log below. Completed tasks through 174 are listed under **Done**. Completed detail
+sections are archived in [`TASKS-archive.md`](TASKS-archive.md); the Review log at
+the end of this file records each audit pass and is where new work is filed.
 
 **Done**
 
@@ -189,6 +186,7 @@ section below); detail sections remain in filed order, not this order.*
 - [x] 171. Deduplicate the single/group combat control shell without merging their rules
 - [x] 172. Deduplicate roll-widget/gate/memo scaffolding without building a generic roll renderer
 - [x] 173. Durable-navigation retry targets disappear on reload — the spent consequence can become a permanent dead end
+- [x] 174. The controllable async-navigation test fixture is copied three times in one suite
 
 ---
 
