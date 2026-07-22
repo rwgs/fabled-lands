@@ -1124,6 +1124,118 @@ export async function run(ctx) {
       }
     }
 
+    // --- task 169: consequence-bearing navigation has an abort/retry contract --------------
+    // A target-load failure must leave the player in one coherent state. Resurrection-on-death
+    // REFUNDS the deal (the deal is intact and the death prompt re-appears); a durable
+    // consequence (a flee wound, a spent item charge, a resolved combat round) STAYS applied
+    // and offers a retry that reaches the target without re-applying it. Success consumes once
+    // and preserves the return frame.
+    {
+      const tick = () => new Promise((r) => setTimeout(r, 0));
+      const controllable = (g, storyRef, dstEl) => {
+        const box = { pending: null };
+        box.enter = (b, s) => new Promise((resolve, reject) => {
+          box.pending = {
+            ok: () => { g.goTo(b, s); g.snapshot(); storyRef().begin(dstEl, b, s); resolve(true); },
+            reject: () => reject(new Error('book fetch failed')),
+          };
+        });
+        return box;
+      };
+      const retryBtn = (cont) => Array.from(cont.querySelectorAll('button')).find((b) => /Try again/.test(b.textContent));
+
+      // (res) cross-book resurrection on death: a rejected target refunds the deal (still dead);
+      // a confirmed target revives exactly once at the deal's section, keeping a return frame.
+      {
+        const secDied = parse('<section name="DIED"><p>You fall.</p></section>');
+        const secDeal = parse('<section name="200"><p>Back among the living.</p></section>');
+        const g = GameState.create({ name:'T169r', gender:'m', profession:'Warrior', book:1, adv });
+        g.slot = 24;
+        g.addResurrection({ book: 3, section: '200', god: 'Alvir' });
+        g.data.stamina = 0; // dead
+        const cont = document.createElement('div');
+        let story;
+        const nav = controllable(g, () => story, secDeal);
+        story = new Story(cont, g, { navigate: nav.enter, onDeath(){}, notify(){} });
+        g.setVisitProvider(() => story.serializeVisit());
+        g.goTo(1, 'DIED'); story.begin(secDied, 1, 'DIED');
+        ok('task169-res: the player starts dead with one deal arranged', g.isDead() && g.data.resurrections.length === 1);
+        // Mirror handleDeath: peek the deal's target, defer the revive into the move's pay.
+        const revive = () => story.navigate(3, '200', { pay: () => { eng.reviveWithResurrection(g, 0); return true; } });
+
+        revive();
+        ok('task169-res: while pending the deal is consumed and Stamina healed in memory', g.data.resurrections.length === 0 && g.data.stamina > 0 && story._navInFlight === true);
+        nav.pending.reject(); await tick();
+        ok('task169-res: a rejected target refunds the deal and leaves the player dead', g.data.resurrections.length === 1 && g.isDead());
+        ok('task169-res: a rejected target releases the guard and stays on the death section', story._navInFlight === false && story.section === 'DIED');
+
+        revive(); nav.pending.ok(); await tick();
+        ok('task169-res: a successful revive consumes the deal exactly once and heals', g.data.resurrections.length === 0 && g.data.stamina > 0);
+        ok('task169-res: a successful revive reaches the deal section', story.section === '200' && Number(g.data.book) === 3);
+        ok('task169-res: a successful revive preserves a return frame to the death section', !!story._returnFrame && story._returnFrame.section === 'DIED');
+        deleteSlot(24);
+      }
+
+      // (item) a charged item detour: the charge is durable; a rejected target arms a retry that
+      // reaches the detour WITHOUT re-spending the charge; success consumes the charge once.
+      {
+        const secSrc = parse('<section name="ITEMSRC"><p>Consult the tome.</p></section>');
+        const secDetour = parse('<section name="600"><p>A secret is revealed.</p></section>');
+        const g = GameState.create({ name:'T169i', gender:'m', profession:'Warrior', book:1, adv });
+        g.slot = 25;
+        const cont = document.createElement('div');
+        let story;
+        const nav = controllable(g, () => story, secDetour);
+        story = new Story(cont, g, { navigate: nav.enter, onDeath(){}, notify(){} });
+        g.setVisitProvider(() => story.serializeVisit());
+        g.goTo(1, 'ITEMSRC'); story.begin(secSrc, 1, 'ITEMSRC');
+        const item = makeItem('tool', 'ancient tome', 0, null, []);
+        g.data.items.push(item);
+        const effect = { uses: 1, body: '<goto section="600" book="3"/>' };
+
+        story.useItem(item, effect, data.parseXml('<effect><goto section="600" book="3"/></effect>'));
+        ok('task169-item: using the item consumes the charge (durable) and holds the guard', effect.uses === 0 && !g.data.items.some((it) => it.id === item.id) && story._navInFlight === true);
+        nav.pending.reject(); await tick();
+        ok('task169-item: a rejected detour keeps the charge spent (not refunded)', effect.uses === 0 && !g.data.items.some((it) => it.id === item.id));
+        ok('task169-item: a rejected detour arms a retry (guard released, retry shown)', story._navInFlight === false && !!retryBtn(cont));
+
+        retryBtn(cont).click(); nav.pending.ok(); await tick();
+        ok('task169-item: the retry reaches the detour', story.section === '600' && Number(g.data.book) === 3);
+        ok('task169-item: the retry did not re-consume a charge (item still gone, spent once)', !g.data.items.some((it) => it.id === item.id));
+        ok('task169-item: the retry preserves a return frame to the source', !!story._returnFrame && story._returnFrame.section === 'ITEMSRC');
+        deleteSlot(25);
+      }
+
+      // (flee) a fight escape: the parting wound is durable; a rejected target arms a retry that
+      // reaches the escape section WITHOUT re-applying the wound; the fight is not a dead end.
+      {
+        const secSrc = parse('<section name="FLEESRC"><p>A monster blocks the way.</p><fight name="Ogre" combat="6" defence="30" stamina="20"/><flee><lose stamina="2"/><goto section="745" book="2"/>Run for it</flee></section>');
+        const secTarget = parse('<section name="745"><p>Safe at last.</p></section>');
+        const g = GameState.create({ name:'T169f', gender:'m', profession:'Warrior', book:1, adv });
+        g.slot = 26; g.data.stamina = g.data.staminaMax;
+        const cont = document.createElement('div');
+        let story;
+        const nav = controllable(g, () => story, secTarget);
+        story = new Story(cont, g, { navigate: nav.enter, onDeath(){}, notify(){} });
+        g.setVisitProvider(() => story.serializeVisit());
+        g.goTo(1, 'FLEESRC'); story.begin(secSrc, 1, 'FLEESRC');
+        const fleeBtn = () => Array.from(cont.querySelectorAll('button')).find((b) => /^Flee$/.test(b.textContent.trim()));
+        const stam0 = g.data.stamina;
+        ok('task169-flee: the fight offers a Flee button', !!fleeBtn());
+
+        fleeBtn().click(); // applies the parting wound (durable), marks fled, navigates
+        ok('task169-flee: fleeing applies the parting wound (durable) and holds the guard', g.data.stamina === stam0 - 2 && story._navInFlight === true);
+        nav.pending.reject(); await tick();
+        ok('task169-flee: a rejected escape keeps the wound (not refunded)', g.data.stamina === stam0 - 2);
+        ok('task169-flee: a rejected escape arms a retry and is no Attack/Flee dead-end', story._navInFlight === false && !!retryBtn(cont) && !fleeBtn());
+
+        retryBtn(cont).click(); nav.pending.ok(); await tick();
+        ok('task169-flee: the retry reaches the escape target', story.section === '745' && Number(g.data.book) === 2);
+        ok('task169-flee: the retry did not re-apply the wound (still one wound)', g.data.stamina === stam0 - 2);
+        deleteSlot(26);
+      }
+    }
+
     // --- task 117: priced equipment/cargo losses can't arm a reward without taking payment ---
     // §2.90 forfeits a weapon OR armour (price=x) to renounce Elnir; §3.569 trades a named
     // Cargo Unit (price=x) for two textiles. An ineligible forfeit button (no such

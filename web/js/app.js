@@ -719,10 +719,20 @@ async function handleDeath() {
       });
       dealIndex = typeof pick === 'number' ? pick : 0;
     }
-    const target = reviveWithResurrection(state, dealIndex); // revive rule lives in engine.js (tasks 34, 159)
     // Route through Story's single navigation entry point so the leave hooks run and no
-    // stale return frame lingers for the resurrection section's <return> (task 115).
-    if (target) { if (story) story.navigate(target.book, target.section); else navigate(target.book, target.section); }
+    // stale return frame lingers for the resurrection section's <return> (task 115). Defer the
+    // deal into the transactional navigate (task 169): peek the target, then consume the deal
+    // and heal ONLY inside the move (opts.pay). A deal from another book is a real cross-book
+    // fetch; a failed/missing target refunds it — deal intact, still dead — and the death
+    // prompt re-appears, so a resurrection can never be spent on a section we couldn't reach.
+    // A confirmed target revives exactly once. (revive rule lives in engine.js — tasks 34, 159)
+    const deal = state.data.resurrections[dealIndex] || state.data.resurrections[0];
+    if (deal && story) {
+      story.navigate(deal.book, deal.section, { pay: () => { reviveWithResurrection(state, dealIndex); return true; } });
+    } else if (deal) {
+      const target = reviveWithResurrection(state, dealIndex); // no Story yet: revive + raw navigate
+      if (target) navigate(target.book, target.section);
+    }
   } else if (choice === 'undo') { undo(); }
   else if (choice === 'load') { showSaves(); }
   else { showCreate(); }

@@ -158,13 +158,19 @@ export class Story {
     // (gone ashore) exempts nothing, so every at-large ship docks and the voyage ends. (task 81)
     const rawNavigate = opts.navigate;
     // A mutation-bearing move is transactional across target validation and the source →
-    // destination hand-off (task 167). opts.pay (optional) is the PRICE of the move — a
-    // choice cost, a blessing/ship spend — deferred so it is applied in memory but neither
-    // persisted nor kept unless the destination actually loads: a rejected/missing target
-    // refunds it and leaves the source live. opts.sourceNode overrides the return-frame's
-    // crossed action (else the caller's _pendingSourceNode is used). Immediate consequences
-    // (a flee wound, a combat round, an item charge) are applied by the caller before this,
-    // are already durable, and are intentionally NOT refunded — only the move is guarded.
+    // destination hand-off (task 167). A move carries at most one of two consequence policies,
+    // chosen per caller (task 169 — the abort/retry boundary):
+    //   • opts.pay — a REFUNDABLE price (a choice cost, a blessing/ship spend, or the
+    //     resurrection deal on death): applied in memory but neither persisted nor kept unless
+    //     the destination loads. A rejected/missing target refunds it and leaves the source
+    //     live to retry (resurrection-on-death refunds the deal and re-prompts death).
+    //   • opts.durable — the caller already applied a consequence that must STAY (a flee wound,
+    //     a resolved combat round, a revival price / spent item charge). The rollback restores
+    //     to the post-consequence snapshot, so the effect survives; on a failed target the
+    //     wrapper arms a retry (_pendingRetry) that re-reaches this SAME target WITHOUT
+    //     re-applying the effect, instead of a spent dead-end source.
+    // opts.sourceNode overrides the return-frame's crossed action (else the caller's
+    // _pendingSourceNode is used).
     this.navigate = (book, section, opts2 = {}) => {
       // In-flight guard (task 147): rawNavigate (app.navigate) awaits a possibly-slow
       // cross-book section fetch before begin() completes. Without this, a second click
@@ -197,6 +203,13 @@ export class Story {
         this.deferredCleanups = pre.deferredCleanups;
         this._pendingSourceNode = null;
         this._navInFlight = false;
+        // A durable-consequence move (a flee wound, a resolved combat round, a revival price)
+        // already applied its effect — the rollback restores to the post-effect snapshot, so
+        // the effect survives. Refunding it would be wrong (task 169), so instead of a spent
+        // dead-end source we arm a retry that re-reaches the SAME target without re-applying
+        // it. A refundable move (opts.pay) leaves the source live and just rerenders, so the
+        // player re-clicks the original control.
+        if (opts2.durable) this._pendingRetry = { book, section };
         if (e) this.notify('Could not load that section — please try again.', 'warn');
         this.rerender();
       };
@@ -269,6 +282,12 @@ export class Story {
     this.root.addEventListener('click', (e) => {
       if (this._navInFlight) { e.stopImmediatePropagation(); e.preventDefault(); }
     }, true);
+    // Retry target for a durable-consequence move whose destination failed to load (task 169).
+    // The effect (a flee wound, a resolved combat round, a revival price) has already applied,
+    // so rather than a spent dead-end source we present a retry that re-reaches this SAME
+    // target WITHOUT re-applying the effect. Set by navigate()'s abort when opts.durable is
+    // passed; cleared by begin() on a successful arrival. { book, section } or null.
+    this._pendingRetry = null;
   }
 
   // Snapshot the current visit so a later <return> can restore it (task 110). Null
@@ -312,6 +331,7 @@ export class Story {
   /** Begin a fresh visit of a section element. */
   begin(sectionEl, book, section) {
     this._navInFlight = false; // the transition has arrived — release the navigate guard (task 147)
+    this._pendingRetry = null; // a successful arrival clears any pending durable-move retry (task 169)
     this.sectionEl = sectionEl;
     this.book = book;
     this.section = section;
@@ -402,7 +422,9 @@ export class Story {
     const res = useItemEffect(this.state, item, effect, bodyNode);
     if (res.removeItem) this.state.removeItemById(item.id);
     if (res.goto && res.goto.section != null) {
-      this.navigate(res.goto.book || this.book || this.state.data.book, res.goto.section);
+      // The charge is already spent (durable) — mark the detour durable so a failed target
+      // offers a retry that reaches it rather than wasting the charge on a dropped move. (task 169)
+      this.navigate(res.goto.book || this.book || this.state.data.book, res.goto.section, { durable: true });
     } else {
       this.rerender();
     }
@@ -514,6 +536,10 @@ export class Story {
 
   render() {
     this.root.innerHTML = '';
+    // A durable-consequence move whose target failed to load (task 169): show a retry that
+    // re-reaches the target without re-applying the effect, and suppress the rest of the
+    // section so a stale Attack/Flee/group action can't re-trigger the consequence.
+    if (this._pendingRetry) { this._renderRetry(); return; }
     const el = this.sectionEl;
 
     // Section illustration (gracefully hidden if the image file is absent).
@@ -627,6 +653,29 @@ export class Story {
     const deathDeferred = this.sectionFight && this.sectionFight.outcome === 'lose'
       && this.fightGate && this.fightGate.hasLosePath;
     if (this.state.isDead() && !deathDeferred) this.onDeath();
+  }
+
+  // The retry view for a durable-consequence move whose destination failed to load (task 169).
+  // The consequence stayed applied; this button re-attempts the SAME target as another durable
+  // move, so a repeated failure re-arms the retry and a success clears it (via begin()).
+  _renderRetry() {
+    const label = document.createElement('div');
+    label.className = 'section-num';
+    label.textContent = `${bookTitle(this.book)} · ${this.section}`;
+    this.root.appendChild(label);
+    const flow = document.createElement('div');
+    flow.className = 'flow';
+    const msg = document.createElement('p');
+    msg.textContent = 'That section could not be loaded. Your progress is safe — try again.';
+    flow.appendChild(msg);
+    const btn = document.createElement('button');
+    btn.className = 'goto goto-primary';
+    btn.textContent = 'Try again ▸';
+    const target = this._pendingRetry;
+    btn.addEventListener('click', () => { this._pendingRetry = null; this.navigate(target.book, target.section, { durable: true }); });
+    flow.appendChild(btn);
+    this.root.appendChild(flow);
+    this.onRender();
   }
 
   makeIllustration(name, title = '') {

@@ -2,15 +2,11 @@
 
 Backlog of recommended improvements. Open tasks are filed under priority buckets
 (**HIGH** / **MEDIUM** / **LOW**) — work the first open (`- [ ]`) item top-down;
-each task's detail section carries the same stable ID. **There are currently four
-open tasks:** work **169**, followed by **170–172**. Completed tasks
-through 168 are listed under **Done** below. Completed detail sections are archived in
+each task's detail section carries the same stable ID. **There are currently three
+open tasks:** work **170–172** (all LOW). Completed tasks
+through 169 are listed under **Done** below. Completed detail sections are archived in
 [`TASKS-archive.md`](TASKS-archive.md); the Review log at the end of this file
 records each audit pass and is where new work is filed.
-
-**MEDIUM**
-
-- [ ] 169. Durable-consequence navigation has no abort/retry contract — failed resurrection, flee, combat or item detours can strand the action
 
 **LOW**
 
@@ -191,6 +187,7 @@ section below); detail sections remain in filed order, not this order.*
 - [x] 166. Direct visit commits bypass persistence observers — save failures stay silent and activity timestamps go stale
 - [x] 167. Mutation-bearing navigation is not atomic — a failed/pending cross-book load can consume payment without completing the move
 - [x] 168. An open navigation transaction leaves unrelated UI live and globally suppresses its saves
+- [x] 169. Durable-consequence navigation has no abort/retry contract — failed resurrection, flee, combat or item detours can strand the action
 
 ---
 

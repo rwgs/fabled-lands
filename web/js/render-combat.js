@@ -162,7 +162,9 @@ function drawGroupFight(story, box, fights, dmgNode, group, fleeNode = null) {
       const redirected = fights.find((f) => f.roundGoto);
       if (redirected && !story.state.isDead()) {
         const g = redirected.roundGoto; fights.forEach((f) => { f.roundGoto = null; });
-        story.navigate(g.book != null ? g.book : story.book, g.section);
+        // The round is durable (its state mutations survive the rollback); a failed target
+        // arms a retry for the redirect rather than dropping it. (task 169)
+        story.navigate(g.book != null ? g.book : story.book, g.section, { durable: true });
         return;
       }
       // On any resolution (all foes down) or death, rerender so the gate (and the
@@ -189,10 +191,12 @@ function drawGroupFight(story, box, fights, dmgNode, group, fleeNode = null) {
       if (story.state.isDead()) { story.rerender(); return; } // a fatal parting wound
       const fgoto = fleeNode.querySelector('goto');
       const fchoice = story.sectionEl && story.sectionEl.querySelector('choice[flee="t"][section]');
+      // The parting wound is durable; a failed target arms a retry for the escape redirect
+      // rather than leaving a fled fight with no way out. (task 169)
       if (fgoto && fgoto.getAttribute('section') != null) {
-        story.navigate(fgoto.getAttribute('book') ? Number(fgoto.getAttribute('book')) : story.book, fgoto.getAttribute('section'));
+        story.navigate(fgoto.getAttribute('book') ? Number(fgoto.getAttribute('book')) : story.book, fgoto.getAttribute('section'), { durable: true });
       } else if (fchoice) {
-        story.navigate(fchoice.getAttribute('book') ? Number(fchoice.getAttribute('book')) : story.book, fchoice.getAttribute('section'));
+        story.navigate(fchoice.getAttribute('book') ? Number(fchoice.getAttribute('book')) : story.book, fchoice.getAttribute('section'), { durable: true });
       } else {
         story.rerender();
       }
@@ -327,7 +331,9 @@ function drawFight(story, box, fight, node, dmgNode, fleeNode, key, locked = fal
     // "dragged you under" (→7), §4.238 "if you get wounded" (→184). (task 99)
     if (fight.roundGoto && !story.state.isDead()) {
       const g = fight.roundGoto; fight.roundGoto = null;
-      story.navigate(g.book != null ? g.book : story.book, g.section);
+      // The round is durable (its mutations survive the rollback); a failed target arms a
+      // retry for the redirect rather than dropping it and re-showing Attack. (task 169)
+      story.navigate(g.book != null ? g.book : story.book, g.section, { durable: true });
       return;
     }
     // Reduced to 0 Stamina: if the section has an "if you lose…" branch, that's
@@ -357,10 +363,12 @@ function drawFight(story, box, fight, node, dmgNode, fleeNode, key, locked = fal
       if (story.state.isDead()) { story.rerender(); return; } // a fatal parting wound
       const fgoto = fleeNode.querySelector('goto');
       const fchoice = story.sectionEl && story.sectionEl.querySelector('choice[flee="t"][section]');
+      // The parting wound is durable; a failed target arms a retry for the escape redirect
+      // rather than leaving a fled fight with no way out. (task 169)
       if (fgoto && fgoto.getAttribute('section') != null) {
-        story.navigate(fgoto.getAttribute('book') ? Number(fgoto.getAttribute('book')) : story.book, fgoto.getAttribute('section'));
+        story.navigate(fgoto.getAttribute('book') ? Number(fgoto.getAttribute('book')) : story.book, fgoto.getAttribute('section'), { durable: true });
       } else if (fchoice) {
-        story.navigate(fchoice.getAttribute('book') ? Number(fchoice.getAttribute('book')) : story.book, fchoice.getAttribute('section'));
+        story.navigate(fchoice.getAttribute('book') ? Number(fchoice.getAttribute('book')) : story.book, fchoice.getAttribute('section'), { durable: true });
       } else {
         story.rerender(); // no target: the flee unlocks a box-gated choice (e.g. §207 → §22)
       }

@@ -70,12 +70,16 @@ export function renderGroup(story, container, node, path) {
       if (plan.isRevival) {
         // Consume the deal and turn to its section (the revive rule — full
         // Stamina, task 159 — lives in engine.js). Guard against a missing deal.
+        // The group's losses (the price of coming back) and the consumed deal are durable, so
+        // a failed target arms a retry for the redirect rather than refunding them. (task 169)
         const target = reviveWithResurrection(story.state);
-        if (target) { story.navigate(target.book, target.section); return; }
+        if (target) { story.navigate(target.book, target.section, { durable: true }); return; }
         story.rerender();
       } else if (plan.gotoNode) {
+        // The group's applied effects are durable, so mark the move durable: a failed target
+        // retries the redirect instead of stranding a spent group action. (task 169)
         const b = plan.gotoNode.getAttribute('book') ? Number(plan.gotoNode.getAttribute('book')) : story.book;
-        story.navigate(b, plan.gotoNode.getAttribute('section'));
+        story.navigate(b, plan.gotoNode.getAttribute('section'), { durable: true });
       } else if (plan.returnNode) {
         story.goBack();
       } else {
