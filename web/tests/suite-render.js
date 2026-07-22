@@ -264,6 +264,30 @@ export async function run(ctx) {
       window.__FL_INSTANT_DICE__ = false;
     }
 
+    // --- task 175: a rerollable travel roll keeps the onward choices gated until decided ---
+    // applyRollGate holds a section's onward navigation until its mandatory roll resolves; a
+    // resolved-but-pending blessing-reroll decision is not final, so the choices stay locked
+    // until the player keeps (or rerolls) the result — the branch/redirect can still change.
+    {
+      window.__FL_INSTANT_DICE__ = true;
+      const settleG = () => new Promise((r) => setTimeout(r, 20));
+      const rndG = Math.random;
+      const gg = GameState.create({ name:'G175', gender:'m', profession:'Warrior', book:1, adv });
+      gg.ephemeral = true; gg.addBlessing('luck');
+      const cg175 = document.createElement('div');
+      const stg = new Story(cg175, gg, { navigate(){}, onDeath(){}, notify(){} });
+      stg.begin(parse('<section name="G175"><p><random dice="2"/></p><outcomes><outcome range="2-12"><p>ARRIVED</p></outcome></outcomes><choices><choice section="99">Onward</choice></choices></section>'), 1, 'G175');
+      const onward = () => Array.from(cg175.querySelectorAll('.choice')).find((b) => /Onward/.test(b.textContent));
+      ok('task175: onward choice is gated before the mandatory roll', !!onward() && onward().disabled === true);
+      Math.random = () => 0.5; cg175.querySelector('.roll .btn-roll').click(); await settleG(); Math.random = rndG;
+      ok('task175: onward choice stays gated while the roll result is a pending decision',
+         !!onward() && onward().disabled === true && !!cg175.querySelector('.keep-roll'));
+      cg175.querySelector('.keep-roll').click();
+      ok('task175: keeping the result reveals the outcome and unlocks the onward choice',
+         !!onward() && onward().disabled === false && /ARRIVED/.test(cg175.textContent));
+      window.__FL_INSTANT_DICE__ = false;
+    }
+
     // --- interaction: clicking a choice navigates ---
     let navd = null;
     const story3 = new Story(container, gs, { navigate:(b,s)=>{navd={b,s};}, onDeath(){}, notify(){} });

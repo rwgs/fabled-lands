@@ -1036,6 +1036,76 @@ export async function run(ctx) {
     ok('§T76 the THIEVERY blessing is consumed by the reroll (Luck kept)', !gdr76.hasBlessing('thievery') && gdr76.hasBlessing('luck'));
     ok('§T76 the reroll now succeeds and offers no further reroll', !cdr76.querySelector('.blessing-reroll') && /Success/.test(cdr76.textContent));
 
+    // --- task 175: a rerollable result is a decision boundary ------------------------------
+    // A resolved roll the player can still reroll must NOT commit its <success>/<failure>/
+    // <outcome> branch — its effects, awards or redirect — until the player keeps the result
+    // or spends every eligible blessing. Before task 175 revealBranch applied the failed
+    // branch's effects the instant the roll resolved, so a successful reroll could not undo a
+    // Stamina/permanent-ability loss (or a "lose all blessings") the rejected roll had banked;
+    // §6.49's failure even removed the blessing before the offered reroll could run.
+    {
+      const rnd = Math.random;
+      const mk175 = (xml, name, setup) => {
+        const g = GameState.create({ name:'T175', gender:'m', profession:'Warrior', book:1, adv });
+        g.ephemeral = true; if (setup) setup(g);
+        const c = document.createElement('div');
+        const st = new Story(c, g, { navigate(){}, onDeath(){}, notify(){} });
+        g.setVisitProvider(() => st.serializeVisit());
+        st.begin(parse(xml), 1, name);
+        return { g, c, st };
+      };
+      const secA = '<section name="T175A"><p><difficulty ability="scouting" level="15"/>.</p><success><p>SAFE</p></success><failure><lose stamina="7">slam into a rock</lose><p>HURT</p></failure></section>';
+
+      // (1) a failed branch's <lose stamina> stays uncommitted while pending; a successful
+      //     Luck reroll never applies it.
+      const a = mk175(secA, 'T175A', (g) => { g.data.abilities.scouting = 6; g.data.stamina = 20; g.data.staminaMax = 20; g.addBlessing('luck'); });
+      Math.random = () => 0; a.c.querySelector('.btn-roll').click(); await settle42(); Math.random = rnd; // 2+6=8 ≤15 → fail
+      ok('§T175A a pending failed roll applies no branch effect (Stamina intact)', a.g.data.stamina === 20, 'stamina=' + a.g.data.stamina);
+      ok('§T175A the pending failure branch is not revealed', !/HURT/.test(a.c.textContent));
+      ok('§T175A a pending result offers a reroll and a "Keep this result" action', !!a.c.querySelector('.blessing-reroll') && !!a.c.querySelector('.keep-roll'));
+      Math.random = () => 0.99; a.c.querySelector('.blessing-reroll').click(); await settle42(); Math.random = rnd; // 12+6=18 >15 → success
+      ok('§T175A a successful blessing reroll consumes Luck', !a.g.hasBlessing('luck'));
+      ok('§T175A the rejected failure loss is never applied', a.g.data.stamina === 20, 'stamina=' + a.g.data.stamina);
+      ok('§T175A the success branch reveals with no lingering reroll controls', /SAFE/.test(a.c.textContent) && !a.c.querySelector('.blessing-reroll') && !a.c.querySelector('.keep-roll'));
+
+      // (1b) keeping the failed result commits the loss exactly once.
+      const b = mk175(secA, 'T175A', (g) => { g.data.abilities.scouting = 6; g.data.stamina = 20; g.data.staminaMax = 20; g.addBlessing('luck'); });
+      Math.random = () => 0; b.c.querySelector('.btn-roll').click(); await settle42(); Math.random = rnd;
+      b.c.querySelector('.keep-roll').click();
+      ok('§T175A keeping the failed result reveals the branch and applies the loss once', b.g.data.stamina === 13 && /HURT/.test(b.c.textContent), 'stamina=' + b.g.data.stamina);
+      b.st.rerender();
+      ok('§T175A a re-render after keeping does not re-apply the loss', b.g.data.stamina === 13, 'stamina=' + b.g.data.stamina);
+
+      // (5) a roll with NO eligible blessing keeps the pre-175 behaviour: reveal + apply now.
+      const n = mk175(secA, 'T175A', (g) => { g.data.abilities.scouting = 6; g.data.stamina = 20; g.data.staminaMax = 20; });
+      Math.random = () => 0; n.c.querySelector('.btn-roll').click(); await settle42(); Math.random = rnd;
+      ok('§T175A no-blessing: the failure branch reveals and applies immediately (no decision gate)',
+         n.g.data.stamina === 13 && /HURT/.test(n.c.textContent) && !n.c.querySelector('.keep-roll'), 'stamina=' + n.g.data.stamina);
+
+      // (2) §6.49: the failure's <lose blessing="*"> must not fire before the offered reroll
+      //     can run — the offered blessing stays held through the pending decision.
+      const sec49 = '<section name="T175D"><p><difficulty ability="charisma" level="15"/>.</p><success><tick blessing="combat"/></success><failure><lose blessing="*">lose all your blessings</lose></failure></section>';
+      const r = mk175(sec49, 'T175D', (g) => { g.data.abilities.charisma = 6; g.addBlessing('luck'); g.addBlessing('sanctity'); });
+      Math.random = () => 0; r.c.querySelector('.btn-roll').click(); await settle42(); Math.random = rnd; // fail
+      ok('§T175D the offered blessing is still held while the failure is pending', r.g.hasBlessing('luck') && r.g.hasBlessing('sanctity'));
+      Math.random = () => 0.99; Array.from(r.c.querySelectorAll('.blessing-reroll')).find((x) => /Luck/i.test(x.textContent)).click(); await settle42(); Math.random = rnd; // success
+      ok('§T175D the reroll ran (Luck spent, sanctity kept) — the failure never removed all', !r.g.hasBlessing('luck') && r.g.hasBlessing('sanctity'));
+      ok('§T175D a successful reroll takes the success branch (COMBAT blessing gained)', r.g.hasBlessing('combat'));
+      const k = mk175(sec49, 'T175D', (g) => { g.data.abilities.charisma = 6; g.addBlessing('luck'); g.addBlessing('sanctity'); });
+      Math.random = () => 0; k.c.querySelector('.btn-roll').click(); await settle42(); Math.random = rnd;
+      k.c.querySelector('.keep-roll').click();
+      ok('§T175D keeping the failure removes all blessings exactly once', k.g.data.blessings.length === 0, JSON.stringify(k.g.data.blessings));
+
+      // (3) a Luck reroll between two random outcomes applies ONLY the final outcome's effect.
+      const secC = '<section name="T175C"><p><random dice="2"/></p><outcomes><outcome range="2-6"><gain shards="10"/>LOW</outcome><outcome range="7-12"><lose stamina="3"/>HIGH</outcome></outcomes></section>';
+      const cc = mk175(secC, 'T175C', (g) => { g.data.shards = 0; g.data.stamina = 20; g.data.staminaMax = 20; g.addBlessing('luck'); });
+      Math.random = () => 0; cc.c.querySelector('.btn-roll').click(); await settle42(); Math.random = rnd; // total 2 → LOW
+      ok('§T175C a pending random outcome applies no automatic effect', cc.g.data.shards === 0 && !/LOW|HIGH/.test(cc.c.textContent), 'shards=' + cc.g.data.shards);
+      Math.random = () => 0.99; cc.c.querySelector('.blessing-reroll').click(); await settle42(); Math.random = rnd; // total 12 → HIGH
+      ok('§T175C the rejected low outcome gain is never applied', cc.g.data.shards === 0, 'shards=' + cc.g.data.shards);
+      ok('§T175C only the kept (high) outcome fires, exactly once', cc.g.data.stamina === 17 && /HIGH/.test(cc.c.textContent), 'stamina=' + cc.g.data.stamina);
+    }
+
     // --- task 123: "Immunity to Disease and Poison" is one blessing under two spellings ---
     // The XML grants it as blessing="poison" (§2.133) and blessing="disease" (9 places),
     // and tests/spends it under either spelling. Alias them to one canonical blessing so a

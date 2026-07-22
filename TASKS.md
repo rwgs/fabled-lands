@@ -3,14 +3,10 @@
 Backlog of recommended improvements. Open tasks are filed under priority buckets
 (**HIGH** / **MEDIUM** / **LOW**) — work the first open (`- [ ]`) item top-down;
 each task's detail section carries the same stable ID. **All filed tasks are
-complete through 174**; the current review findings are filed below as tasks
-175–179. Completed detail sections are archived in
+complete through 175**; the remaining review findings are filed below as tasks
+176–179. Completed detail sections are archived in
 [`TASKS-archive.md`](TASKS-archive.md); the Review log at the end records each
 audit pass.
-
-**HIGH**
-
-- [ ] 175. Blessing rerolls keep the rejected roll's branch effects — damage/rewards can survive or stack
 
 **MEDIUM**
 
@@ -201,6 +197,7 @@ section below); detail sections remain in filed order, not this order.*
 - [x] 172. Deduplicate roll-widget/gate/memo scaffolding without building a generic roll renderer
 - [x] 173. Durable-navigation retry targets disappear on reload — the spent consequence can become a permanent dead end
 - [x] 174. The controllable async-navigation test fixture is copied three times in one suite
+- [x] 175. Blessing rerolls keep the rejected roll's branch effects — damage/rewards can survive or stack
 
 ---
 

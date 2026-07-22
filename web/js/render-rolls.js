@@ -63,13 +63,17 @@ export function showDiceResult(widget, dice, detail, outcome, ok) {
   }
 }
 
-// After a resolved roll, offer any blessing the player may spend to reroll it (task 76).
-// `opts` = { ability, success, kind:'check'|'random', travel }; eligibility lives in
-// state.rerollBlessings. `reroll` re-runs the SAME roll and stores the fresh result (it
-// must not itself re-render — this does). A used blessing is consumed unless permanent.
-export function appendBlessingReroll(story, widget, opts, reroll) {
+// A resolved roll the player may still reroll is a PENDING decision (tasks 76 + 175): its
+// branch/effects/onward choices stay uncommitted (render() pre-scanned it into
+// rerollPendingRolls) until the player keeps the result or spends every eligible blessing.
+// This renders that decision's controls — one button per eligible `blessings` name plus a
+// "Keep this result" action. `reroll` re-runs the SAME roll and stores a FRESH (unaccepted)
+// result — the next render re-evaluates whether a reroll remains (chained blessings) — and
+// must not itself re-render (the click handler does). A used blessing is consumed unless
+// permanent; keeping marks the stored result accepted so its branch reveals next render.
+export function appendRerollControls(story, widget, blessings, stored, reroll) {
   if (story.inactive) return;
-  for (const name of story.state.rerollBlessings(opts)) {
+  for (const name of blessings) {
     const label = name === 'luck' ? 'Luck' : name === 'travel' ? 'Safe Travel' : name.toUpperCase();
     const btn = document.createElement('button');
     btn.className = 'btn-secondary blessing-reroll';
@@ -77,6 +81,20 @@ export function appendBlessingReroll(story, widget, opts, reroll) {
     btn.addEventListener('click', () => { if (story.state.useBlessing(name)) reroll(); story.rerender(); });
     widget.appendChild(btn);
   }
+  const keep = document.createElement('button');
+  keep.className = 'btn-secondary keep-roll';
+  keep.textContent = 'Keep this result';
+  keep.addEventListener('click', () => { stored.accepted = true; story.rerender(); });
+  widget.appendChild(keep);
+}
+
+// The shared stored-roll tail (task 175): if render()'s pre-scan marked this roll a pending
+// blessing-reroll decision, render its reroll + Keep controls (the branch stays suppressed
+// via rerollPendingRolls/Vars); otherwise the result is final and its branch reveals as
+// normal. `reroll` re-runs the roll and stores a fresh result.
+function offerReroll(story, widget, path, stored, reroll) {
+  const blessings = story.rerollPendingRolls.get(path);
+  if (blessings) appendRerollControls(story, widget, blessings, stored, reroll);
 }
 
 // The keyed `.roll`/aria-live widget every roll renderer opens (task 172): the memo key for
@@ -200,7 +218,7 @@ export function renderDifficulty(story, container, node, path) {
   if (stored) {
     const abLabel = (stored.ability || spec.split('|')[0] || '').toUpperCase();
     showDiceResult(widget, stored.dice, `${abLabel} ${stored.abilityScore >= 0 ? '+' : ''}${stored.abilityScore} = ${stored.total} vs ${level}`, stored.success ? 'Success' : 'Failure', stored.success);
-    appendBlessingReroll(story, widget, { ability: stored.ability, success: stored.success, kind: 'check' }, () => {
+    offerReroll(story, widget, path, stored, () => {
       const res = rollDifficulty(story.state, stored.ability, level, modifier + childAdjustment(node, story.state), mode);
       writeRollVar(story, node.getAttribute('var'), res.margin);
       story.ctx.rolls.set(key, res);
@@ -255,7 +273,7 @@ export function renderRandom(story, container, node, path) {
 
   // One shared "spin the dice" action: consume the payment if gated, roll + apply the node's
   // <adjust> children, and store the result under its var. Reused by the first roll and by a
-  // blessing reroll (which does not itself re-render — appendBlessingReroll does).
+  // blessing reroll (which does not itself re-render — the reroll click handler does).
   const spin = () => {
     if (gated) story.state.setFlag(flag, false); // consume the payment — re-pay to spin again
     const r = rollDice(dice);
@@ -270,9 +288,10 @@ export function renderRandom(story, container, node, path) {
     // authoritative value is already saved, so replay it without a fresh save. (task 100)
     if (varName && story.state.getVar(varName) !== stored.total) story.state.restoreVar(varName, stored.total);
     showDiceResult(widget, stored.dice, `Rolled ${stored.total}`, '', true);
-    // Luck rerolls any dice result; Safe Travel rerolls a type="travel" encounter.
-    const travel = (node.getAttribute('type') || '').toLowerCase() === 'travel';
-    appendBlessingReroll(story, widget, { kind: 'random', travel }, spin);
+    // Luck rerolls any dice result; Safe Travel rerolls a type="travel" encounter. While a
+    // reroll remains unspent the outcome table is a pending decision (task 175): its matched
+    // outcome and any automatic effect/reward wait until the player keeps or rerolls.
+    offerReroll(story, widget, path, stored, spin);
   } else if (gated && !armed) {
     const btn = rollButton(story, `Roll ${diceWord(dice)}`, widget, () => {});
     btn.disabled = true; btn.title = 'Pay first to make this roll.';
@@ -292,7 +311,7 @@ export function renderRankcheck(story, container, node, path) {
   markWhilePending(story, stored); // hold a <while> pass (task 100)
   if (stored) {
     showDiceResult(widget, stored.dice, `Rolled ${stored.total} vs Rank ${story.state.rankValue()}`, stored.success ? 'Success' : 'Failure', stored.success);
-    appendBlessingReroll(story, widget, { success: stored.success, kind: 'check' }, () => {
+    offerReroll(story, widget, path, stored, () => {
       const res = rollRankCheck(story.state, dice, add, childAdjustment(node, story.state));
       writeRollVar(story, node.getAttribute('var'), res.margin);
       story.ctx.rolls.set(key, res);
@@ -327,7 +346,7 @@ export function renderTraining(story, container, node, path) {
     const ab = stored.ability;
     showDiceResult(widget, stored.dice, `Rolled ${stored.total} vs ${ab.toUpperCase()} ${stored.natural}`, stored.success ? `+1 ${ab.toUpperCase()}` : 'No gain', stored.success);
     // Only Luck rerolls a training roll (self-improvement, not an ability *test*).
-    appendBlessingReroll(story, widget, { success: stored.success, kind: 'check' }, () => {
+    offerReroll(story, widget, path, stored, () => {
       story.ctx.rolls.set(key, rollTraining(story.state, ab, dice, add));
     });
     return widget;
@@ -350,8 +369,13 @@ export function renderTraining(story, container, node, path) {
 // branchPlan (render-rules.js, task 119); the view reveals what the plan says.
 
 export function renderBranch(story, container, node, path, activeRoll) {
-  const roll = activeRoll ? story.ctx.rolls.get('roll@' + activeRoll.path) : null;
-  const plan = branchPlan(story.state, story.ctx, node, roll);
+  // A roll whose result is still a pending blessing-reroll decision (task 175) is not
+  // committed: treat it as unresolved (roll = null) so its <success>/<failure>/<outcome>
+  // stays hidden, and pass the pending vars so branchPlan also skips any var-keyed branch
+  // the same roll feeds — the branch reveals only once the player keeps or exhausts the reroll.
+  const pendingRoll = !!activeRoll && story.rerollPendingRolls.has(activeRoll.path);
+  const roll = (activeRoll && !pendingRoll) ? story.ctx.rolls.get('roll@' + activeRoll.path) : null;
+  const plan = branchPlan(story.state, story.ctx, node, roll, story.rerollPendingVars);
   switch (plan.kind) {
     case 'skip': return;
     case 'reveal': revealBranch(story, container, node, path); return;

@@ -374,6 +374,45 @@ export function choiceGate(state, node, view) {
   return { reasons, isSail, cost, coinLabel, payment: { pay, cost, currency, foreignCoin, item: itemReq, itemTags } };
 }
 
+// ---- rerollable-result decision boundary (task 175) -------------------------
+
+// The rerollBlessings opts for a resolved roll, derived from the node kind and the stored
+// result. difficulty/rankcheck are ability CHECKS (a failed ability roll may be rerolled by
+// its ability blessing or Luck); a rankcheck carries no ability blessing; a training roll is
+// self-improvement, not a test, so only Luck rerolls it; a random roll offers Luck (and Safe
+// Travel for a type="travel" encounter). Mirrors the opts each roll renderer used to pass to
+// appendBlessingReroll, so the pending decision and the offered buttons agree.
+function rerollOptsFor(node, stored) {
+  const tag = node.tagName.toLowerCase();
+  if (tag === 'random') return { kind: 'random', travel: (node.getAttribute('type') || '').toLowerCase() === 'travel' };
+  if (tag === 'training' || tag === 'rankcheck') return { success: !!(stored && stored.success), kind: 'check' };
+  return { ability: stored ? stored.ability : null, success: !!(stored && stored.success), kind: 'check' };
+}
+
+// The eligible blessing rerolls for a resolved roll the player has not yet KEPT (task 175),
+// DOM-free. A non-empty list makes the result a pending decision boundary: its
+// <success>/<failure>/<outcome> branch, that branch's effects/awards/redirect, and the
+// roll-gate's onward choices must stay uncommitted until the player keeps the result
+// (stored.accepted) or exhausts the rerolls (list empty ⇒ final). A result with no eligible
+// reroll — a passed check, or no blessing held — is final immediately (the pre-175 behaviour).
+export function pendingRerollBlessings(state, node, stored) {
+  if (!stored || stored.accepted) return [];
+  return state.rerollBlessings(rerollOptsFor(node, stored));
+}
+
+// The union of a view's "not yet resolved this render" variable sets: the <while> pass's
+// re-rolled vars (whileIterPendingVars, task 100) and a pending blessing-reroll decision's
+// roll var (rerollPendingVars, task 175). Either may be absent; returns null when both are
+// empty so callers keep the cheap "no pending vars" path.
+export function viewPendingVars(view) {
+  const a = view.whileIterPendingVars, b = view.rerollPendingVars;
+  const aHas = a && a.size, bHas = b && b.size;
+  if (!aHas && !bHas) return null;
+  if (aHas && !bHas) return a;
+  if (bHas && !aHas) return b;
+  const u = new Set(a); for (const v of b) u.add(v); return u;
+}
+
 // ---- branch resolution (success/failure/outcomes — tasks 50/104/108/109/122) --
 
 // A branch "succeeds" either from the roll's success flag, or — when it
@@ -388,8 +427,14 @@ export function branchSuccess(state, node, roll) {
 // WRITTEN this visit — by a roll or an active <set> (ctx.wroteVars) — never on a
 // stale/unset global (task 50). A plain (roll-fed) branch waits for its roll. This
 // stops a `<failure var="s">` firing on entry with s=0 (or a leftover s>0).
-export function branchResolved(ctx, node, roll) {
-  if (node.hasAttribute('var')) return ctx.wroteVars.has(node.getAttribute('var'));
+export function branchResolved(ctx, node, roll, pendingVars = null) {
+  if (node.hasAttribute('var')) {
+    const v = node.getAttribute('var');
+    // A var written by a roll whose result is still a pending blessing-reroll decision is
+    // not committed yet — the branch waits until the player keeps or rerolls it (task 175).
+    if (pendingVars && pendingVars.has(v)) return false;
+    return ctx.wroteVars.has(v);
+  }
   return !!roll;
 }
 
@@ -414,11 +459,11 @@ export function branchAbilityMatches(node, roll) {
 //   { kind:'table', reveal, index } — an <outcomes> table; reveal is the single
 //                                     matching child (null = none yet), index its position
 //   { kind:'prose' }                — not a branch element (the view renders its words)
-export function branchPlan(state, ctx, node, roll) {
+export function branchPlan(state, ctx, node, roll, pendingVars = null) {
   const tag = node.tagName.toLowerCase();
 
   if (tag === 'success' || tag === 'failure') {
-    if (!branchResolved(ctx, node, roll)) return { kind: 'skip' }; // wait until the feeding roll / var write
+    if (!branchResolved(ctx, node, roll, pendingVars)) return { kind: 'skip' }; // wait until the feeding roll / var write
     const want = tag === 'success';
     return branchSuccess(state, node, roll) === want && branchAbilityMatches(node, roll)
       ? { kind: 'reveal' } : { kind: 'skip' };
@@ -436,7 +481,7 @@ export function branchPlan(state, ctx, node, roll) {
     // gate, like flag= (task 122). A same-visit hidden tick has already applied
     // (it renders above the table), so an initiate ticked this visit counts.
     else if (node.getAttribute('codeword') != null) match = node.getAttribute('codeword').split(/[|,]/).some((w) => state.hasCodeword(w.trim()));
-    else if (!branchResolved(ctx, node, roll)) return { kind: 'skip' }; // wait for the roll / var write
+    else if (!branchResolved(ctx, node, roll, pendingVars)) return { kind: 'skip' }; // wait for the roll / var write
     else if (node.getAttribute('range') != null) match = matchRange(node.getAttribute('range'), node.getAttribute('var') ? state.getVar(node.getAttribute('var')) : roll.total);
     else if (node.hasAttribute('var')) match = branchSuccess(state, node, roll);
     else match = true;
@@ -472,7 +517,7 @@ export function branchPlan(state, ctx, node, roll) {
       const c = branches[i];
       const resolved = c.getAttribute('codeword') != null
         || (isDefaultOutcome(c) && codewordDispatch)
-        || branchResolved(ctx, c, roll);
+        || branchResolved(ctx, c, roll, pendingVars);
       if (!resolved) continue;
       const ctag = c.tagName.toLowerCase();
       let match = false;
@@ -598,7 +643,7 @@ export function classifyPassive(node, view) {
   // section has not filled yet (e.g. §521 "<lose multiple="x">" sitting above its
   // "<random var="x">"). Applying now would use x=0 and then memoise that no-op;
   // instead show the words and let the post-roll rerender apply the real count.
-  if (pendingRollVar(node, view.state, view.sectionEl, view.whileIterPendingVars)) {
+  if (pendingRollVar(node, view.state, view.sectionEl, viewPendingVars(view))) {
     return { mode: 'inert', showWords: !hidden };
   }
 

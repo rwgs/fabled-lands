@@ -18,7 +18,7 @@ import { GameState } from './state.js';
 import { ABILITY_LABEL } from './rules.js';
 import { bookTitle, availableBooks, loadBook, getSection } from './data.js';
 import { modal } from './ui.js';
-import { computeOutcomeBlessings } from './render-rules.js';
+import { computeOutcomeBlessings, pendingRerollBlessings } from './render-rules.js';
 import {
   computeFightGate, computeEscapeCodewords, isDeferredDeadChain,
   computeRollGate, computeTransferGate, computeBuyGate,
@@ -288,6 +288,11 @@ export class Story {
     // target WITHOUT re-applying the effect. Set by navigate()'s abort when opts.durable is
     // passed; cleared by begin() on a successful arrival. { book, section } or null.
     this._pendingRetry = null;
+    // Pending blessing-reroll decisions this render (task 175): a resolved roll's path → its
+    // eligible blessings, and the vars those rolls feed. Rebuilt at the top of every render()
+    // by _scanPendingRerolls; initialised here so any pre-render read is safe.
+    this.rerollPendingRolls = new Map();
+    this.rerollPendingVars = new Set();
   }
 
   // Snapshot the current visit so a later <return> can restore it (task 110). Null
@@ -577,6 +582,18 @@ export class Story {
     // nested inside a preceding `<p>` (a very common structure).
     this.activeRoll = null;
     this.blocked = false; // set true by an unresolved forced economic payment
+    // Rerollable-result decision boundary (task 175): a resolved roll the player still holds
+    // an eligible blessing reroll for is a PENDING decision — its <success>/<failure>/<outcome>
+    // branch, that branch's effects/awards/redirect, and the roll-gate's onward choices must
+    // stay uncommitted until the player keeps the result or exhausts the rerolls. Pre-scan the
+    // section's stored rolls BEFORE the walk so a var-dependent effect or branch is suppressed
+    // regardless of document order (a <lose ="x"> can precede its feeding <random var="x">).
+    // rerollPendingRolls maps a pending roll's path → its eligible blessings; rerollPendingVars
+    // holds the vars those rolls feed. Both are empty for a player holding no reroll blessing,
+    // so the pre-175 immediate-reveal behaviour is unchanged for the common case.
+    this.rerollPendingRolls = new Map();
+    this.rerollPendingVars = new Set();
+    this._scanPendingRerolls(el);
     // An economic <lose> is treated as an opt-in *payment* only when the section
     // offers a way to avoid it — an optional (force="f") "turn back"/decline goto.
     // Without such an escape the loss is unavoidable (e.g. §106 "buy the pearls"),
@@ -688,6 +705,28 @@ export class Story {
     flow.appendChild(btn);
     this.root.appendChild(flow);
     this.onRender();
+  }
+
+  // Pre-scan this section's stored rolls for pending blessing-reroll decisions (task 175),
+  // populating rerollPendingRolls (path → eligible blessings) and rerollPendingVars (the vars
+  // those rolls feed) BEFORE the render walk. Reading ctx.rolls (not a DOM walk) keeps every
+  // pending roll known up front, so a branch or var-dependent effect stays suppressed even
+  // when it precedes its feeding roll in document order. pathNodes (from the prior render)
+  // resolves each roll's node; a resumed visit has no pathNodes yet, so fall back to the
+  // positional path. Only 'roll@' entries are rolls (pick@ picker choices are skipped).
+  _scanPendingRerolls(sectionEl) {
+    if (!this.ctx || !sectionEl) return;
+    for (const [key, stored] of this.ctx.rolls) {
+      if (typeof key !== 'string' || !key.startsWith('roll@') || !stored || stored.accepted) continue;
+      const path = key.slice(5);
+      const node = this.ctx.pathNodes.get(path) || resolveNodePath(path, sectionEl);
+      if (!node || node.nodeType !== Node.ELEMENT_NODE || !ROLL_TAGS.has(node.tagName.toLowerCase())) continue;
+      const blessings = pendingRerollBlessings(this.state, node, stored);
+      if (!blessings.length) continue;
+      this.rerollPendingRolls.set(path, blessings);
+      const v = node.getAttribute('var');
+      if (v) this.rerollPendingVars.add(v);
+    }
   }
 
   makeIllustration(name, title = '') {
@@ -1277,8 +1316,12 @@ export class Story {
     const navs = Array.from(flow.querySelectorAll('[data-rollnav]'));
     if (!navs.length) return;
     const roll = gate.rollPath != null ? this.ctx.rolls.get('roll@' + gate.rollPath) : null;
+    // A rolled gate whose result is still a pending blessing-reroll decision (task 175) is not
+    // final: keep the onward navigation locked exactly as an unrolled gate, so the player
+    // cannot walk past the decision before keeping or rerolling it.
+    const pendingRoll = gate.rollPath != null && this.rerollPendingRolls.has(gate.rollPath);
     let disable, title;
-    if (!roll) {
+    if (!roll || pendingRoll) {
       disable = true; title = 'Resolve the roll above first.';
     } else {
       const oc = gate.matchedOutcome;

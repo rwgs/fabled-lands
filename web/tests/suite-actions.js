@@ -617,6 +617,50 @@ export async function run(ctx) {
       window.__FL_INSTANT_DICE__ = false;
     }
 
+    // --- task 175: a pending / accepted reroll decision survives save + resume ---
+    // The pending-or-kept state rides in the visit record (the roll memo's `accepted` flag),
+    // so a reload neither auto-accepts a pending result nor replays an accepted branch's
+    // effects. Roll fails with Luck held → pending; a reload restores the reroll + Keep
+    // controls with no effect applied. Keeping commits the loss once; a reload after keeping
+    // reveals the branch without re-applying it.
+    {
+      window.__FL_INSTANT_DICE__ = true;
+      const settle175 = () => new Promise((r) => setTimeout(r, 30));
+      const rnd = Math.random;
+      const secA = parse('<section name="T175S"><p><difficulty ability="scouting" level="15"/>.</p><success><p>SAFE</p></success><failure><lose stamina="7">rock</lose><p>HURT</p></failure></section>');
+
+      const g = GameState.create({ name:'T175S', gender:'m', profession:'Warrior', book:1, adv });
+      g.data.abilities.scouting = 6; g.data.stamina = 20; g.data.staminaMax = 20; g.addBlessing('luck');
+      const cont = document.createElement('div');
+      const story = new Story(cont, g, { navigate(){}, onDeath(){}, notify(){} });
+      g.setVisitProvider(() => story.serializeVisit());
+      g.goTo(1, 'T175S'); story.begin(secA, 1, 'T175S');
+      Math.random = () => 0; cont.querySelector('.btn-roll').click(); await settle175(); Math.random = rnd; // fail → pending
+      ok('task175: a pending decision applies no failure loss', g.data.stamina === 20, 'stamina=' + g.data.stamina);
+
+      const rec = story.serializeVisit();
+      const g2 = new GameState(sanitizeData(JSON.parse(JSON.stringify({ ...g.data, visit: rec }))));
+      const cont2 = document.createElement('div');
+      const story2 = new Story(cont2, g2, { navigate(){}, onDeath(){}, notify(){} });
+      story2.resume(secA, 1, 'T175S', g2.data.visit, null);
+      ok('task175: resume restores the pending decision (reroll + Keep), not the branch',
+         !!cont2.querySelector('.blessing-reroll') && !!cont2.querySelector('.keep-roll') && !/HURT/.test(cont2.textContent));
+      ok('task175: resume of a pending decision replays no effect', g2.data.stamina === 20, 'stamina=' + g2.data.stamina);
+
+      // Keep the failure → the branch commits once; a reload does not replay it.
+      g2.setVisitProvider(() => story2.serializeVisit());
+      cont2.querySelector('.keep-roll').click();
+      ok('task175: keeping applies the loss once', g2.data.stamina === 13, 'stamina=' + g2.data.stamina);
+      const rec2 = story2.serializeVisit();
+      const g3 = new GameState(sanitizeData(JSON.parse(JSON.stringify({ ...g2.data, visit: rec2 }))));
+      const cont3 = document.createElement('div');
+      const story3 = new Story(cont3, g3, { navigate(){}, onDeath(){}, notify(){} });
+      story3.resume(secA, 1, 'T175S', g3.data.visit, null);
+      ok('task175: resume of a kept result reveals the branch without replaying the loss',
+         g3.data.stamina === 13 && /HURT/.test(cont3.textContent) && !cont3.querySelector('.keep-roll'), 'stamina=' + g3.data.stamina);
+      window.__FL_INSTANT_DICE__ = false;
+    }
+
     // --- task 154: begin()'s autosaves are atomic — no mid-begin save pairs the NEW
     // section with the PREVIOUS visit's ctx/entry-tick baseline ---
     // begin() clears vars/potion/fight bonuses and arrives at the dock BEFORE it used to
@@ -1934,6 +1978,44 @@ export async function run(ctx) {
          (() => { g.addCodeword('Zealot'); const v = rules.branchPlan(g, ctx, cwTable, null); return v.reveal === cwTable.children[0]; })());
 
       ok('task119: branchPlan non-branch element → prose', plan('<p>words</p>', null).kind === 'prose');
+
+      // task 175: a var-keyed branch whose feeding roll is a PENDING reroll decision stays
+      // unresolved even though the var was written — branchPlan is passed the pending-var set.
+      g.setVar('m', 3); // a positive margin so the <success var="m"> would resolve once committed
+      const wroteM = visit.newCtx(); wroteM.wroteVars.add('m');
+      ok('task175: branchResolved — a written var resolves its branch',
+         rules.branchResolved(wroteM, parse('<success var="m"/>'), null) === true);
+      ok('task175: branchResolved — a pending reroll var keeps the branch unresolved',
+         rules.branchResolved(wroteM, parse('<success var="m"/>'), null, new Set(['m'])) === false);
+      ok('task175: branchPlan skips a var-keyed branch while its roll is pending',
+         plan('<success var="m" section="9"/>', null, wroteM).kind === 'reveal'
+         && rules.branchPlan(g, wroteM, parse('<success var="m" section="9"/>'), null, new Set(['m'])).kind === 'skip');
+    }
+
+    // --- task 175: reroll-decision planners (DOM-free) --------------------------------
+    {
+      const gL = GameState.create({ name:'RP175', gender:'m', profession:'Warrior', book:1, adv });
+      gL.data.blessings = ['luck']; gL.data.permanentBlessings = [];
+      const diff = parse('<difficulty ability="scouting" level="15"/>');
+      ok('task175: pendingRerollBlessings — a failed check with Luck is a pending decision',
+         JSON.stringify(rules.pendingRerollBlessings(gL, diff, { success: false })) === JSON.stringify(['luck']));
+      ok('task175: pendingRerollBlessings — a passed check is final (no reroll)',
+         rules.pendingRerollBlessings(gL, diff, { success: true }).length === 0);
+      ok('task175: pendingRerollBlessings — an accepted result is final',
+         rules.pendingRerollBlessings(gL, diff, { success: false, accepted: true }).length === 0);
+      ok('task175: pendingRerollBlessings — any random roll with Luck is a pending decision',
+         JSON.stringify(rules.pendingRerollBlessings(gL, parse('<random dice="2"/>'), { total: 7 })) === JSON.stringify(['luck']));
+      const gN = GameState.create({ name:'RP175b', gender:'m', profession:'Warrior', book:1, adv });
+      gN.data.blessings = [];
+      ok('task175: pendingRerollBlessings — no blessing held → final immediately',
+         rules.pendingRerollBlessings(gN, diff, { success: false }).length === 0);
+
+      // viewPendingVars unions the <while>-iter and reroll pending sets (either may be absent).
+      ok('task175: viewPendingVars — null when both empty', rules.viewPendingVars({}) === null);
+      ok('task175: viewPendingVars — returns the sole non-empty set',
+         (() => { const s = new Set(['a']); return rules.viewPendingVars({ rerollPendingVars: s }) === s; })());
+      ok('task175: viewPendingVars — merges both sets',
+         (() => { const u = rules.viewPendingVars({ whileIterPendingVars: new Set(['a']), rerollPendingVars: new Set(['b']) }); return u.has('a') && u.has('b'); })());
     }
 
     // --- task 119 (phase 3): groupPlan — <group> classification ----------------------

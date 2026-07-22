@@ -15,7 +15,7 @@ import { applyInlineBuy, buyOptions } from './market.js';
 import {
   classifyPassive, groupPlan, groupRollDefers, ownsSoleLinkedBlessing, ITEM_FAMILY_TAGS,
   linkedRewards, isCounterReward, isChooseOne, isPricedItemAward, hasVisiblePay,
-  rewardWasteReason, forcedChoiceGroup, pendingRollVar,
+  rewardWasteReason, forcedChoiceGroup, pendingRollVar, viewPendingVars,
 } from './render-rules.js';
 import { titleCase, bonusSuffix } from './render-util.js';
 
@@ -648,7 +648,7 @@ export function renderItemAward(story, container, node, path) {
   // available; a rolled quantity waits for its <random var> before it is live
   // (else x=0 would grant nothing and memoise it). (task 94)
   const qtyAttr = node.getAttribute('quantity');
-  if (qtyAttr != null && pendingRollVar(node, story.state, story.sectionEl, story.whileIterPendingVars)) {
+  if (qtyAttr != null && pendingRollVar(node, story.state, story.sectionEl, viewPendingVars(story))) {
     const wait = document.createElement('button');
     wait.className = 'btn-mini take-item';
     wait.disabled = true;
