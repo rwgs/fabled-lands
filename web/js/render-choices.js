@@ -81,13 +81,22 @@ export function renderChoice(story, node, path) {
     btn.title = gate.reasons.join('; ');
   } else {
     btn.addEventListener('click', () => {
-      // A flee="t" choice IS the flee action: apply the <flee> consequence
-      // (parting wound / codeword) before leaving, and mark the fight fled.
+      // A flee="t" choice IS the flee action, and it carries the SAME durable-consequence
+      // contract as the fight widget's Flee button (task 178): its <flee> body (a parting
+      // wound / "ran away" codeword) is applied NOW and must STAY, so the move is routed
+      // { durable: true } — a rejected/missing target arms the task-169/173 retry instead of
+      // leaving the flee choice live to apply the wound a second time. Any real cost (a paid
+      // flee — none in the current corpus) is charged and re-validated against the live sheet
+      // BEFORE the consequence mutates anything; refuse-and-refresh if it can't be met.
       if (isFlee) {
+        if (!payChoiceCost(story.state, gate.payment).ok) { story.rerender(); return; }
         const fleeNode = story.sectionEl && story.sectionEl.querySelector('flee');
         if (fleeNode) applyEffectBody(fleeNode, story.state);
         if (story.sectionFight) story.sectionFight.outcome = 'fled';
-        if (story.state.isDead()) { story.rerender(); return; }
+        if (story.state.isDead()) { story.rerender(); return; } // fatal parting wound: no move, no retry
+        if (section == null) { story.rerender(); return; }      // flee only unlocks a box-gated choice
+        story.navigate(targetBook, section, { durable: true, sourceNode: node });
+        return;
       }
       // Sail exit: same chooser/action as a sail goto (task 89) — on click, sets the
       // chosen vessel at large (prompting when several are here) before navigating. For

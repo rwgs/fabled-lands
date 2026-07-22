@@ -1263,6 +1263,60 @@ export async function run(ctx) {
       }
     }
 
+    // --- task 178: a DIRECT <choice flee="t"> shares the fight widget's durable retry contract ---
+    // Clicking the section's own flee choice (not the widget's Flee button) applies the <flee>
+    // parting wound and routes the move { durable: true }: a rejected target keeps the ONE wound
+    // and arms a retry-only screen instead of leaving the flee choice live to wound again; a
+    // fatal parting wound ends with no navigation and no retry. (§6.305 is a real example.)
+    {
+      const tick = () => new Promise((r) => setTimeout(r, 0));
+      const retryBtn = (cont) => Array.from(cont.querySelectorAll('button')).find((b) => /Try again/.test(b.textContent));
+      const fleeChoiceBtn = (cont) => Array.from(cont.querySelectorAll('.choice')).find((b) => /Flee/.test(b.textContent));
+      const secXml = '<section name="FLEECHOICE"><p>You turn to run.</p><flee><lose stamina="2"/></flee><choices><choice section="745" book="2" flee="t">Flee, taking a parting wound</choice></choices></section>';
+
+      // Rejected escape: one wound, a retry-only screen, then a successful retry with no second wound.
+      {
+        const g = GameState.create({ name:'T178', gender:'m', profession:'Warrior', book:1, adv });
+        g.slot = 28; g.data.stamina = g.data.staminaMax;
+        const cont = document.createElement('div');
+        let story;
+        const nav = controllable(g, () => story, parse('<section name="745"><p>Safe.</p></section>'));
+        story = new Story(cont, g, { navigate: nav.enter, onDeath(){}, notify(){} });
+        g.setVisitProvider(() => story.serializeVisit());
+        g.goTo(1, 'FLEECHOICE'); story.begin(parse(secXml), 1, 'FLEECHOICE');
+        const stam0 = g.data.stamina;
+        ok('task178: the section shows a direct flee choice, wound not yet applied', !!fleeChoiceBtn(cont) && g.data.stamina === stam0);
+
+        fleeChoiceBtn(cont).click(); // applies the parting wound (durable), routes durable
+        ok('task178: clicking the flee choice applies the wound once (durable) and holds the guard', g.data.stamina === stam0 - 2 && story._navInFlight === true);
+        nav.pending.reject(); await tick();
+        ok('task178: a rejected escape keeps the one wound (not refunded)', g.data.stamina === stam0 - 2);
+        ok('task178: a rejected escape arms a retry-only screen (no live flee choice to re-wound)', story._navInFlight === false && !!retryBtn(cont) && !fleeChoiceBtn(cont));
+
+        retryBtn(cont).click(); nav.pending.ok(); await tick();
+        ok('task178: the retry reaches the escape target', story.section === '745' && Number(g.data.book) === 2);
+        ok('task178: the retry did not re-apply the wound (still one)', g.data.stamina === stam0 - 2);
+        ok('task178: the retry preserves a return frame to the source', !!story._returnFrame && story._returnFrame.section === 'FLEECHOICE');
+        deleteSlot(28);
+      }
+
+      // A fatal parting wound: no navigation is attempted (guard released) and no retry is armed.
+      {
+        const g = GameState.create({ name:'T178f', gender:'m', profession:'Warrior', book:1, adv });
+        g.slot = 29; g.data.stamina = 2; // the 2-point wound is fatal
+        const cont = document.createElement('div');
+        let story;
+        const nav = controllable(g, () => story, parse('<section name="745"><p>Safe.</p></section>'));
+        story = new Story(cont, g, { navigate: nav.enter, onDeath(){}, notify(){} });
+        g.setVisitProvider(() => story.serializeVisit());
+        g.goTo(1, 'FLEECHOICE'); story.begin(parse(secXml), 1, 'FLEECHOICE');
+        fleeChoiceBtn(cont).click();
+        ok('task178: a fatal parting wound kills without navigating', g.isDead() && nav.pending === null && story._navInFlight === false);
+        ok('task178: a fatal parting wound arms no retry', !story._pendingRetry);
+        deleteSlot(29);
+      }
+    }
+
     // --- task 173: a durable-move retry target survives a save/reload ----------------------
     // Task 169 arms an in-memory "Try again" retry when a durable consequence's target fails.
     // The retry target is now persisted in the visit record, so reloading at the retry screen
