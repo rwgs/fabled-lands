@@ -2,14 +2,10 @@
 
 Backlog of recommended improvements. Open tasks are filed under priority buckets
 (**HIGH** / **MEDIUM** / **LOW**) — work the first open (`- [ ]`) item top-down;
-each task's detail section carries the same stable ID. Completed tasks through 172
+each task's detail section carries the same stable ID. Completed tasks through 173
 are listed under **Done**. Completed detail sections are archived in
 [`TASKS-archive.md`](TASKS-archive.md); the Review log at the end of this file
 records each audit pass and is where new work is filed.
-
-**MEDIUM**
-
-- [ ] 173. Persist durable-navigation retry targets across save/load
 
 **LOW**
 
@@ -192,6 +188,7 @@ section below); detail sections remain in filed order, not this order.*
 - [x] 170. Centralise duplicated display helpers already owned by `render-util.js`
 - [x] 171. Deduplicate the single/group combat control shell without merging their rules
 - [x] 172. Deduplicate roll-widget/gate/memo scaffolding without building a generic roll renderer
+- [x] 173. Durable-navigation retry targets disappear on reload — the spent consequence can become a permanent dead end
 
 ---
 

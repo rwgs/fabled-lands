@@ -1236,6 +1236,78 @@ export async function run(ctx) {
       }
     }
 
+    // --- task 173: a durable-move retry target survives a save/reload ----------------------
+    // Task 169 arms an in-memory "Try again" retry when a durable consequence's target fails.
+    // The retry target is now persisted in the visit record, so reloading at the retry screen
+    // resumes that screen (the wound/charge already applied) instead of stranding the spent
+    // consequence. A malformed target is discarded; a legacy record with no field still loads.
+    {
+      const tick = () => new Promise((r) => setTimeout(r, 0));
+      const controllable = (g, storyRef, dstEl) => {
+        const box = { pending: null };
+        box.enter = (b, s) => new Promise((resolve, reject) => {
+          box.pending = {
+            ok: () => { g.goTo(b, s); g.snapshot(); storyRef().begin(dstEl, b, s); resolve(true); },
+            reject: () => reject(new Error('book fetch failed')),
+          };
+        });
+        return box;
+      };
+      const retryBtn = (cont) => Array.from(cont.querySelectorAll('button')).find((b) => /Try again/.test(b.textContent));
+      const fleeBtn = (cont) => Array.from(cont.querySelectorAll('button')).find((b) => b.textContent.trim() === 'Flee');
+      const attackBtn = (cont) => Array.from(cont.querySelectorAll('.btn-roll')).find((b) => /Attack/.test(b.textContent));
+
+      // A flee whose cross-book escape fails, reloaded at the retry screen, then retried to success.
+      {
+        const secSrcXml = '<section name="FLEE173"><p>A monster.</p><fight name="Ogre" combat="1" defence="30" stamina="20"/><flee><lose stamina="2"/><goto section="745" book="2"/>Run</flee></section>';
+        const g = GameState.create({ name:'T173', gender:'m', profession:'Warrior', book:1, adv });
+        g.slot = 27; g.data.stamina = g.data.staminaMax;
+        const cont = document.createElement('div');
+        let story;
+        const nav = controllable(g, () => story, parse('<section name="745"><p>Safe.</p></section>'));
+        story = new Story(cont, g, { navigate: nav.enter, onDeath(){}, notify(){} });
+        g.setVisitProvider(() => story.serializeVisit());
+        g.goTo(1, 'FLEE173'); story.begin(parse(secSrcXml), 1, 'FLEE173');
+        const stam0 = g.data.stamina;
+
+        fleeBtn(cont).click(); // durable wound applied; the cross-book escape is pending
+        nav.pending.reject(); await tick(); // the escape fails → retry armed
+        ok('task173: after a failed durable move the retry is armed on screen', !!story._pendingRetry && String(story._pendingRetry.section) === '745' && !!retryBtn(cont));
+        ok('task173: the persisted visit record carries the retry target', !!(g.data.visit && g.data.visit.retry) && String(g.data.visit.retry.section) === '745' && Number(g.data.visit.retry.book) === 2);
+        ok('task173: the wound is durable (persisted)', g.data.stamina === stam0 - 2);
+
+        // Reload: sanitize the saved blob into a fresh GameState + Story and resume it.
+        const g2 = new GameState(sanitizeData(JSON.parse(JSON.stringify(g.data))));
+        ok('task173: sanitize keeps the retry target on the visit record', !!(g2.data.visit && g2.data.visit.retry) && String(g2.data.visit.retry.section) === '745');
+        const cont2 = document.createElement('div');
+        let story2;
+        const nav2 = controllable(g2, () => story2, parse('<section name="745"><p>Safe.</p></section>'));
+        story2 = new Story(cont2, g2, { navigate: nav2.enter, onDeath(){}, notify(){} });
+        g2.setVisitProvider(() => story2.serializeVisit());
+        story2.resume(parse(secSrcXml), 1, 'FLEE173', g2.data.visit, null);
+        ok('task173: reload restores the retry-only screen (Try again, no Flee/Attack dead-end)',
+           !!story2._pendingRetry && !!retryBtn(cont2) && !fleeBtn(cont2) && !attackBtn(cont2));
+        ok('task173: reload keeps the wound (resume re-applies nothing)', g2.data.stamina === stam0 - 2);
+
+        retryBtn(cont2).click(); nav2.pending.ok(); await tick(); // the restored retry succeeds
+        ok('task173: the restored retry reaches the escape target', story2.section === '745' && Number(g2.data.book) === 2);
+        ok('task173: the restored retry did not re-apply the wound (still one)', g2.data.stamina === stam0 - 2);
+        ok('task173: the restored retry captured the source as the return frame', !!story2._returnFrame && story2._returnFrame.section === 'FLEE173');
+        ok('task173: a successful arrival clears the persisted retry', !story2._pendingRetry && (g2.data.visit == null || g2.data.visit.retry == null));
+        deleteSlot(27);
+      }
+
+      // Sanitisation boundaries: a valid target survives; a malformed one is dropped; a legacy
+      // v1 record with no retry field stays resumable.
+      {
+        const mk = (retry) => sanitizeData({ abilities:{ combat:5 }, stamina:9, book:1, section:'X', visit:{ v:1, book:1, section:'X', ctx:{}, retry } });
+        ok('task173: a valid retry target survives sanitize', !!mk({ book:2, section:'745' }).visit.retry && mk({ book:2, section:'745' }).visit.retry.section === '745' && mk({ book:2, section:'745' }).visit.retry.book === 2);
+        ok('task173: a retry with a bad book is discarded', mk({ book:'nope', section:'745' }).visit.retry === null);
+        ok('task173: a retry with an empty section is discarded', mk({ book:2, section:'  ' }).visit.retry === null);
+        ok('task173: a legacy v1 record with no retry field stays resumable', !!mk(undefined).visit && mk(undefined).visit.retry === null);
+      }
+    }
+
     // --- task 117: priced equipment/cargo losses can't arm a reward without taking payment ---
     // §2.90 forfeits a weapon OR armour (price=x) to renounce Elnir; §3.569 trades a named
     // Cargo Unit (price=x) for two textiles. An ineligible forfeit button (no such

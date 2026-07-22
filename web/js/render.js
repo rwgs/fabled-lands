@@ -459,6 +459,11 @@ export class Story {
       // The transient per-fight attack/Defence bonus (task 49) is per-visit state a reload
       // can't re-derive — its granting tick is already memoised — so it rides in the record. (task 156)
       fightBonus: this.state.fightBonusSnapshot(),
+      // A durable-consequence move whose target failed (task 169) left the effect applied and
+      // armed a "Try again" retry. The retry target lives only on the Story, so persist it here:
+      // a reload at the retry screen must restore the retry, not strand the spent consequence
+      // with no way forward (task 173). Null when no retry is armed.
+      retry: this._pendingRetry ? { book: this._pendingRetry.book, section: this._pendingRetry.section } : null,
       ctx: serializeCtx(this.ctx),
       frame: this._returnFrame ? serializeFrame(this._returnFrame) : null,
     };
@@ -499,6 +504,12 @@ export class Story {
     // reload would resume with the paid bonus gone / the hidden penalty shed. (task 156)
     this.state.restoreFightBonus(record && record.fightBonus);
     this._returnFrame = frame || null;
+    // Restore a persisted durable-move retry (task 173) BEFORE render(), which checks
+    // _pendingRetry first: a reload at the "Try again" screen resumes that screen (the
+    // consequence already applied and memoised in ctx) instead of a spent dead-end source.
+    // sanitizeVisit already validated the { book, section }; a fresh/successful begin() clears it.
+    this._pendingRetry = (record && record.retry && record.retry.section != null)
+      ? { book: record.retry.book, section: record.retry.section } : null;
     this.render();
   }
 
@@ -526,6 +537,7 @@ export class Story {
     this.deferredCleanups = new Map();
     this.state.setEntryTicks(probeState.entryTickCount());
     this._returnFrame = null;
+    this._pendingRetry = null; // a stale-migrated re-entry is a fresh visit — no retry to restore (task 173)
     this.render();
     // Commit the migrated visit (task 161). The blob we loaded from carried a legacy /
     // rejected visit record; adopting the probe's ctx above is a bare field assignment that

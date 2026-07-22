@@ -1167,6 +1167,17 @@ function sanitizeShip(s) {
 // Dropped (→ null) unless it is a v:1 record whose section matches the game's current
 // section — a mismatched record would resume the wrong visit, so we discard it and let
 // the migration re-enter conservatively.
+// A persisted durable-move retry target (task 173): an optional { book, section } that
+// resumes the "Try again" screen after a reload. Discarded unless it names a positive-int
+// book and a non-empty section, so a malformed/hand-edited/imported target simply drops
+// (the record then resumes as an ordinary visit, matching a legacy save with no field).
+function sanitizeRetry(r) {
+  const o = asObj(r);
+  const section = o.section == null ? '' : asStr(o.section).trim();
+  const book = asNum(o.book, NaN, { int: true });
+  return (section && Number.isFinite(book) && book >= 1) ? { book, section } : null;
+}
+
 function sanitizeVisit(v, curBook, curSection) {
   const o = asObj(v);
   if (o.v !== 1 || o.section == null || curSection == null) return null;
@@ -1182,6 +1193,8 @@ function sanitizeVisit(v, curBook, curSection) {
     fightBonus: o.fightBonus && typeof o.fightBonus === 'object'
       ? { attack: asNum(o.fightBonus.attack, 0, { int: true }), defence: asNum(o.fightBonus.defence, 0, { int: true }) }
       : null,
+    // Durable-move retry target (task 173); null when no retry was armed (the common case).
+    retry: sanitizeRetry(o.retry),
     ctx: asObj(o.ctx),
     frame: o.frame == null ? null : asObj(o.frame),
   };
