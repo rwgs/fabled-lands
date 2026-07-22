@@ -3,14 +3,10 @@
 Backlog of recommended improvements. Open tasks are filed under priority buckets
 (**HIGH** / **MEDIUM** / **LOW**) — work the first open (`- [ ]`) item top-down;
 each task's detail section carries the same stable ID. **All filed tasks are
-complete through 178**; the remaining review finding is filed below as task
-179. Completed detail sections are archived in
+complete through 179** — the backlog has no open items. Completed detail
+sections are archived in
 [`TASKS-archive.md`](TASKS-archive.md); the Review log at the end records each
 audit pass.
-
-**LOW**
-
-- [ ] 179. Lazy service-worker cache writes can be terminated before `cache.put()` completes
 
 **Done**
 
@@ -195,6 +191,7 @@ section below); detail sections remain in filed order, not this order.*
 - [x] 176. Unavailable-book demo links and imported saves reject outside the recoverable UI
 - [x] 177. Complete modal keyboard isolation/focus restoration, including the section-view oracle
 - [x] 178. Direct `choice[flee="t"]` navigation omits the durable retry contract
+- [x] 179. Lazy service-worker cache writes can be terminated before `cache.put()` completes
 
 ---
 

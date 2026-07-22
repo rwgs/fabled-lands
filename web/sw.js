@@ -114,9 +114,15 @@ self.addEventListener('fetch', (event) => {
       if (!cached && req.mode === 'navigate') cached = await caches.match(req, { ignoreSearch: true });
       if (cached) return cached;
       return fetch(req).then((res) => {
+        // Cache a successful same-origin (basic) response for later offline reuse. Tie the
+        // write to the fetch event's lifetime via waitUntil so the worker can't be terminated
+        // after the response is delivered but before cache.put() lands (task 179) — the write
+        // was previously an unobserved side promise, so an illustration fetched online could
+        // still be absent on the next offline visit. A cache-storage failure is swallowed: it
+        // must never turn a good network response into a failure.
         if (res.ok && (res.type === 'basic')) {
           const copy = res.clone();
-          caches.open(VERSION).then((cache) => cache.put(req, copy));
+          event.waitUntil(caches.open(VERSION).then((cache) => cache.put(req, copy)).catch(() => {}));
         }
         return res;
       }).catch(() => cached);

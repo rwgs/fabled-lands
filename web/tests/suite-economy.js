@@ -860,6 +860,26 @@ export async function run(ctx) {
          navUrl.href + ' vs ' + shellUrl);
     }
 
+    // --- task 179: a lazy cache write must be tied to the fetch event lifetime ---
+    // The fetch handler caches a successful same-origin response for offline reuse. That write
+    // was an unobserved side promise (caches.open().then(put) owned by nothing), so the worker
+    // could be terminated after delivering the response but before cache.put() landed — an
+    // illustration fetched online could then be absent offline. It is now owned by
+    // event.waitUntil() and its failure swallowed, so a cache-storage error never fails the
+    // network response. Asserted as a source contract (a live SW cache round-trip hangs under
+    // headless Chrome; the task also prescribes a manual online→offline check). Cache-first
+    // lookup, the basic/ok policy and cross-origin exclusion are re-asserted as unchanged.
+    { // block-scoped
+      const swSrc179 = await (await fetch('./sw.js')).text();
+      ok('task179: the lazy cache write is owned by event.waitUntil() and its failure swallowed',
+         /event\.waitUntil\(\s*caches\.open\(VERSION\)\.then\(\(cache\)\s*=>\s*cache\.put\(req, copy\)\)\.catch\(/.test(swSrc179),
+         (swSrc179.match(/event\.waitUntil\([^\n]*/) || ['(no waitUntil-owned write found)'])[0]);
+      ok('task179: only a successful basic response is cached (policy unchanged)',
+         /if \(res\.ok && \(res\.type === 'basic'\)\)/.test(swSrc179));
+      ok('task179: cache-first lookup and cross-origin exclusion are unchanged',
+         /caches\.match\(req\)/.test(swSrc179) && /url\.origin !== location\.origin\) return;/.test(swSrc179));
+    }
+
     // --- task 33: narrate sections whose prose is bare text (no <p> wrapper) ---
     { // block-scoped
       const nar = new Narrator();
