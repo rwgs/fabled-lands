@@ -2,11 +2,15 @@
 
 Backlog of recommended improvements. Open tasks are filed under priority buckets
 (**HIGH** / **MEDIUM** / **LOW**) — work the first open (`- [ ]`) item top-down;
-each task's detail section carries the same stable ID. **There are currently no
-open tasks** (the next review pass files new work). Completed tasks through 167
-are listed under **Done** below. Completed detail sections are archived in
+each task's detail section carries the same stable ID. **There is currently one
+open task:** work **168**. Completed tasks through 167 are listed under **Done**
+below. Completed detail sections are archived in
 [`TASKS-archive.md`](TASKS-archive.md); the Review log at the end of this file
 records each audit pass and is where new work is filed.
+
+**LOW**
+
+- [ ] 168. Navigation-txn rollback discards a concurrent non-navigating mutation on a failed cross-book move
 
 **Done**
 
@@ -252,6 +256,31 @@ cover a paid cross-book choice and at least one other mutation-before-navigation
 path, inspect the persisted source record while pending and after rejection,
 then resolve successfully and verify one deduction, one turn, one return frame
 and a released `_navInFlight` guard. Run the full build + browser suite.
+
+## 168. Navigation-txn rollback discards a concurrent non-navigating mutation on a failed cross-book move
+
+**Priority: LOW — a very narrow, self-introduced window from task 167; near-impossible
+in normal play, filed for transparency.**
+
+The task-167 navigation transaction snapshots the whole `GameState.data` at the start
+of a move and, on a rejected/missing target, calls `rollbackTxn(snap)` which restores
+that snapshot wholesale. While the transaction is open, `save()` suppresses the storage
+write for *every* mutation, not only the move's own price. So if — during the async
+destination fetch of a **cross-book** move that then **fails** — the player makes an
+unrelated, non-navigating state change (e.g. drinking/dropping a sheet item, which fires
+`changed()` but does not navigate, so the `_navInFlight` guard does not block it), that
+change is applied in memory but not persisted, and the failure rollback then discards it
+along with refunding the price. Same-book moves resolve their fetch synchronously (the
+section is cached), so the window only exists for a cross-book fetch that rejects, which
+is itself rare; the intersection with a concurrent sheet action is negligible. Still,
+before task 167 that concurrent mutation would have been persisted immediately.
+
+Options: scope the transaction/rollback to only the move's own mutations (harder — the
+price is applied through the same `changed()` path as everything else); or re-apply a
+captured "concurrent delta" after rollback; or accept it and document the window. Decide
+and either fix or explicitly close as won't-fix with rationale. If touched, add a test
+that mutates unrelated state during a pending-then-rejected cross-book navigate and
+asserts the unrelated change survives. Run the full build + browser suite.
 
 ---
 
