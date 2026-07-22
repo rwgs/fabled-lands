@@ -17,7 +17,7 @@ import {
 import { GameState } from './state.js';
 import { ABILITY_LABEL } from './rules.js';
 import { bookTitle, availableBooks, loadBook, getSection } from './data.js';
-import { modal } from './ui.js';
+import { modal, mountDialog } from './ui.js';
 import { computeOutcomeBlessings, pendingRerollBlessings } from './render-rules.js';
 import {
   computeFightGate, computeEscapeCodewords, isDeferredDeadChain,
@@ -1099,24 +1099,25 @@ export class Story {
     return null;
   }
 
-  // The oracle popup: an isolated modal (built directly rather than via modal(), which
-  // closes on any button) that reveals one random section's prose at a time, up to
-  // `count` reveals, then a Close. Nothing here reads or writes game state. (task 101)
+  // The oracle popup: a read-only dialog that reveals one random section's prose at a time,
+  // up to `count` reveals, then a Close. It can't use modal() (that closes on any button —
+  // "Reveal another" must update the body IN PLACE), so it builds its own box but routes it
+  // through the shared mountDialog shell for the one dialog contract: labelled role="dialog",
+  // focus moved in and restored to the opener, Tab trapped inside, Escape/backdrop dismissable,
+  // and the app behind it frozen (task 177). Nothing here reads or writes game state. (task 101)
   async openSectionView(title, count) {
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay';
     const box = document.createElement('div');
     box.className = 'modal sectionview-modal';
     const h = document.createElement('h2'); h.textContent = title; box.appendChild(h);
     const body = document.createElement('div'); body.className = 'modal-body'; box.appendChild(body);
     const bar = document.createElement('div'); bar.className = 'modal-buttons';
     const another = document.createElement('button'); another.className = 'btn btn-primary';
-    const close = document.createElement('button'); close.className = 'btn'; close.textContent = 'Close';
-    bar.appendChild(another); bar.appendChild(close); box.appendChild(bar);
-    overlay.appendChild(box);
-    const teardown = () => { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); };
-    close.addEventListener('click', teardown);
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) teardown(); });
+    const closeBtn = document.createElement('button'); closeBtn.className = 'btn'; closeBtn.textContent = 'Close';
+    bar.appendChild(another); bar.appendChild(closeBtn); box.appendChild(bar);
+    // Focus the dialog itself first so screen readers announce its name; the reveal below
+    // toggles `another`'s disabled state, so it can't be the stable initial focus target.
+    const shell = mountDialog(box, { label: title, dismissable: true, initialFocus: box });
+    closeBtn.addEventListener('click', () => shell.close());
 
     let remaining = count;
     const reveal = async () => {
@@ -1137,9 +1138,8 @@ export class Story {
       else { another.disabled = true; another.textContent = 'The vision fades'; }
     };
     another.addEventListener('click', reveal);
-    document.body.appendChild(overlay);
     await reveal(); // show the first vision
-    return overlay;
+    return shell;
   }
 
   // Surface the player's active extra choices (<extrachoice>) at this section: a

@@ -622,6 +622,67 @@ export async function run(ctx) {
       ok('152.2: programmatic close removes that overlay', document.querySelectorAll('.modal-overlay').length === before);
     }
 
+    // task 177: ui.modal() honours one dialog contract — initial focus, a Tab/Shift+Tab focus
+    // trap, a frozen background, and focus RESTORED to the opener on close.
+    {
+      const opener = document.createElement('button'); opener.textContent = 'opener';
+      document.body.appendChild(opener); opener.focus();
+      const p = modal({ title: 'Trap', body: 'pick', buttons: [{ label: 'A', value: 'a', primary: true }, { label: 'B', value: 'b' }] });
+      const overlay = [...document.querySelectorAll('.modal-overlay')].pop();
+      const box = overlay.querySelector('.modal');
+      const [btnA, btnB] = Array.from(box.querySelectorAll('.modal-buttons .btn'));
+      ok('task177 modal: exposed as a named role="dialog"', box.getAttribute('role') === 'dialog' && box.getAttribute('aria-modal') === 'true' && box.getAttribute('aria-label') === 'Trap');
+      ok('task177 modal: moves initial focus to the primary button', document.activeElement === btnA);
+      ok('task177 modal: freezes the background (inert + aria-hidden)', opener.hasAttribute('inert') && opener.getAttribute('aria-hidden') === 'true');
+      // Tab from the last control wraps to the first; Shift+Tab from the first wraps to the last.
+      btnB.focus();
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+      ok('task177 modal: Tab wraps last → first', document.activeElement === btnA);
+      btnA.focus();
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }));
+      ok('task177 modal: Shift+Tab wraps first → last', document.activeElement === btnB);
+      btnB.click();
+      const val = await p;
+      ok('task177 modal: a button close resolves with its value', val === 'b');
+      ok('task177 modal: focus restored to the opener after button close', document.activeElement === opener);
+      ok('task177 modal: the background freeze is lifted on close', !opener.hasAttribute('inert') && !opener.hasAttribute('aria-hidden'));
+      opener.remove();
+    }
+
+    // task 177: a NON-dismissable dialog ignores Escape and backdrop clicks, but a programmatic
+    // close still works and restores focus.
+    {
+      const opener = document.createElement('button'); document.body.appendChild(opener); opener.focus();
+      const p = modal({ title: 'Locked', body: 'x', buttons: [{ label: 'OK', value: 'ok', primary: true }], dismissable: false });
+      const overlay = [...document.querySelectorAll('.modal-overlay')].pop();
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      ok('task177 modal: Escape does NOT close a non-dismissable dialog', document.body.contains(overlay));
+      overlay.click(); // backdrop
+      ok('task177 modal: backdrop does NOT close a non-dismissable dialog', document.body.contains(overlay));
+      p.close('force');
+      const val = await p;
+      ok('task177 modal: programmatic close still works + restores focus', val === 'force' && !document.body.contains(overlay) && document.activeElement === opener);
+      opener.remove();
+    }
+
+    // task 177: a dismissable dialog closes on Escape and on a backdrop click, resolving null
+    // and restoring focus each time.
+    {
+      const opener = document.createElement('button'); document.body.appendChild(opener); opener.focus();
+      const pEsc = modal({ title: 'Esc', body: 'x', buttons: [{ label: 'OK', value: 'ok' }] });
+      const ovEsc = [...document.querySelectorAll('.modal-overlay')].pop();
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      const vEsc = await pEsc;
+      ok('task177 modal: Escape closes a dismissable dialog (resolves null)', vEsc === null && !document.body.contains(ovEsc) && document.activeElement === opener);
+      opener.focus();
+      const pBack = modal({ title: 'Back', body: 'x', buttons: [{ label: 'OK', value: 'ok' }] });
+      const ovBack = [...document.querySelectorAll('.modal-overlay')].pop();
+      ovBack.click(); // click the backdrop (the overlay itself)
+      const vBack = await pBack;
+      ok('task177 modal: backdrop closes a dismissable dialog (resolves null)', vBack === null && !document.body.contains(ovBack) && document.activeElement === opener);
+      opener.remove();
+    }
+
     // task 152.4: Narrator.handleRerender drops the chunk list even when not playing, so it
     // stops referencing the previous section's detached DOM.
     {

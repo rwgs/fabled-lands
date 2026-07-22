@@ -512,12 +512,33 @@ export async function run(ctx) {
       // Opening the oracle shows an isolated popup, mutates NO state and does NOT navigate.
       const before = JSON.stringify(gSV.data);
       const beforeSection = gSV.data.section;
-      const overlay = await storySV.openSectionView('Trance', 6);
+      // task 177: the oracle now routes through the shared dialog shell — remember an opener so
+      // we can prove focus is restored on close.
+      const svOpener = document.createElement('button'); svOpener.textContent = 'open oracle';
+      document.body.appendChild(svOpener); svOpener.focus();
+      const sv = await storySV.openSectionView('Trance', 6);
+      const overlay = sv.overlay;
       ok('§5.114 opening the oracle shows an isolated read-only popup', document.body.contains(overlay) && !!overlay.querySelector('.sectionview-modal') && !!overlay.querySelector('.sectionview-cap') && !!overlay.querySelector('.sectionview-prose'));
       ok('§5.114 the oracle popup exposes no game controls', overlay.querySelectorAll('.sectionview-prose button, .sectionview-prose .goto, .sectionview-prose .choice, .sectionview-prose .btn-roll').length === 0);
       ok('§5.114 the oracle changes neither the current section nor navigation', gSV.data.section === beforeSection && svNav === null);
       ok('§5.114 the oracle mutates no player state', JSON.stringify(gSV.data) === before, 'state changed by oracle');
-      overlay.remove();
+      // task 177: the oracle honours the shared dialog contract.
+      ok('task177 oracle: exposed as a named role="dialog"', sv.box.getAttribute('role') === 'dialog' && sv.box.getAttribute('aria-modal') === 'true' && sv.box.getAttribute('aria-label') === 'Trance');
+      ok('task177 oracle: moves initial focus into the dialog', document.activeElement === sv.box);
+      ok('task177 oracle: the app behind it is frozen (inert + aria-hidden)', svOpener.hasAttribute('inert') && svOpener.getAttribute('aria-hidden') === 'true');
+      // "Reveal another" updates the vision in place — it must NOT close the dialog.
+      const anotherBtn = Array.from(overlay.querySelectorAll('.modal-buttons .btn')).find((b) => b.classList.contains('btn-primary'));
+      const labelBefore = anotherBtn.textContent;
+      anotherBtn.click();
+      for (let i = 0; i < 200 && anotherBtn.textContent === labelBefore; i++) await new Promise((r) => setTimeout(r, 10));
+      ok('task177 oracle: "Reveal another" updates in place without closing', document.body.contains(overlay) && anotherBtn.textContent !== labelBefore);
+      // Close restores focus to the opener and lifts the background freeze.
+      const closeBtn = Array.from(overlay.querySelectorAll('.modal-buttons .btn')).find((b) => !b.classList.contains('btn-primary'));
+      closeBtn.click();
+      ok('task177 oracle: Close removes the overlay', !document.body.contains(overlay));
+      ok('task177 oracle: Close restores focus to the opener', document.activeElement === svOpener);
+      ok('task177 oracle: Close lifts the background freeze', !svOpener.hasAttribute('inert') && !svOpener.hasAttribute('aria-hidden'));
+      svOpener.remove();
     }
 
     // task 102: §1.338's healer — the <lose price="p" shards="25"> cost arms the

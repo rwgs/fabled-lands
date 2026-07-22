@@ -71,50 +71,106 @@ export function toast(msg, type = 'info') {
 }
 
 // ---- modal -----------------------------------------------------------------
+// The one focusable-selector both the trap and every caller share.
+const DIALOG_FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+// Shared dialog shell (task 177): mount an already-built `box` in a full-screen overlay and
+// give EVERY dialog one contract — a labelled role="dialog", focus moved in and later
+// RESTORED to the element that opened it, sequential focus trapped inside the dialog
+// (Tab/Shift+Tab wrap), and the rest of the page frozen from pointer + assistive tech
+// (inert + aria-hidden) while it is up. Returns { overlay, box, close }. `close()` runs
+// exactly once: it drops the key listener, un-freezes the background it froze, removes the
+// overlay, restores focus, then fires the optional onClose. When dismissable, Escape and a
+// backdrop click both call close(); the caller owns what its buttons do (a control that must
+// stay open — the oracle's "Reveal another" — simply never calls close). ui.js stays a small
+// helper, not a framework: this is the whole contract.
+export function mountDialog(box, { label = null, dismissable = true, initialFocus = null, onClose = null } = {}) {
+  // Remember who to hand focus back to; ignore <body> (nothing was really focused).
+  const opener = (document.activeElement && document.activeElement !== document.body) ? document.activeElement : null;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  box.setAttribute('role', 'dialog');
+  box.setAttribute('aria-modal', 'true');
+  if (label) box.setAttribute('aria-label', label);
+  if (!box.hasAttribute('tabindex')) box.setAttribute('tabindex', '-1'); // focus fallback when the box has no controls
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+
+  // Freeze + hide everything behind the dialog. Skip anything already inert (a dialog opened
+  // underneath) so close() only ever clears what THIS mount set.
+  const frozen = [];
+  for (const sib of Array.from(document.body.children)) {
+    if (sib === overlay || sib.hasAttribute('inert')) continue;
+    sib.setAttribute('inert', '');
+    sib.setAttribute('aria-hidden', 'true');
+    frozen.push(sib);
+  }
+
+  let closed = false;
+  function close() {
+    if (closed) return; closed = true;
+    document.removeEventListener('keydown', onKey, true);
+    overlay.remove();
+    for (const sib of frozen) { sib.removeAttribute('inert'); sib.removeAttribute('aria-hidden'); }
+    if (opener && document.contains(opener) && typeof opener.focus === 'function') opener.focus();
+    if (onClose) onClose();
+  }
+  // Capture phase so we intercept Tab/Escape before any background/global handler; inert on
+  // the background stops pointer/AT reach, but document-level key listeners still fire, so the
+  // trap is what actually keeps sequential focus inside the topmost dialog.
+  function onKey(e) {
+    if (e.key === 'Escape') { if (dismissable) { e.preventDefault(); close(); } return; }
+    if (e.key !== 'Tab') return;
+    const items = Array.from(box.querySelectorAll(DIALOG_FOCUSABLE));
+    if (!items.length) { e.preventDefault(); box.focus(); return; }
+    const first = items[0], last = items[items.length - 1], active = document.activeElement;
+    if (e.shiftKey) { if (active === first || !box.contains(active)) { e.preventDefault(); last.focus(); } }
+    else if (active === last || !box.contains(active)) { e.preventDefault(); first.focus(); }
+  }
+  document.addEventListener('keydown', onKey, true);
+  if (dismissable) overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  (initialFocus || box).focus();
+  return { overlay, box, close };
+}
+
 export function modal({ title, body, buttons = [{ label: 'OK', value: true }], dismissable = true }) {
-  let doClose = () => {};
+  let settle = () => {};
   const p = new Promise((resolve) => {
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay';
     const box = document.createElement('div');
     box.className = 'modal';
-    // Dialog semantics (task 153): expose the modal as a dialog and name it from the
-    // title, move focus into it, and honour Escape when it's dismissable — so keyboard
-    // and screen-reader users aren't left tabbing through the obscured background.
-    box.setAttribute('role', 'dialog');
-    box.setAttribute('aria-modal', 'true');
-    if (title) { const h = document.createElement('h2'); h.textContent = title; box.appendChild(h); box.setAttribute('aria-label', title); }
+    if (title) { const h = document.createElement('h2'); h.textContent = title; box.appendChild(h); }
     const content = document.createElement('div');
     content.className = 'modal-body';
     if (typeof body === 'string') content.innerHTML = body; else if (body) content.appendChild(body);
     box.appendChild(content);
     const bar = document.createElement('div');
     bar.className = 'modal-buttons';
-    // Idempotent teardown: drop the Escape listener + overlay and resolve exactly once.
-    // Exposed as `.close(value)` on the returned promise so a caller can dismiss the
-    // dialog programmatically AND settle its promise — the game menu relies on this
-    // instead of ripping the overlay out behind the promise's back. (tasks 152, 153)
-    let closed = false;
-    const close = (value) => { if (closed) return; closed = true; document.removeEventListener('keydown', onKey); overlay.remove(); resolve(value); };
-    doClose = close;
+    box.appendChild(bar);
+    // The action that closes the dialog decides the resolved value; dismissal (Escape/backdrop)
+    // leaves it null. mountDialog runs the shared teardown + focus restore, then onClose settles
+    // the promise exactly once.
+    let result = null;
+    let close = () => {};
     let primaryBtn = null;
     buttons.forEach((b) => {
       const btn = document.createElement('button');
       btn.className = 'btn' + (b.primary ? ' btn-primary' : '');
       btn.textContent = b.label;
-      btn.addEventListener('click', () => close(b.value));
+      btn.addEventListener('click', () => { result = b.value; close(); });
       if (b.primary && !primaryBtn) primaryBtn = btn;
       bar.appendChild(btn);
     });
-    box.appendChild(bar);
-    overlay.appendChild(box);
-    if (dismissable) overlay.addEventListener('click', (e) => { if (e.target === overlay) close(null); });
-    const onKey = (e) => { if (dismissable && e.key === 'Escape') { e.preventDefault(); close(null); } };
-    document.addEventListener('keydown', onKey);
-    document.body.appendChild(overlay);
-    (primaryBtn || bar.querySelector('button'))?.focus();
+    const shell = mountDialog(box, {
+      label: title || null,
+      dismissable,
+      initialFocus: primaryBtn || bar.querySelector('button'),
+      onClose: () => resolve(result),
+    });
+    close = shell.close;
+    // Programmatic close: settle with a value AND tear down (tasks 152, 153).
+    settle = (value = null) => { result = value; shell.close(); };
   });
-  p.close = (value = null) => doClose(value);
+  p.close = (value = null) => settle(value);
   return p;
 }
 
