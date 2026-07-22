@@ -3,10 +3,24 @@
 Backlog of recommended improvements. Open tasks are filed under priority buckets
 (**HIGH** / **MEDIUM** / **LOW**) — work the first open (`- [ ]`) item top-down;
 each task's detail section carries the same stable ID. **All filed tasks are
-complete** — the backlog has no open items; new findings are filed in the Review
-log below. Completed tasks through 174 are listed under **Done**. Completed detail
-sections are archived in [`TASKS-archive.md`](TASKS-archive.md); the Review log at
-the end of this file records each audit pass and is where new work is filed.
+complete through 174**; the current review findings are filed below as tasks
+175–179. Completed detail sections are archived in
+[`TASKS-archive.md`](TASKS-archive.md); the Review log at the end records each
+audit pass.
+
+**HIGH**
+
+- [ ] 175. Blessing rerolls keep the rejected roll's branch effects — damage/rewards can survive or stack
+
+**MEDIUM**
+
+- [ ] 176. Unavailable-book demo links and imported saves reject outside the recoverable UI
+- [ ] 177. Complete modal keyboard isolation/focus restoration, including the section-view oracle
+
+**LOW**
+
+- [ ] 178. Direct `choice[flee="t"]` navigation omits the durable retry contract
+- [ ] 179. Lazy service-worker cache writes can be terminated before `cache.put()` completes
 
 **Done**
 
@@ -446,6 +460,148 @@ scenario's GameState/Story/destination independent, retain the explicit success/
 controls and do not introduce a production abstraction or a shared cross-suite fixture
 framework. Run the focused `actions` suite and the full browser suite.
 
+## 175. Blessing rerolls keep the rejected roll's branch effects — damage/rewards can survive or stack
+
+**Priority: HIGH — a core blessing rule can permanently damage or kill the player even
+when the replacement roll succeeds, and random-result rewards/consequences can apply twice.**
+
+`render-rolls.js` reveals the matched `<success>`/`<failure>`/`<outcome>` immediately;
+`revealBranch()` walks that branch through `Story.appendChildren()`, which applies its
+passive effects and records their visit memos. `appendBlessingReroll()` subsequently only
+consumes the chosen blessing, replaces `ctx.rolls[key]` and rerenders. It neither defers
+the first branch nor restores its state/memos. Live consequences include §5.104's 7
+Stamina loss, §5.282's permanent all-ability loss and §6.607's permanent SANCTITY loss.
+The sharpest proof is §6.49: the failed branch removes every blessing before the already
+rendered ability/Luck reroll button can call `useBlessing()`, so the offered reroll cannot
+run at all. A random reroll can likewise retain one outcome's automatic reward/penalty and
+then apply the replacement outcome too.
+
+Make a rerollable result a decision boundary: no result-dependent branch effect, award,
+redirect or control may become committed until the player keeps that result or exhausts
+the available rerolls. Prefer a pending-result/accept-result lifecycle over broad rollback
+of arbitrary state after the branch has already become interactive. Keep the rule/planning
+decision DOM-free; the view may render the dice, reroll choices and a clear “Keep this
+result” action. Persist the pending/accepted decision in the visit record so reload neither
+auto-accepts nor re-applies it. A result with no eligible reroll must retain today's immediate
+branch behaviour, and chained eligible blessings after another failed reroll must remain
+well-defined.
+
+Add deterministic regressions that prove:
+
+1. a failed difficulty branch containing `<lose stamina>` changes nothing while the result
+   is pending, and a successful blessing reroll never applies that loss;
+2. §6.49 still holds the offered blessing before the decision, rerolls successfully when
+   chosen, and removes all blessings exactly once only when the failure is kept;
+3. a Luck reroll between two random outcomes applies only the final outcome's automatic
+   effect/reward;
+4. save/resume preserves a pending result and an accepted result without losing controls or
+   replaying effects; and
+5. a roll with no eligible blessing still reveals/applies its branch immediately.
+
+Run the focused render/inventory/action suites and the full build + browser suite.
+
+## 176. Unavailable-book demo links and imported saves reject outside the recoverable UI
+
+**Priority: MEDIUM — malformed but user-controlled input can leave a blank game screen and
+an imported slot that cannot be played; valid saves and book data are not at risk.**
+
+`startDemo()` calls `data.getSection(book, section)` as its validation step, but an
+unavailable book rejects in `loadBook()` rather than returning `null`. `boot()` starts that
+async function without awaiting/catching it, so `?demo=999.1` becomes an unhandled rejection
+instead of the documented title-screen fallback. The import path has the same boundary gap:
+`sanitizeData()` accepts any integer book ≥1, writes the save, and `loadCurrent()` later
+awaits `getSection(state.data.book, sec)` without a rejection handler. Clicking Play on such
+a slot first builds the game screen and then strands it when the unavailable-book fetch
+rejects. A hand-edited/corrupt localStorage blob can reach the same path even after import
+validation is tightened.
+
+Validate a demo/import's current book against `data.availableBooks()` before fetching or
+persisting it, without importing the data/UI module into the DOM-free state model. Reject an
+unavailable-book import before allocating/writing a slot and show the existing Import failed
+UI. Also make `startDemo()` and `loadCurrent()` catch book-load failures and return to a
+usable title/save screen with an actionable message; do not overwrite, relocate or delete
+the bad save implicitly. Preserve the existing Book 1 fallback for a missing section inside
+an available book unless the new tests demonstrate a safer explicit message.
+
+Add regressions for an unavailable `?demo=` target, an import whose current book is not
+bundled (including no slot write), and a pre-existing invalid slot whose Play action fails
+recoverably. Keep valid imports and invalid-section-in-valid-book behaviour covered. Run the
+focused state/app-facing coverage and the full browser suite.
+
+## 177. Complete modal keyboard isolation/focus restoration, including the section-view oracle
+
+**Priority: MEDIUM — dialogs are widely used and currently let keyboard focus escape into
+obscured controls or disappear when the focused button is removed.**
+
+Task 153 added dialog semantics, initial focus and dismissable Escape handling to
+`ui.modal()`, but it does not trap Tab/Shift+Tab, make the obscured page non-interactive, or
+restore focus to the element that opened the dialog. Closing removes the focused subtree,
+usually leaving focus on `<body>`. The §5.114 section-view oracle builds a separate modal in
+`render.js`; it has none of the shared dialog role/name, initial focus, Escape handling,
+keyboard containment or focus restoration.
+
+Bring both paths to one consistent modal contract with the minimum reusable shell needed:
+remember and safely restore the invoking focus, keep sequential focus inside the topmost
+dialog, prevent assistive technology/pointer interaction with the obscured app, preserve the
+existing dismissable versus non-dismissable Escape rule, and clean every listener/temporary
+attribute on every close path. Prefer routing the oracle through the shared contract (or a
+small shared dialog primitive) without turning `ui.js` into a framework; its Reveal another
+button must update content without closing the dialog.
+
+Add DOM regressions for initial focus, Tab and Shift+Tab wrapping, Escape behaviour,
+non-dismissable dialogs, focus restoration after button/backdrop/programmatic close, and the
+oracle's role/name/focus/reveal/close flow. Run the focused render/inventory suites and the
+full browser suite.
+
+## 178. Direct `choice[flee="t"]` navigation omits the durable retry contract
+
+**Priority: LOW — the live targets are valid same-book sections, so a rejection is rare,
+but the consequence-first path can reapply an irreversible wound/codeword if entry fails.**
+
+The fight widget's Flee button applies the `<flee>` body and routes its target with
+`{ durable: true }`, correctly preserving the consequence while arming the task-169/173
+retry screen on a missing/rejected destination. Clicking the section's visible
+`<choice flee="t">` directly applies the same body and marks the fight fled, but calls
+`Story.navigate()` with only `pay` and `sourceNode`. Abort therefore restores the already
+post-consequence state without setting `_pendingRetry`; the source rerenders with the flee
+choice still available and another click can apply the wound again. §6.305 is a concrete
+parting-wound example; fifteen direct flee choices exist across books 3, 4 and 6.
+
+Route the direct choice through the same durable consequence policy as the fight widget and
+retain its source-node return semantics. Do not pass contradictory refundable and durable
+policies merely because `renderChoice()` currently supplies a no-op payment callback for
+every move; make the actual payment/consequence order explicit and revalidate any real paid
+flee form before mutation (the current corpus has none).
+
+Extend the controllable navigation fixture with a direct `choice[flee="t"]`: reject the
+target, assert one consequence plus a retry-only screen, retry successfully, and prove no
+second wound/codeword. Cover a fatal parting wound (no navigation/retry) and keep the widget
+Flee regression green. Run the focused actions/combat suites and the full browser suite.
+
+## 179. Lazy service-worker cache writes can be terminated before `cache.put()` completes
+
+**Priority: LOW — required and known optional assets are precached correctly; the race only
+weakens later caching of same-origin cache misses.**
+
+The fetch handler returns the network `Response` while launching
+`caches.open(VERSION).then(cache => cache.put(req, copy))` as an unobserved side promise.
+Neither the `respondWith()` promise nor `event.waitUntil()` owns that write, so the service
+worker may be terminated after delivering the response but before the cache entry lands.
+An optional/general illustration fetched successfully online can therefore still be absent
+on the next offline visit.
+
+Tie a successful basic-response cache write to the fetch event lifetime. Either await the
+write in the response chain with a deliberate cache-write failure fallback, or attach the
+write to a valid `waitUntil()` promise before the event settles; do not turn a cache-storage
+failure into a failed network response. Keep cache-first lookup, cross-origin exclusion,
+query-string navigation fallback and the required/optional install policies unchanged.
+
+Add a source-contract regression alongside the task-64/138 service-worker checks and, if
+stable in headless Chrome, a CacheStorage round-trip proving an initially uncached
+same-origin resource is present after the fetch completes. Record a short manual online →
+offline verification if browser lifecycle control remains unsuitable for automation. Run
+the focused economy suite and the full browser suite.
+
 ---
 
 ## Review log
@@ -453,6 +609,27 @@ framework. Run the focused `actions` suite and the full browser suite.
 *Running audit log of the backlog — each pass re-verifies the open items against
 the current code and records what was filed, split, or re-confirmed. Task
 numbers refer to the contents checklist at the top of the file.*
+
+Reviewed 2026-07-22 (tenth full pass, after tasks 173–174): started clean at
+`2245eae`. Reviewed every first-party runtime/rule/view/persistence module, the web shell
+and service worker, build scripts, focused suites, XML integration and generated/reference
+boundaries. Rechecked the architecture/import graph and sampled the corpus at each suspected
+rule seam. Filed **175** (HIGH): blessing rerolls occur after branch effects have committed;
+§6.49 removes the offered blessing before its button can work, while damage/permanent losses
+and random rewards can survive a replacement result. Filed **176–177** (MEDIUM): unavailable
+book input rejects outside the demo/import/load recovery UI; and the shared/custom modal
+paths still lack complete keyboard isolation/focus restoration. Filed **178–179** (LOW): the
+direct flee-choice path missed task 169's durable retry option, and lazy service-worker cache
+writes are not held by the fetch event lifetime.
+
+Organization verdict remains unchanged: these are bounded lifecycle and accessibility
+contracts, not evidence for a framework, directory move or broad module split. Task 175's
+pending-result rule belongs in a DOM-free planner/visit record with the view limited to its
+controls; 176 belongs at the app/data validation boundary; 178 should reuse the existing
+navigation policy; and 179 is a local service-worker promise fix. PowerShell 7 build:
+**4,377 XML files valid**, 4,369 sections generated, **no generated-file drift**.
+Fresh-profile aggregate smoke: **`RESULT ALL PASS pass=1619 fail=0`**, including every
+section of all six books. The review itself changed no production/generated files.
 
 Reviewed 2026-07-22 (ninth full pass): started clean at `68f7b8f` after tasks
 168–172. Re-read the five implementations and their regressions line-by-line,
