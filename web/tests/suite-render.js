@@ -8,11 +8,31 @@ import { buyOptions, payChoiceCost } from '../js/market.js';
 import { Story } from '../js/render.js';
 import { Narrator } from '../js/tts.js';
 import { modal } from '../js/ui.js';
+import { titleCase, escapeHtml, bonusSuffix, itemLabel } from '../js/render-util.js';
 
 export async function run(ctx) {
   const { ok, parse } = ctx;
   await data.loadMeta();
   const adv = data.parseAdventurers(data.bookInfo(1).adventurers);
+
+    // --- task 170: the canonical display helpers (render-util) handle every caller's input ---
+    // titleCase/escapeHtml/bonusSuffix are now the single implementation the sheet, awards and
+    // market share, so they must be robust to null/numbers/metacharacters and standardise the
+    // bonus text (weapon/armour/tool vocabulary; zero bonus omitted).
+    ok('task170: titleCase capitalises each word', titleCase('fur cloak') === 'Fur Cloak');
+    ok('task170: titleCase tolerates null/empty', titleCase(null) === '' && titleCase('') === '');
+    ok('task170: escapeHtml neutralises HTML metacharacters', escapeHtml('<b>a&"c"</b>') === '&lt;b&gt;a&amp;&quot;c&quot;&lt;/b&gt;');
+    ok('task170: escapeHtml stringifies null/numbers safely', escapeHtml(null) === '' && escapeHtml(0) === '0' && escapeHtml(42) === '42');
+    ok('task170: bonusSuffix — weapon shows Combat', bonusSuffix('weapon', 2) === ' (Combat +2)');
+    ok('task170: bonusSuffix — armour shows Defence', bonusSuffix('armour', 1) === ' (Defence +1)');
+    ok('task170: bonusSuffix — ability tool title-cases its ability', bonusSuffix('tool', 1, 'thievery') === ' (Thievery +1)');
+    ok('task170: bonusSuffix — a tool without an ability falls back to a bare bonus', bonusSuffix('tool', 1, null) === ' (+1)');
+    ok('task170: bonusSuffix — an unclassed item shows a bare bonus', bonusSuffix('item', 3) === ' (+3)');
+    ok('task170: bonusSuffix — a zero/absent bonus prints nothing (no "+0")',
+       bonusSuffix('weapon', 0) === '' && bonusSuffix('armour', undefined) === '' && bonusSuffix('item', 0) === '');
+    ok('task170: itemLabel composes a title-cased name with the canonical suffix',
+       itemLabel({ name: 'iron sword', kind: 'weapon', bonus: 2 }) === 'Iron Sword (Combat +2)'
+       && itemLabel({ name: 'lantern', kind: 'item', bonus: 0 }) === 'Lantern');
   const gs = GameState.create({ name:'Test', gender:'m', profession:'Warrior', book:1, adv });
     // render representative sections
     const container = document.createElement('div');

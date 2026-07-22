@@ -11,7 +11,7 @@ import { shopKind, goodsFrom, ownsGoods, buyTrade, sellTrade, sellPlan, applyInl
 import { normalize, parseTags, splitItemName, isShardsCurrency } from './state.js';
 import { canonCargo } from './rules.js';
 import { modal } from './ui.js';
-import { MARKET_TITLES, titleCase, escapeHtml, itemLabel } from './render-util.js';
+import { MARKET_TITLES, titleCase, escapeHtml, itemLabel, bonusSuffix } from './render-util.js';
 import { isChooseOne } from './render-rules.js';
 import { renderChoosableReward } from './render-rewards.js';
 
@@ -72,12 +72,8 @@ function renderShopRow(story, node, path, currency = null, marketSolds = []) {
   row.className = 'trade';
   const label = document.createElement('span');
   label.className = 'trade-name';
-  let tag = '';
-  if (kind === 'weapon') tag = ` (Combat +${bonus})`;
-  else if (kind === 'armour') tag = ` (Defence +${bonus})`;
-  else if (kind === 'tool' && ability) tag = ` (${titleCase(ability)} +${bonus})`;
-  else if (bonus) tag = ` (+${bonus})`;
-  label.textContent = titleCase(splitItemName(name).name) + tag; // show the first of a "a|b" label
+  // Title-case the shop name (the first of a "a|b" label); the bonus suffix is canonical (task 170).
+  label.textContent = titleCase(splitItemName(name).name) + bonusSuffix(kind, bonus, ability);
   row.appendChild(label);
 
   // quantity= caps how many of this row are in stock this visit — §6.655's lone

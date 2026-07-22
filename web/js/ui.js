@@ -2,6 +2,11 @@
 
 import { ABILITIES, ABILITY_LABEL, rankTitle, ordinal, SHIP_TYPES, canonShipType } from './rules.js';
 import { parseXml } from './data.js';
+// The canonical string/label helpers live in the dependency-free render-util (task 170), so the
+// sheet/shell and the view modules share one titleCase/escapeHtml/bonus-text implementation
+// instead of drifting copies. escapeHtml is re-exported for app.js, which imports it from here.
+import { titleCase, escapeHtml, bonusSuffix } from './render-util.js';
+export { escapeHtml };
 
 // ---- dice animation --------------------------------------------------------
 export function animateDice(container, small = false) {
@@ -176,11 +181,7 @@ export function renderSheet(state, container, opts = {}) {
   if (!d.items.length) items.appendChild(el('li', 'empty', 'Nothing carried.'));
   d.items.forEach((it, idx) => {
     const li = el('li', 'item');
-    let tag = '';
-    if (it.kind === 'weapon') tag = ` (Combat +${it.bonus})`;
-    else if (it.kind === 'armour') tag = ` (Defence +${it.bonus})`;
-    else if (it.kind === 'tool' && it.ability) tag = ` (${ABILITY_LABEL[it.ability] || it.ability} +${it.bonus})`;
-    const nm = el('span', 'item-txt', it.name + tag);
+    const nm = el('span', 'item-txt', it.name + bonusSuffix(it.kind, it.bonus, it.ability));
     if (it.wielded) nm.classList.add('wielded');
     if (it.worn) nm.classList.add('worn');
     li.appendChild(nm);
@@ -349,5 +350,3 @@ function curseChips(curses, state, onSheetChange = () => {}) {
   });
   return w;
 }
-function titleCase(s) { return (s || '').replace(/\b\w/g, (c) => c.toUpperCase()); }
-export function escapeHtml(s) { return (s || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }

@@ -17,7 +17,7 @@ import {
   linkedRewards, isCounterReward, isChooseOne, isPricedItemAward, hasVisiblePay,
   rewardWasteReason, forcedChoiceGroup, pendingRollVar,
 } from './render-rules.js';
-import { titleCase } from './render-util.js';
+import { titleCase, bonusSuffix } from './render-util.js';
 
 // The shared "show the effect's words" span (class fx), appended only when non-empty.
 export function appendFxWords(story, container, node, path) {
@@ -536,12 +536,7 @@ function rewardLabel(node) {
     const { name } = splitItemName(rawName);
     const bonus = node.getAttribute('bonus') ? parseInt(node.getAttribute('bonus'), 10) : 0;
     const ability = node.getAttribute('ability');
-    let tail = '';
-    if (tag === 'weapon' && bonus) tail = ` (Combat +${bonus})`;
-    else if (tag === 'armour' && bonus) tail = ` (Defence +${bonus})`;
-    else if (tag === 'tool' && ability) tail = ` (${titleCase(ability)} +${bonus})`;
-    else if (bonus) tail = ` (+${bonus})`;
-    return `Take ${titleCase(name)}${tail}`;
+    return `Take ${titleCase(name)}${bonusSuffix(tag, bonus, ability)}`;
   }
   const txt = (node.textContent || '').trim();
   if (txt) return txt;
@@ -631,12 +626,7 @@ export function renderItemAward(story, container, node, path) {
   const { name, alts } = splitItemName(rawName);
   const bonus = node.getAttribute('bonus') ? parseInt(node.getAttribute('bonus'), 10) : 0;
   const ability = node.getAttribute('ability') || null;
-  let tag = '';
-  if (kind === 'weapon') tag = ` (Combat +${bonus})`;
-  else if (kind === 'armour') tag = ` (Defence +${bonus})`;
-  else if (kind === 'tool' && ability) tag = ` (${titleCase(ability)} +${bonus})`;
-  else if (bonus) tag = ` (+${bonus})`;
-  const display = currency != null ? `${currency} Shards` : titleCase(name) + tag;
+  const display = currency != null ? `${currency} Shards` : titleCase(name) + bonusSuffix(kind, bonus, ability);
   const key = 'take@' + path;
   // replace= TRANSFORMS an existing possession into this reward instead of adding a
   // duplicate: a named replace="X" converts the item named X, an empty replace=""
