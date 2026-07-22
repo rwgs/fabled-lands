@@ -2,15 +2,14 @@
 
 Backlog of recommended improvements. Open tasks are filed under priority buckets
 (**HIGH** / **MEDIUM** / **LOW**) — work the first open (`- [ ]`) item top-down;
-each task's detail section carries the same stable ID. **There are currently two
-open tasks:** work **171–172** (both LOW). Completed tasks
-through 170 are listed under **Done** below. Completed detail sections are archived in
+each task's detail section carries the same stable ID. **There is currently one
+open task:** work **172** (LOW). Completed tasks
+through 171 are listed under **Done** below. Completed detail sections are archived in
 [`TASKS-archive.md`](TASKS-archive.md); the Review log at the end of this file
 records each audit pass and is where new work is filed.
 
 **LOW**
 
-- [ ] 171. Deduplicate the single/group combat control shell without merging their rules
 - [ ] 172. Deduplicate roll-widget/gate/memo scaffolding without building a generic roll renderer
 
 **Done**
@@ -188,6 +187,7 @@ section below); detail sections remain in filed order, not this order.*
 - [x] 168. An open navigation transaction leaves unrelated UI live and globally suppresses its saves
 - [x] 169. Durable-consequence navigation has no abort/retry contract — failed resurrection, flee, combat or item detours can strand the action
 - [x] 170. Centralise duplicated display helpers already owned by `render-util.js`
+- [x] 171. Deduplicate the single/group combat control shell without merging their rules
 
 ---
 

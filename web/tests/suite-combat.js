@@ -1348,4 +1348,72 @@ export async function run(ctx) {
       Math.random = rnd162;
     }
 
+    // --- task 171: single & group combat widgets share one control shell (parity) ---------
+    // drawFight and drawGroupFight now build their stats/log/animation-guard/flee/commit shell
+    // from the same local helpers (their DIFFERENT rules stay separate). These assert BOTH
+    // widgets still expose+consume each blessing, route a flee once, drop a stale animated
+    // strike, and persist a continuing round exactly once — the parity that drifted before.
+    {
+      const rnd171 = Math.random;
+      const settle171 = () => new Promise((r) => setTimeout(r, 20));
+      const secSingle = '<section name="P171S"><p><fight name="Ogre" combat="1" defence="1" stamina="99"/></p><flee><goto section="99" book="2"/>Run</flee></section>';
+      const secGroup = '<section name="P171G"><p><fight group="g" name="A" combat="1" defence="1" stamina="99"/><fight group="g" name="B" combat="1" defence="1" stamina="99"/></p><flee><goto section="99" book="2"/>Run</flee></section>';
+      const wrathBtn = (c) => Array.from(c.querySelectorAll('.blessing-combat')).find((b) => /Divine Wrath/.test(b.textContent));
+      const defBtn = (c) => Array.from(c.querySelectorAll('.blessing-combat')).find((b) => /Defence through Faith/.test(b.textContent));
+      const fleeBtn = (c) => Array.from(c.querySelectorAll('button')).find((b) => b.textContent.trim() === 'Flee');
+      const attackBtn = (c) => Array.from(c.querySelectorAll('.fight .btn-roll')).find((b) => /^Attack/.test(b.textContent));
+      const build = (secXml, navSpy) => {
+        const g = GameState.create({ name:'P171', gender:'m', profession:'Warrior', book:1, adv });
+        g.ephemeral = true; g.data.stamina = 40; g.data.staminaMax = 40; g.data.abilities.combat = 12;
+        g.addBlessing('wrath'); g.addBlessing('defence');
+        const c = document.createElement('div');
+        const st = new Story(c, g, { navigate: navSpy || (() => {}), onDeath(){}, notify(){} });
+        g.setVisitProvider(() => st.serializeVisit());
+        st.begin(parse(secXml), 1, secXml.includes('group="g"') ? 'P171G' : 'P171S');
+        return { g, c, st };
+      };
+
+      // (expose) both widgets show Divine Wrath + Defence-through-Faith when held and unresolved.
+      const es = build(secSingle), eg = build(secGroup);
+      ok('task171: the single widget exposes Wrath + Defence blessings', !!wrathBtn(es.c) && !!defBtn(es.c));
+      ok('task171: the group widget exposes Wrath + Defence blessings', !!wrathBtn(eg.c) && !!defBtn(eg.c));
+
+      // (consume) clicking Defence-through-Faith spends the blessing once and applies +3 on both.
+      const cs = build(secSingle); defBtn(cs.c).click(); await settle171();
+      const csFight = Array.from(cs.st.ctx.fights.values())[0];
+      ok('task171: single Defence blessing consumed once, +3 applied, button gone', !cs.g.hasBlessing('defence') && csFight.defenceBonus === 3 && !defBtn(cs.c));
+      const cg = build(secGroup); defBtn(cg.c).click(); await settle171();
+      const cgFights = Array.from(cg.st.ctx.fights.values());
+      ok('task171: group Defence blessing consumed once, +3 on every member, button gone', !cg.g.hasBlessing('defence') && cgFights.length === 2 && cgFights.every((f) => f.defenceBonus === 3) && !defBtn(cg.c));
+
+      // (flee once) each widget routes a flee to its escape section exactly once.
+      let ns = 0; const fs = build(secSingle, () => { ns++; }); fleeBtn(fs.c).click();
+      ok('task171: single flee routes exactly once', ns === 1 && fs.st.sectionFight.outcome === 'fled', `navs=${ns}`);
+      let ng = 0; const fg = build(secGroup, () => { ng++; }); fleeBtn(fg.c).click();
+      ok('task171: group flee routes exactly once', ng === 1 && fg.st.sectionFight.outcome === 'fled', `navs=${ng}`);
+
+      // (stale strike) a strike whose visit changes mid-animation is dropped on both widgets.
+      window.__FL_INSTANT_DICE__ = false;
+      let releaseGate; window.__FL_DICE_GATE__ = () => new Promise((res) => { releaseGate = res; });
+      const ss = build(secSingle); const ssFight = Array.from(ss.st.ctx.fights.values())[0];
+      attackBtn(ss.c).click(); ss.st.ctx = {}; releaseGate(); await settle171();
+      ok('task171: single drops a strike after navigating away mid-animation', ssFight.stamina === 99, `en=${ssFight.stamina}`);
+      const sg = build(secGroup); const sgFights = Array.from(sg.st.ctx.fights.values());
+      attackBtn(sg.c).click(); sg.st.ctx = {}; releaseGate(); await settle171();
+      ok('task171: group drops a strike after navigating away mid-animation', sgFights.every((f) => f.stamina === 99), `en=${sgFights.map((f) => f.stamina)}`);
+      delete window.__FL_DICE_GATE__;
+
+      // (persist once) a continuing (non-resolving) round persists exactly once on both widgets.
+      window.__FL_INSTANT_DICE__ = true;
+      Math.random = () => 0.99; // the player hits, but Stamina 99 keeps the fight unresolved
+      const ps = build(secSingle); let pc = 0; const ocs = ps.g.commitVisit.bind(ps.g); ps.g.commitVisit = () => { pc++; return ocs(); };
+      attackBtn(ps.c).click(); await settle171();
+      ok('task171: a continuing single round persists exactly once', pc === 1, `commits=${pc}`);
+      const pg = build(secGroup); let pcg = 0; const ocg = pg.g.commitVisit.bind(pg.g); pg.g.commitVisit = () => { pcg++; return ocg(); };
+      attackBtn(pg.c).click(); await settle171();
+      ok('task171: a continuing group round persists exactly once', pcg === 1, `commits=${pcg}`);
+      window.__FL_INSTANT_DICE__ = false;
+      Math.random = rnd171;
+    }
+
 }

@@ -100,8 +100,91 @@ function renderGroupFight(story, container, node, group) {
   return box;
 }
 
+// ---- shared control-shell helpers (task 171) --------------------------------
+// drawFight (single) and drawGroupFight (group) use DIFFERENT headless rules — fightRound vs
+// groupFightRound, per-fight outcome vs the group proxy, one foe vs a target picker — and those
+// stay visibly separate below. But their VIEW shells are identical: the player stats row, the
+// live log, the animated-strike guard, flee-target routing, and the "resolve-or-continue"
+// commit tail. These small local helpers hold that shared shell once so a persistence/blessing/
+// flee change lands in both widgets (the parity that drifted across tasks 83/87/91/162/166).
+
+// The player's stats line. defenceBonus is the per-fight Defence-through-Faith raise (stored on
+// the single fight, or shared on every group member — task 91), folded in with the transient
+// special="attack"/"defence" bonuses so the shown values match what resolution uses. (tasks 49, 87)
+function playerStatsRow(story, defenceBonus = 0) {
+  const you = document.createElement('div');
+  you.className = 'fight-stats you';
+  const shownCombat = story.state.ability('combat') + story.state.fightAttackBonus();
+  const shownDef = story.state.defence() + story.state.fightDefenceBonus() + (defenceBonus || 0);
+  you.innerHTML = `<span>Your Combat ${shownCombat}</span><span>Your Defence ${shownDef}</span><span>Your Stamina ${story.state.data.stamina}/${story.state.effectiveStaminaMax()}</span>`;
+  return you;
+}
+
+// The last six lines of the fight log (aria-live so screen readers hear each round, task 153).
+function logRow(lines) {
+  const logEl = document.createElement('div');
+  logEl.className = 'fight-log';
+  logEl.setAttribute('aria-live', 'polite');
+  lines.slice(-6).forEach((l) => { const p = document.createElement('div'); p.textContent = l; logEl.appendChild(p); });
+  return logEl;
+}
+
+// The animated-strike guard (task 146): freeze the pane, roll the dice, and report whether the
+// visit is still current. Returns false if the player navigated away mid-animation, so the
+// caller drops the strike rather than landing it on the next visit's ctx.
+async function animatedStrike(story, box) {
+  const ctxAtClick = story.ctx;
+  freezeButtons(story.root);
+  await animateDice(box, true);
+  return story.ctx === ctxAtClick;
+}
+
+// Route a resolved flee to its escape section (tasks 21, 169): the <flee>'s own <goto>, else a
+// section-level <choice flee="t">, else a plain rerender (the flee only unlocks a box-gated
+// choice, e.g. §207 → §22). The parting wound is durable, so the move is marked durable — a
+// failed target arms a retry rather than leaving a fled fight with no way out.
+function fleeNavigate(story, fleeNode) {
+  const fgoto = fleeNode.querySelector('goto');
+  const fchoice = story.sectionEl && story.sectionEl.querySelector('choice[flee="t"][section]');
+  if (fgoto && fgoto.getAttribute('section') != null) {
+    story.navigate(fgoto.getAttribute('book') ? Number(fgoto.getAttribute('book')) : story.book, fgoto.getAttribute('section'), { durable: true });
+  } else if (fchoice) {
+    story.navigate(fchoice.getAttribute('book') ? Number(fchoice.getAttribute('book')) : story.book, fchoice.getAttribute('section'), { durable: true });
+  } else {
+    story.rerender();
+  }
+}
+
+// The Flee button: apply the <flee> body NOW (the parting wound / "ran away" codeword — it
+// fires on the flee, never on render), mark the fight fled via the caller's proxy (a single
+// fight's own outcome, or the group's shared sectionFight), then route to the escape section.
+function makeFleeButton(story, fleeNode, markFled) {
+  const flee = document.createElement('button');
+  flee.className = 'btn-secondary';
+  flee.textContent = 'Flee';
+  flee.addEventListener('click', () => {
+    applyEffectBody(fleeNode, story.state);
+    markFled();
+    if (story.state.isDead()) { story.rerender(); return; } // a fatal parting wound
+    fleeNavigate(story, fleeNode);
+  });
+  return flee;
+}
+
+// The shared tail after a combat action that didn't navigate away: on a resolved fight (or
+// death) rerender the whole section so the fight gate + death/lose guard re-evaluate; otherwise
+// redraw the widget in place and persist the round, so a reload resumes it rather than rewinding
+// to the pre-round state (task 162). `resolved` and `redraw` are supplied per widget.
+function afterAction(story, resolved, redraw) {
+  if (resolved || story.state.isDead()) { story.rerender(); return; }
+  redraw();
+  story.state.commitVisit();
+}
+
 function drawGroupFight(story, box, fights, dmgNode, group, fleeNode = null) {
   box.innerHTML = '';
+  const redraw = () => drawGroupFight(story, box, fights, dmgNode, group, fleeNode);
+  const groupResolved = () => fights.every((f) => isDefeated(f)); // group-specific resolution rule
   const title = document.createElement('div');
   title.className = 'fight-title';
   title.textContent = `⚔ ${fights.length} foes`;
@@ -116,24 +199,10 @@ function drawGroupFight(story, box, fights, dmgNode, group, fleeNode = null) {
     box.appendChild(stats);
   });
 
-  const you = document.createElement('div');
-  you.className = 'fight-stats you';
-  // Show the per-fight attack/Defence bonuses (special="attack"/"defence", Defence
-  // through Faith — stored on the members, one encounter, task 91) so the displayed
-  // values match what resolution uses (playerCombat / playerDefenceFor). (tasks 49, 83, 87)
-  const shownCombat = story.state.ability('combat') + story.state.fightAttackBonus();
-  const shownDef = story.state.defence() + story.state.fightDefenceBonus() + (fights[0] ? (fights[0].defenceBonus || 0) : 0);
-  you.innerHTML = `<span>Your Combat ${shownCombat}</span><span>Your Defence ${shownDef}</span><span>Your Stamina ${story.state.data.stamina}/${story.state.effectiveStaminaMax()}</span>`;
-  box.appendChild(you);
+  box.appendChild(playerStatsRow(story, fights[0] ? fights[0].defenceBonus : 0)); // shared group Defence mark
+  box.appendChild(logRow(fights.flatMap((f) => f.log)));
 
-  const logEl = document.createElement('div');
-  logEl.className = 'fight-log';
-  logEl.setAttribute('aria-live', 'polite'); // announce each combat round to screen readers (task 153)
-  const merged = fights.flatMap((f) => f.log).slice(-6);
-  merged.forEach((l) => { const p = document.createElement('div'); p.textContent = l; logEl.appendChild(p); });
-  box.appendChild(logEl);
-
-  if (fights.every((f) => isDefeated(f))) {
+  if (groupResolved()) {
     const b = document.createElement('div'); b.className = 'roll-outcome ok'; b.textContent = 'All foes are defeated!'; box.appendChild(b);
     return;
   }
@@ -149,60 +218,24 @@ function drawGroupFight(story, box, fights, dmgNode, group, fleeNode = null) {
     attack.className = 'btn-roll';
     attack.textContent = living.length > 1 ? `Attack ${target.name}` : 'Attack';
     attack.addEventListener('click', async () => {
-      // Freeze the whole pane and remember the visit: a still-live control clicked
-      // during the ~0.5s animation must not let groupFightRound mutate state after the
-      // player has left this section, nor land it on the next visit's ctx (task 146).
-      const ctxAtClick = story.ctx;
-      freezeButtons(story.root);
-      await animateDice(box, true);
-      if (story.ctx !== ctxAtClick) return; // navigated away mid-animation — drop the strike
+      if (!(await animatedStrike(story, box))) return; // navigated away mid-animation — drop the strike
       groupFightRound(story.state, fights, dmgNode, target);
       // A <fightdamage> body's <goto> (a wound redirect) ends the combat by
-      // navigation, exactly as in a single fight. (task 99)
+      // navigation, exactly as in a single fight. (tasks 99, 169)
       const redirected = fights.find((f) => f.roundGoto);
       if (redirected && !story.state.isDead()) {
         const g = redirected.roundGoto; fights.forEach((f) => { f.roundGoto = null; });
-        // The round is durable (its state mutations survive the rollback); a failed target
-        // arms a retry for the redirect rather than dropping it. (task 169)
         story.navigate(g.book != null ? g.book : story.book, g.section, { durable: true });
         return;
       }
-      // On any resolution (all foes down) or death, rerender so the gate (and the
-      // death/lose guard, via the sectionFight proxy above) re-evaluates.
-      if (fights.every((f) => isDefeated(f)) || story.state.isDead()) { story.rerender(); return; }
-      drawGroupFight(story, box, fights, dmgNode, group, fleeNode); // fight continues
-      // Persist the completed round — enemy Stamina/log/flags live on the fights in
-      // story.ctx.fights, which serializeVisit stores; a reload then resumes this round,
-      // not the pre-round state. (Resolution/death take rerender, which also saves.) (task 162)
-      story.state.commitVisit();
+      afterAction(story, groupResolved(), redraw);
     });
     controls.appendChild(attack);
   });
 
-  // A <flee> escape (e.g. §6.291 "flee back to your ship, →745"): apply the
-  // flee body on click, mark the group fled, then follow the flee's goto.
-  if (fleeNode) {
-    const flee = document.createElement('button');
-    flee.className = 'btn-secondary';
-    flee.textContent = 'Flee';
-    flee.addEventListener('click', () => {
-      applyEffectBody(fleeNode, story.state);
-      story.sectionFight.outcome = 'fled';
-      if (story.state.isDead()) { story.rerender(); return; } // a fatal parting wound
-      const fgoto = fleeNode.querySelector('goto');
-      const fchoice = story.sectionEl && story.sectionEl.querySelector('choice[flee="t"][section]');
-      // The parting wound is durable; a failed target arms a retry for the escape redirect
-      // rather than leaving a fled fight with no way out. (task 169)
-      if (fgoto && fgoto.getAttribute('section') != null) {
-        story.navigate(fgoto.getAttribute('book') ? Number(fgoto.getAttribute('book')) : story.book, fgoto.getAttribute('section'), { durable: true });
-      } else if (fchoice) {
-        story.navigate(fchoice.getAttribute('book') ? Number(fchoice.getAttribute('book')) : story.book, fchoice.getAttribute('section'), { durable: true });
-      } else {
-        story.rerender();
-      }
-    });
-    controls.appendChild(flee);
-  }
+  // A <flee> escape (e.g. §6.291 "flee back to your ship, →745"): the group records its fled
+  // state on the shared proxy so the gate/death guard see it (task 48).
+  if (fleeNode) controls.appendChild(makeFleeButton(story, fleeNode, () => { story.sectionFight.outcome = 'fled'; }));
 
   // COMBAT blessing (§4.324, task 91): retry the missed strike against the same
   // target — the foe struck last round carries the missed flag.
@@ -213,9 +246,7 @@ function drawGroupFight(story, box, fights, dmgNode, group, fleeNode = null) {
     rr.textContent = `Use COMBAT blessing (retry your attack${living.length > 1 ? ` on ${missed.name}` : ''})`;
     rr.addEventListener('click', () => {
       if (!rerollAttack(story.state, missed)) return;
-      if (fights.every((f) => isDefeated(f)) || story.state.isDead()) { story.rerender(); return; }
-      drawGroupFight(story, box, fights, dmgNode, group, fleeNode);
-      story.state.commitVisit(); // persist the retried round (rerollAttack saved the blessing pre-retry) (task 162)
+      afterAction(story, groupResolved(), redraw);
     });
     controls.appendChild(rr);
   }
@@ -234,9 +265,7 @@ function drawGroupFight(story, box, fights, dmgNode, group, fleeNode = null) {
         const dmg = useWrathBlessing(story.state, target);
         story.sectionFight.wrathUsed = true; // once per combat, across every foe
         story.notify(`Divine Wrath strikes the ${target.name} for ${dmg}!`);
-        if (fights.every((f) => isDefeated(f)) || story.state.isDead()) { story.rerender(); return; }
-        drawGroupFight(story, box, fights, dmgNode, group, fleeNode);
-        story.state.commitVisit(); // persist the wrath round (task 162)
+        afterAction(story, groupResolved(), redraw);
       });
       controls.appendChild(w);
     });
@@ -250,8 +279,7 @@ function drawGroupFight(story, box, fights, dmgNode, group, fleeNode = null) {
     d.addEventListener('click', () => {
       // One encounter: the mark lives on the group proxy, the +3 on every member. (task 91)
       useDefenceBlessing(story.state, story.sectionFight, 3, fights);
-      drawGroupFight(story, box, fights, dmgNode, group, fleeNode);
-      story.state.commitVisit(); // persist the Defence buff (+3 stored on every member) (task 162)
+      afterAction(story, false, redraw); // Defence never resolves the fight
     });
     controls.appendChild(d);
   }
@@ -266,6 +294,7 @@ function findInSection(story, tag) {
 
 function drawFight(story, box, fight, node, dmgNode, fleeNode, key, locked = false, roundNode = null) {
   box.innerHTML = '';
+  const redraw = () => drawFight(story, box, fight, node, dmgNode, fleeNode, key, false, roundNode); // never locked mid-fight
   const title = document.createElement('div');
   title.className = 'fight-title';
   title.textContent = `⚔ ${fight.name}`;
@@ -278,21 +307,8 @@ function drawFight(story, box, fight, node, dmgNode, fleeNode, key, locked = fal
     `<span class="en-stam">Stamina ${fight.stamina}/${fight.maxStamina}</span>`;
   box.appendChild(stats);
 
-  const you = document.createElement('div');
-  you.className = 'fight-stats you';
-  // Include any per-fight attack/Defence bonus (special="attack"/"defence", plus
-  // Defence through Faith which lives on the fight itself — task 91) so the
-  // displayed values match what combat resolution uses. (tasks 49, 80, 87)
-  const shownCombat = story.state.ability('combat') + story.state.fightAttackBonus();
-  const shownDef = story.state.defence() + story.state.fightDefenceBonus() + (fight.defenceBonus || 0);
-  you.innerHTML = `<span>Your Combat ${shownCombat}</span><span>Your Defence ${shownDef}</span><span>Your Stamina ${story.state.data.stamina}/${story.state.effectiveStaminaMax()}</span>`;
-  box.appendChild(you);
-
-  const logEl = document.createElement('div');
-  logEl.className = 'fight-log';
-  logEl.setAttribute('aria-live', 'polite'); // announce each combat round to screen readers (task 153)
-  fight.log.slice(-6).forEach((l) => { const p = document.createElement('div'); p.textContent = l; logEl.appendChild(p); });
-  box.appendChild(logEl);
+  box.appendChild(playerStatsRow(story, fight.defenceBonus)); // fight.defenceBonus = this fight's Defence-through-Faith raise
+  box.appendChild(logRow(fight.log));
 
   if (fight.outcome === 'win') {
     const b = document.createElement('div'); b.className = 'roll-outcome ok'; b.textContent = `${fight.name} is defeated!`; box.appendChild(b);
@@ -319,62 +335,24 @@ function drawFight(story, box, fight, node, dmgNode, fleeNode, key, locked = fal
   attack.className = 'btn-roll';
   attack.textContent = 'Attack';
   attack.addEventListener('click', async () => {
-    // Freeze the whole pane and remember the visit (task 146): a still-live control
-    // clicked during the ~0.5s animation must not let fightRound mutate state after the
-    // player has left this section, nor land the strike on the next visit's ctx.
-    const ctxAtClick = story.ctx;
-    freezeButtons(story.root);
-    await animateDice(box, true);
-    if (story.ctx !== ctxAtClick) return; // navigated away mid-animation — drop the strike
+    if (!(await animatedStrike(story, box))) return; // navigated away mid-animation — drop the strike
     fightRound(story.state, fight, dmgNode, roundNode);
     // A <fightround>/<fightdamage> body can end the fight by navigation — §5.689
-    // "dragged you under" (→7), §4.238 "if you get wounded" (→184). (task 99)
+    // "dragged you under" (→7), §4.238 "if you get wounded" (→184). The round is durable, so a
+    // failed target arms a retry rather than dropping the redirect and re-showing Attack. (tasks 99, 169)
     if (fight.roundGoto && !story.state.isDead()) {
       const g = fight.roundGoto; fight.roundGoto = null;
-      // The round is durable (its mutations survive the rollback); a failed target arms a
-      // retry for the redirect rather than dropping it and re-showing Attack. (task 169)
       story.navigate(g.book != null ? g.book : story.book, g.section, { durable: true });
       return;
     }
     // Reduced to 0 Stamina: if the section has an "if you lose…" branch, that's
     // a (non-death) loss — route to it; otherwise it's death.
     if (story.state.isDead() && story.fightGate && story.fightGate.hasLosePath) fight.outcome = 'lose';
-    // On any resolution (win/lose/fled) or death, re-render the whole section so
-    // the fight gate re-evaluates which onward links are enabled.
-    if (fight.outcome || story.state.isDead()) { story.rerender(); return; }
-    drawFight(story, box, fight, node, dmgNode, fleeNode, key, false, roundNode); // fight continues (never locked mid-fight)
-    // A round that doesn't resolve the fight still mutated persistent state — enemy Stamina,
-    // the log and the once-per-round reroll/blessing flags all ride on the fight in
-    // story.ctx.fights, which serializeVisit persists. Save so a reload resumes the exact
-    // round instead of rewinding it. (Win/lose/fled/death take rerender, which also saves.) (task 162)
-    story.state.commitVisit();
+    afterAction(story, fight.outcome, redraw);
   });
   controls.appendChild(attack);
 
-  if (fleeNode) {
-    const flee = document.createElement('button');
-    flee.className = 'btn-secondary';
-    flee.textContent = 'Flee';
-    flee.addEventListener('click', () => {
-      // Apply the flee consequence NOW (the parting wound / "ran away" codeword)
-      // — it lives in <flee> and must fire on the flee, never on render.
-      applyEffectBody(fleeNode, story.state);
-      fight.outcome = 'fled';
-      if (story.state.isDead()) { story.rerender(); return; } // a fatal parting wound
-      const fgoto = fleeNode.querySelector('goto');
-      const fchoice = story.sectionEl && story.sectionEl.querySelector('choice[flee="t"][section]');
-      // The parting wound is durable; a failed target arms a retry for the escape redirect
-      // rather than leaving a fled fight with no way out. (task 169)
-      if (fgoto && fgoto.getAttribute('section') != null) {
-        story.navigate(fgoto.getAttribute('book') ? Number(fgoto.getAttribute('book')) : story.book, fgoto.getAttribute('section'), { durable: true });
-      } else if (fchoice) {
-        story.navigate(fchoice.getAttribute('book') ? Number(fchoice.getAttribute('book')) : story.book, fchoice.getAttribute('section'), { durable: true });
-      } else {
-        story.rerender(); // no target: the flee unlocks a box-gated choice (e.g. §207 → §22)
-      }
-    });
-    controls.appendChild(flee);
-  }
+  if (fleeNode) controls.appendChild(makeFleeButton(story, fleeNode, () => { fight.outcome = 'fled'; }));
 
   // COMBAT blessing (§4.324, task 91): a MISSED strike may be retried once per
   // round — the player alone strikes again; the enemy's reply is never repeated.
@@ -384,9 +362,7 @@ function drawFight(story, box, fight, node, dmgNode, fleeNode, key, locked = fal
     rr.textContent = 'Use COMBAT blessing (retry your attack)';
     rr.addEventListener('click', () => {
       if (!rerollAttack(story.state, fight)) return;
-      if (fight.outcome || story.state.isDead()) { story.rerender(); return; }
-      drawFight(story, box, fight, node, dmgNode, fleeNode, key, false, roundNode);
-      story.state.commitVisit(); // persist the retried round (rerollAttack saved the blessing pre-retry) (task 162)
+      afterAction(story, fight.outcome, redraw);
     });
     controls.appendChild(rr);
   }
@@ -403,9 +379,7 @@ function drawFight(story, box, fight, node, dmgNode, fleeNode, key, locked = fal
     w.addEventListener('click', () => {
       const dmg = useWrathBlessing(story.state, fight);
       story.notify(`Divine Wrath strikes the ${fight.name} for ${dmg}!`);
-      if (fight.outcome || story.state.isDead()) { story.rerender(); return; }
-      drawFight(story, box, fight, node, dmgNode, fleeNode, key, false, roundNode);
-      story.state.commitVisit(); // persist the wrath round (task 162)
+      afterAction(story, fight.outcome, redraw);
     });
     controls.appendChild(w);
   }
@@ -415,8 +389,7 @@ function drawFight(story, box, fight, node, dmgNode, fleeNode, key, locked = fal
     d.textContent = 'Use Defence through Faith (+3 Defence)';
     d.addEventListener('click', () => {
       useDefenceBlessing(story.state, fight);
-      drawFight(story, box, fight, node, dmgNode, fleeNode, key, false, roundNode);
-      story.state.commitVisit(); // persist the Defence buff (once-per-fight flag lives in ctx) (task 162)
+      afterAction(story, fight.outcome, redraw); // Defence never resolves the fight (outcome stays null)
     });
     controls.appendChild(d);
   }
