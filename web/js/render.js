@@ -157,30 +157,76 @@ export class Story {
     // so only the OTHER at-large ships relocate and the voyage continues; a non-sail exit
     // (gone ashore) exempts nothing, so every at-large ship docks and the voyage ends. (task 81)
     const rawNavigate = opts.navigate;
-    this.navigate = (book, section) => {
+    // A mutation-bearing move is transactional across target validation and the source →
+    // destination hand-off (task 167). opts.pay (optional) is the PRICE of the move — a
+    // choice cost, a blessing/ship spend — deferred so it is applied in memory but neither
+    // persisted nor kept unless the destination actually loads: a rejected/missing target
+    // refunds it and leaves the source live. opts.sourceNode overrides the return-frame's
+    // crossed action (else the caller's _pendingSourceNode is used). Immediate consequences
+    // (a flee wound, a combat round, an item charge) are applied by the caller before this,
+    // are already durable, and are intentionally NOT refunded — only the move is guarded.
+    this.navigate = (book, section, opts2 = {}) => {
       // In-flight guard (task 147): rawNavigate (app.navigate) awaits a possibly-slow
       // cross-book section fetch before begin() completes. Without this, a second click
       // in that window would run the leave hooks again (the first pass consumes
       // _sailExempt, so the second re-docks the ship just sailed), double-count the turn
       // in state.goTo, and re-apply the destination's on-entry effects. Ignore re-entrant
-      // navigations until begin() (or a failed fetch) releases the flag.
+      // navigations until begin() (success) or the failure path below releases the flag.
       if (this._navInFlight) return;
       this._navInFlight = true;
-      // Snapshot the section being LEFT as the one-level return frame BEFORE the leave
-      // hooks / rawNavigate mutate anything — so a <return> in the destination restores
-      // this exact visit (position, section-local vars, render memo) rather than
-      // re-entering it fresh. (task 110)
+      // Open the transaction BEFORE the price is charged, so the deduction (and the leave
+      // hooks' todock write) stay in memory only until the destination is confirmed. (task 167)
+      const snap = this.state.beginTxn();
+      // Snapshot the source-side story fields up front so ANY abort — a refused price or a
+      // rejected/missing target — restores this visit's frame and sail-exempt/cleanup state
+      // exactly, alongside state.rollbackTxn refunding the data.
+      const pre = {
+        returnFrame: this._returnFrame,
+        sailExempt: this._sailExempt,
+        deferredCleanups: this.deferredCleanups ? new Map(this.deferredCleanups) : this.deferredCleanups,
+      };
+      // Roll the whole move back to the coherent source: refund the txn, restore the story
+      // fields, drop the crossed-source mark (a failed move has none), release the guard, then
+      // redraw + persist the (unchanged) source via rerender(). Storage was never touched
+      // during the txn, so this re-affirms the pre-move record.
+      const abort = (e) => {
+        if (e) console.error('navigation failed', e);
+        this.state.rollbackTxn(snap);
+        this._returnFrame = pre.returnFrame;
+        this._sailExempt = pre.sailExempt;
+        this.deferredCleanups = pre.deferredCleanups;
+        this._pendingSourceNode = null;
+        this._navInFlight = false;
+        if (e) this.notify('Could not load that section — please try again.', 'warn');
+        this.rerender();
+      };
+      // 1. The price of the move, deferred until now. payChoiceCost re-validates against the
+      //    live sheet (task 133) and returns { ok }; a blessing/ship spend returns true. If it
+      //    refuses (can't afford / possession dropped), roll back cleanly — no move, no charge.
+      if (opts2.pay) {
+        let r; try { r = opts2.pay(); } catch (e) { r = { ok: false }; }
+        const ok = r !== false && !(r && r.ok === false);
+        if (!ok) { abort(); return; }
+      }
+      // 2. Source hand-off. Record the crossed action, then snapshot the section being LEFT as
+      //    the one-level return frame BEFORE the leave hooks / rawNavigate mutate anything — so
+      //    a <return> restores this exact visit rather than re-entering it fresh. (task 110)
+      if (opts2.sourceNode !== undefined) this._pendingSourceNode = opts2.sourceNode;
       const frame = this._captureReturnFrame();
       this._applyLeaveHooks();
       this._returnFrame = frame;
-      // Persistence audit (task 161): the leave hooks apply this section's todock (which
-      // autosaves through changed()) while this.section still names the source and _returnFrame
-      // still holds the source's OWN return frame — so the on-disk record stays a coherent
-      // source visit throughout the slow fetch below. The new destination frame installed just
-      // above is in-memory only and is committed atomically by begin() (which now ends in an
-      // explicit save) once the router resolves; nothing autosaves during the await, so the
-      // transition needs no separate commit here.
-      rawNavigate(book, section);
+      // 3. Enter the destination. rawNavigate (app.navigate) resolves false when the target is
+      //    missing and rejects when its book fetch fails; begin() on success writes nothing (its
+      //    saves are suppressed by the open txn) — the wrapper commits the one coherent
+      //    {destination + price} write here via commitTxn.
+      let result;
+      try { result = rawNavigate(book, section); } catch (e) { abort(e); return; }
+      if (result && typeof result.then === 'function') {
+        result.then((entered) => { if (entered === false) abort(); else this.state.commitTxn(); }).catch((e) => abort(e || new Error('navigation rejected')));
+      } else {
+        // Synchronous rawNavigate (a cached section, or a test mock): commit now.
+        this.state.commitTxn();
+      }
     };
     this.onDeath = opts.onDeath || (() => {});
     this.notify = opts.notify || (() => {});

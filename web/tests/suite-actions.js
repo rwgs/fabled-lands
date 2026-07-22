@@ -1,7 +1,7 @@
 // FL test suite — travel gates, transfers, returns, curse lift, blessing veto, reroll storm
 // Extracted verbatim from web/_test.html run() lines 4350-4891 (task 120).
 import * as data from '../js/data.js';
-import { GameState, makeItem, sanitizeData } from '../js/state.js';
+import { GameState, makeItem, sanitizeData, readSlotData, deleteSlot } from '../js/state.js';
 import * as eng from '../js/engine.js';
 import { Story } from '../js/render.js';
 import * as rules from '../js/render-rules.js';
@@ -906,6 +906,100 @@ export async function run(ctx) {
         const g2 = new GameState(sanitizeData(JSON.parse(JSON.stringify({ ...g.data }))));
         ok('task161-3: the reverted A3 visit survives sanitize (resumable, not a mismatch)',
            !!g2.data.visit && g2.data.visit.section === 'A3u');
+      }
+    }
+
+    // --- task 167: mutation-bearing navigation is atomic across the async target fetch ------
+    // A paid/ship move defers its price into the transactional navigate: while the destination
+    // fetch is pending nothing is persisted; a rejected fetch refunds the price and leaves the
+    // source live with the in-flight guard released; a successful fetch takes it exactly once.
+    {
+      const tick = () => new Promise((r) => setTimeout(r, 0)); // flush the navigate microtasks
+      // A controllable raw navigate mirroring app.navigate: it returns a promise the test
+      // settles as success (enter the destination) or rejection (the book fetch failed).
+      const controllable = (g, storyRef, dstEl) => {
+        const box = { pending: null };
+        box.enter = (b, s) => new Promise((resolve, reject) => {
+          box.pending = {
+            ok: () => { g.goTo(b, s); g.snapshot(); storyRef().begin(dstEl, b, s); resolve(true); },
+            reject: () => reject(new Error('book fetch failed')),
+          };
+        });
+        return box;
+      };
+
+      // Scenario A — a paid cross-book <choice>: reject the target, then retry and succeed.
+      {
+        const secSrc = parse('<section name="SRC167"><p>Source.</p><choices><choice section="9" book="2" shards="50">Cross over</choice></choices></section>');
+        const secDst = parse('<section name="9"><p>Arrived.</p></section>');
+        const g = GameState.create({ name:'T167a', gender:'m', profession:'Warrior', book:1, adv });
+        g.slot = 19; g.data.shards = 100;
+        const cont = document.createElement('div');
+        let story;
+        const nav = controllable(g, () => story, secDst);
+        story = new Story(cont, g, { navigate: nav.enter, onDeath(){}, notify(){} });
+        g.setVisitProvider(() => story.serializeVisit());
+        g.goTo(1, 'SRC167'); story.begin(secSrc, 1, 'SRC167'); // establishes + commits the on-disk source
+        const turns0 = g.data.turns;
+        const crossBtn = () => Array.from(cont.querySelectorAll('.choice')).find((b) => /Cross over/.test(b.textContent));
+
+        crossBtn().click(); // charges the price IN MEMORY; the fetch is now pending
+        ok('task167-A: while pending the cost is deducted in memory', g.data.shards === 50, 'shards=' + g.data.shards);
+        ok('task167-A: while pending the PERSISTED source shows NO deduction', (readSlotData(19) || {}).shards === 100, 'persisted=' + JSON.stringify((readSlotData(19) || {}).shards));
+        ok('task167-A: while pending the source is current and the guard is held', story.section === 'SRC167' && story._navInFlight === true);
+
+        nav.pending.reject(); await tick(); // the target fetch fails
+        ok('task167-A: a rejected target refunds the cost in memory', g.data.shards === 100, 'shards=' + g.data.shards);
+        ok('task167-A: a rejected target leaves the persisted source coherent', (readSlotData(19) || {}).shards === 100);
+        ok('task167-A: a rejected target releases the guard and keeps the source live', story._navInFlight === false && story.section === 'SRC167');
+        ok('task167-A: the paid choice is still offered after the failed move', !!crossBtn());
+        ok('task167-A: no turn was counted for the failed move', g.data.turns === turns0, 'turns=' + g.data.turns + ' vs ' + turns0);
+
+        crossBtn().click(); nav.pending.ok(); await tick(); // retry and succeed
+        ok('task167-A: a successful move takes the cost exactly once', g.data.shards === 50, 'shards=' + g.data.shards);
+        ok('task167-A: a successful move reaches the destination', story.section === '9' && Number(g.data.book) === 2);
+        ok('task167-A: a successful move counts exactly one turn', g.data.turns === turns0 + 1, 'turns=' + g.data.turns);
+        ok('task167-A: a successful move persists the destination WITH the one deduction', (readSlotData(19) || {}).shards === 50 && String((readSlotData(19) || {}).section) === '9');
+        ok('task167-A: a successful move installs one return frame back to the source', !!story._returnFrame && story._returnFrame.section === 'SRC167');
+        ok('task167-A: a successful move releases the in-flight guard', story._navInFlight === false);
+        deleteSlot(19);
+      }
+
+      // Scenario B — a <goto sail="t"> (a ship action): a rejected voyage neither strands the
+      // ship at sea nor persists the launch; the source port stays live and re-sailable.
+      {
+        const secSrc = parse('<section name="SAILSRC" dock="Kunrir"><p>Port.</p><goto sail="t" section="9" book="2">Sail forth</goto></section>');
+        const secDst = parse('<section name="9"><p>At sea.</p></section>');
+        const g = GameState.create({ name:'T167b', gender:'m', profession:'Warrior', book:1, adv });
+        g.slot = 20;
+        const cont = document.createElement('div');
+        let story;
+        const nav = controllable(g, () => story, secDst);
+        story = new Story(cont, g, { navigate: nav.enter, onDeath(){}, notify(){} });
+        g.setVisitProvider(() => story.serializeVisit());
+        g.addShip({ type:'barque', name:'Wave' }); // at large until the dock berths it
+        g.goTo(1, 'SAILSRC'); story.begin(secSrc, 1, 'SAILSRC'); // arriveAtDock('Kunrir') berths Wave
+        const shipId = g.data.ships[0].id;
+        ok('task167-B: the ship is docked here before sailing', g.data.ships[0].docked === 'Kunrir' && g.shipsHere().length === 1);
+        const sailBtn = () => Array.from(cont.querySelectorAll('.goto')).find((b) => /Sail forth/.test(b.textContent));
+        ok('task167-B: the sail goto is enabled with a ship here', !!sailBtn() && sailBtn().disabled === false);
+
+        sailBtn().click(); // launches the ship IN MEMORY; the voyage fetch is pending
+        ok('task167-B: while pending the ship is at large in memory', g.data.ships[0].docked === null && g.data.sailingShipId === shipId);
+        ok('task167-B: while pending the PERSISTED ship is still docked (launch not committed)', ((readSlotData(20) || {}).ships || [])[0] && readSlotData(20).ships[0].docked === 'Kunrir', JSON.stringify((readSlotData(20) || {}).ships));
+        ok('task167-B: while pending the guard is held and the port is current', story._navInFlight === true && story.section === 'SAILSRC');
+
+        nav.pending.reject(); await tick(); // the voyage's destination fails to load
+        ok('task167-B: a rejected voyage re-docks the ship', g.data.ships[0].docked === 'Kunrir' && g.data.sailingShipId == null);
+        ok('task167-B: a rejected voyage releases the guard and keeps the port live', story._navInFlight === false && story.section === 'SAILSRC');
+        ok('task167-B: the port is still re-sailable after the failed voyage', !!sailBtn() && sailBtn().disabled === false);
+
+        sailBtn().click(); nav.pending.ok(); await tick(); // retry and succeed
+        ok('task167-B: a successful voyage reaches the destination', story.section === '9' && Number(g.data.book) === 2);
+        ok('task167-B: a successful voyage keeps the ship at large (sailing on)', g.data.ships[0].docked === null && g.data.sailingShipId === shipId);
+        ok('task167-B: a successful voyage persists the destination', String((readSlotData(20) || {}).section) === '9');
+        ok('task167-B: a successful voyage releases the guard', story._navInFlight === false);
+        deleteSlot(20);
       }
     }
 

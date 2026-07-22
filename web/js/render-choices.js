@@ -100,14 +100,21 @@ export function renderChoice(story, node, path) {
           () => payChoiceCost(story.state, gate.payment).ok);
         return;
       }
-      // The cost is re-validated against the live sheet (task 133): if the required
-      // possession was dropped (or funds spent) since this button rendered, refuse and
-      // refresh so the now-ineligible choice greys out instead of crossing for free.
-      const paid = payChoiceCost(story.state, gate.payment); // transaction lives in market.js (task 34)
-      if (!paid.ok) { story.rerender(); return; }
-      if (section == null) return; // a cost-only choice: pays and stays, not a source action
-      story._pendingSourceNode = node; // record the source action for a possible <return> (task 110)
-      story.navigate(targetBook, section);
+      // A cost-only choice (no destination) pays and stays — its price is immediate, with no
+      // move to guard. Re-validate against the live sheet (task 133); refuse-and-refresh so a
+      // now-ineligible choice greys out instead of crossing for free.
+      if (section == null) {
+        const paid = payChoiceCost(story.state, gate.payment); // transaction lives in market.js (task 34)
+        if (!paid.ok) story.rerender();
+        return;
+      }
+      // A real move: defer the price INTO the transactional navigate (task 167) so a rejected
+      // or interrupted target refunds it and leaves this choice live, and a successful target
+      // takes it exactly once. payChoiceCost still re-validates the live sheet at click time.
+      story.navigate(targetBook, section, {
+        pay: () => payChoiceCost(story.state, gate.payment),
+        sourceNode: node, // record the source action for a possible <return> (task 110)
+      });
     });
   }
   story.tagFightNav(node, btn);
@@ -183,16 +190,16 @@ export function renderGoto(story, container, node, path) {
   const spendBlessing = blessingSpendForGoto(node, story.sectionEl, story.state, story.outcomeBlessings);
   link.addEventListener('click', () => {
     if (!bookAvailable) { story.notify(`“${bookTitle(book)}” (Book ${book}) isn’t included in this edition.`, 'warn'); return; }
-    story._pendingSourceNode = node; // record the source action for a possible <return> (task 110)
     // The storm-safe goto spends the guarded blessing on the way out; for a sail goto
     // defer that spend into the chooser's commit so an abandoned which-ship picker
     // doesn't waste the blessing (task 149).
     const spend = () => { if (spendBlessing && story.state.hasBlessing(spendBlessing)) story.state.useBlessing(spendBlessing); return true; };
     // A sail goto puts a ship "at large" before leaving; prompt when more than one
     // ship is at this dock, else sail the single one. (task 73)
-    if (isSail) { sailThenGo(story, container, link, book, section, spend); return; }
-    spend();
-    story.navigate(book, section);
+    if (isSail) { story._pendingSourceNode = node; sailThenGo(story, container, link, book, section, spend); return; }
+    // Defer the blessing spend into the transactional navigate (task 167): a rejected or
+    // interrupted target refunds the guarded blessing and leaves this goto live.
+    story.navigate(book, section, { pay: spend, sourceNode: node }); // sourceNode: a possible <return> (task 110)
   });
   story.tagFightNav(node, link);
   story.tagRollNav(node, link);
@@ -211,12 +218,21 @@ export function renderGoto(story, container, node, path) {
 // commit refreshes without sailing or navigating (mirrors payChoiceCost's { ok:false }).
 export function sailThenGo(story, container, link, book, section, commit) {
   const here = story.state.shipsHere();
-  // Commit the payment first (so an unaffordable cost blocks before anything moves),
-  // then sail the chosen ship, exempt it from this section's todock (it leaves with
-  // you), then navigate. (tasks 73, 81, 149)
+  // Bundle the payment + putting the ship "at large" into the transactional navigate's
+  // deferred price (task 167): they run in memory but are refunded if the destination is
+  // missing/rejected, so an interrupted voyage neither eats the cost nor strands a ship at
+  // sea. An unaffordable/blocked commit returns { ok:false } to refuse the move (task 149).
+  // The sail-exempt flag is set here (before the wrapper's leave hooks read it). The source
+  // node was recorded by the caller into _pendingSourceNode, which navigate keeps. (task 81)
   const go = (ship) => {
-    if (commit && !commit()) { story.rerender(); return; }
-    const s = story.state.sailShip(ship && ship.id); story._sailExempt = s ? s.id : null; story.navigate(book, section);
+    story.navigate(book, section, {
+      pay: () => {
+        if (commit && !commit()) return { ok: false };
+        const s = story.state.sailShip(ship && ship.id);
+        story._sailExempt = s ? s.id : null;
+        return { ok: true };
+      },
+    });
   };
   if (here.length <= 1) { go(here[0]); return; }
   link.disabled = true;

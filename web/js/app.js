@@ -598,11 +598,14 @@ function toggleSheet(force) {
 
 async function navigate(book, section) {
   book = Number(book);
+  // getSection resolves null for a missing section and REJECTS if the book fetch fails.
+  // Both are handled by the caller: the Story.navigate wrapper (task 167) rolls the move
+  // back and releases the in-flight guard on a false return or a rejected promise, so a
+  // failed cross-book load never strands a spent price or a stuck guard.
   const sectionEl = await data.getSection(book, section);
   if (!sectionEl) {
     toast(`Section ${section} not found in Book ${book}.`, 'warn');
-    if (story) story._navInFlight = false; // begin() won't run to release the guard (task 147)
-    return;
+    return false;
   }
   state.goTo(book, section);
   state.snapshot(); // entry state for this section (before its effects run) — enables undo
@@ -611,6 +614,7 @@ async function navigate(book, section) {
   const pane = $('.story-pane'); if (pane) pane.scrollTop = 0;
   window.scrollTo(0, 0);
   narrator.autoplayIfEnabled(currentFlow()); // [TTS]
+  return true;
 }
 
 async function undo() {

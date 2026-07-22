@@ -2,15 +2,11 @@
 
 Backlog of recommended improvements. Open tasks are filed under priority buckets
 (**HIGH** / **MEDIUM** / **LOW**) — work the first open (`- [ ]`) item top-down;
-each task's detail section carries the same stable ID. **There is currently one
-open task:** work **167**. Completed tasks through 166 are
-listed under **Done** below. Completed detail sections are archived in
+each task's detail section carries the same stable ID. **There are currently no
+open tasks** (the next review pass files new work). Completed tasks through 167
+are listed under **Done** below. Completed detail sections are archived in
 [`TASKS-archive.md`](TASKS-archive.md); the Review log at the end of this file
 records each audit pass and is where new work is filed.
-
-**MEDIUM**
-
-- [ ] 167. Mutation-bearing navigation is not atomic — a failed/pending cross-book load can consume payment without completing the move
 
 **Done**
 
@@ -183,6 +179,7 @@ section below); detail sections remain in filed order, not this order.*
 - [x] 164. Focused test suites still import the old whole-harness dependency set and boot unrelated app code
 - [x] 165. Re-archive completed task details 115–160 and clear them out of the priority buckets
 - [x] 166. Direct visit commits bypass persistence observers — save failures stay silent and activity timestamps go stale
+- [x] 167. Mutation-bearing navigation is not atomic — a failed/pending cross-book load can consume payment without completing the move
 
 ---
 

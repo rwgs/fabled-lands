@@ -141,6 +141,10 @@ export class GameState {
     // channel lets a ctx-only commit publish its save result WITHOUT triggering a sheet
     // rerender (there was no sheet-visible mutation to reflect). (task 166)
     this._saveListeners = new Set();
+    // While a navigation transaction is open (task 167), save() refreshes the in-memory
+    // visit record but skips the storage write, so a paid move's price is not persisted
+    // until its destination is confirmed. See beginTxn/commitTxn/rollbackTxn.
+    this._txnSuppress = false;
     // Callback the Story installs (setVisitProvider) that serialises the current
     // visit's execution record; save() calls it so data.visit is always current at
     // persist time — no matter which of the many mid-render mutations triggered the
@@ -201,6 +205,35 @@ export class GameState {
     const ok = this.save();
     this._publishSaveStatus();
     return ok;
+  }
+
+  // ---- navigation transaction (task 167) -------------------------------
+  // A mutation-bearing move (a paid choice, a blessing/ship passage) defers persisting its
+  // price across the async destination fetch: beginTxn() snapshots the data and suppresses
+  // the localStorage write inside save() (in-memory mutation and the sheet-refresh listeners
+  // still run, so the UI reflects the tentative spend); commitTxn() ends suppression and
+  // flushes ONE coherent write; rollbackTxn() restores the snapshot and ends suppression
+  // WITHOUT writing — the on-disk record was never touched, so it stays the pre-move source.
+  beginTxn() {
+    const snap = JSON.stringify(this.data);
+    this._txnSuppress = true;
+    return snap;
+  }
+  commitTxn() {
+    this._txnSuppress = false;
+    this.data.updated = Date.now();
+    const ok = this.save();
+    this._publishSaveStatus();
+    return ok;
+  }
+  rollbackTxn(snap) {
+    this._txnSuppress = false;
+    try { this.data = JSON.parse(snap); } catch (e) { /* keep current data on a parse fault */ }
+    // No write happened during the suppressed txn, so storage already holds the coherent
+    // pre-move source; just refresh the sheet to the restored values and keep the
+    // save-status channel consistent (the caller persists the restored source explicitly).
+    this._publishSaveStatus();
+    for (const fn of this._listeners) fn(this);
   }
 
   // ---- creation --------------------------------------------------------
@@ -973,7 +1006,15 @@ export class GameState {
     if (this.ephemeral) { this.lastSaveError = null; return true; } // preview game: not persisted until kept
     // Refresh the current-visit record so the write captures execution state as of now
     // (task 116). Guarded: a provider fault must never block persisting the game itself.
+    // Done even while a navigation txn suppresses the write below, so data.visit stays
+    // coherent in memory (a mismatched mid-transition record still resolves to null).
     if (this._visitProvider) { try { this.data.visit = this._visitProvider(); } catch (e) { this.data.visit = null; } }
+    // A mutation-bearing move holds a navigation transaction open across the async
+    // destination fetch (task 167): the price of the move mutates in memory but must not
+    // reach storage until the destination is confirmed, so an interrupted/rejected fetch
+    // leaves the on-disk record the coherent pre-move source. commitTxn() flushes; a
+    // rollback discards. The in-memory data.visit refresh above still runs.
+    if (this._txnSuppress) { this.lastSaveError = null; return true; }
     try {
       localStorage.setItem(SAVE_PREFIX + this.slot, JSON.stringify(this.data));
       const meta = loadSlotMeta();
