@@ -495,17 +495,20 @@ function buildGameScreen() {
   const header = el('header', 'game-header');
   const menuBtn = iconBtn('☰', 'More…', showGameMenu);
   const title = el('div', 'header-title', 'Fabled Lands');
-  const sheetBtn = iconBtn('📜', 'Adventure Sheet', () => toggleSheet());
-  sheetBtn.classList.add('sheet-toggle');
+  const sheetBtn = iconBtn('📜', 'Adventure Sheet', () => toggleSheet(), 'sheet-toggle');
   header.appendChild(menuBtn); header.appendChild(title);
 
-  // Quick-access action icons in the top bar (mirrors the menu).
+  // Quick-access action icons in the top bar (mirrors the menu). Every control marked
+  // .in-menu duplicates a ☰ More entry, so the narrow-chrome policy drops it from the header
+  // below 600px (task 191): all ten controls need ~393px, so at 320/360px the trailing ones —
+  // Save & quit and the Adventure Sheet — were clipped by body's hidden overflow. What stays
+  // on a phone is More, narration play/stop, Save & quit and the Sheet; Undo/Rules/Maps/theme
+  // stay reachable in the menu, auto-narrate and speed in its Narration settings.
   const actions = el('div', 'header-actions');
-  actions.appendChild(iconBtn('↩️', 'Undo last move', () => undo()));
-  actions.appendChild(iconBtn('📖', 'Rules', () => showRules(true)));
-  actions.appendChild(iconBtn('🗺', 'Maps', () => showMaps(state.data.book)));
-  const themeBtn = iconBtn('🌙', 'Toggle dark mode', () => toggleTheme());
-  themeBtn.classList.add('theme-toggle');
+  actions.appendChild(iconBtn('↩️', 'Undo last move', () => undo(), 'in-menu'));
+  actions.appendChild(iconBtn('📖', 'Rules', () => showRules(true), 'in-menu'));
+  actions.appendChild(iconBtn('🗺', 'Maps', () => showMaps(state.data.book), 'in-menu'));
+  const themeBtn = iconBtn('🌙', 'Toggle dark mode', () => toggleTheme(), 'theme-toggle in-menu');
   syncThemeBtn(themeBtn);
   actions.appendChild(themeBtn);
   // [TTS] narration controls: play/stop, auto-narrate toggle, and speed.
@@ -526,7 +529,7 @@ function buildGameScreen() {
       syncAutoBtn();
       if (narrator.settings.autoplay) { toast('Auto-narrate on'); narrator.play(currentFlow()); }
       else { toast('Auto-narrate off'); narrator.stop(); }
-    });
+    }, 'in-menu');
     const syncAutoBtn = () => {
       autoBtn.classList.toggle('active', narrator.settings.autoplay);
       autoBtn.title = narrator.settings.autoplay ? 'Auto-narrate: on' : 'Auto-narrate: off';
@@ -544,8 +547,7 @@ function buildGameScreen() {
       narrator.saveSettings();
       syncSpeedBtn();
       toast(`Narration speed ${fmtRate(narrator.settings.rate)}`);
-    });
-    speedBtn.classList.add('speed-btn');
+    }, 'speed-btn in-menu');
     const syncSpeedBtn = () => {
       speedBtn.textContent = fmtRate(narrator.settings.rate);
       speedBtn.title = `Narration speed (${fmtRate(narrator.settings.rate)})`;
@@ -607,7 +609,7 @@ function surfaceSaveError(force = false) {
   }).then((v) => { if (v === 'export') exportSave(null, null); });
 }
 
-function iconBtn(glyph, title, fn) { const b = el('button', 'icon-btn', glyph); b.title = title; b.setAttribute('aria-label', title); b.addEventListener('click', fn); return b; }
+function iconBtn(glyph, title, fn, cls) { const b = el('button', cls ? 'icon-btn ' + cls : 'icon-btn', glyph); b.title = title; b.setAttribute('aria-label', title); b.addEventListener('click', fn); return b; }
 
 function refreshSheet() {
   const pane = $('#sheet-pane');

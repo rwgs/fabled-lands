@@ -432,12 +432,20 @@ img { max-width: 100%; }
 @media (min-width: 900px) {
   .icon-btn.sheet-toggle { display: none; }
 }
-/* Narrow screens: make room for the action icons by dropping the decorative title. */
+/* Narrow chrome (task 191). Dropping the decorative title was not enough: the ten header
+   controls a speech-capable browser shows need ~393px of fixed widths, gaps and padding, so
+   at 320/360px the trailing ones (Save & quit, Adventure Sheet) fell outside the viewport and
+   body's hidden overflow-x made them unreachable. The controls that also live in the ☰ More
+   menu are marked .in-menu and drop out here — Undo, Rules, Maps and the theme toggle are
+   menu entries, auto-narrate and narration speed live in its Narration settings — leaving
+   More, narration play/stop, Save & quit and the Sheet. With four controls instead of ten
+   there is room to GROW the touch targets to 44px rather than shrink them. */
 @media (max-width: 600px) {
   .game-header { gap: 0.25rem; padding-left: 0.4rem; padding-right: 0.4rem; }
   .header-title { display: none; }
-  .header-actions { gap: 0.15rem; }
-  .icon-btn { width: 2.2rem; height: 2.2rem; font-size: 1.1rem; }
+  .header-actions { gap: 0.25rem; }
+  .icon-btn { width: 2.75rem; height: 2.75rem; font-size: 1.25rem; }
+  .icon-btn.in-menu { display: none; }
   /* Stack the save card so its Play / Export / Delete buttons wrap below the
      info and share the row instead of overflowing a narrow screen. */
   .save-card { flex-direction: column; align-items: stretch; gap: 0.6rem; }

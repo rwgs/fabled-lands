@@ -1120,6 +1120,132 @@ export async function run(ctx) {
          && /OPTIONAL\.map\(\(url\) => cache\.add\(url\)\.catch\(/.test(swSrc190));
     }
 
+    // --- task 191: a narrow header must not clip its critical controls ---
+    // A speech-capable browser builds ten header controls. Their fixed widths, gaps and header
+    // padding needed ~393px, so at 320/360 CSS px the trailing ones — Save & quit and the
+    // Adventure Sheet — sat outside the viewport, unreachable behind body's hidden overflow-x.
+    // The narrow-chrome policy marks every control that duplicates a ☰ More entry with
+    // .in-menu and drops it below 600px, leaving More, narration play/stop, Save & quit and
+    // the Sheet — with room to grow the touch targets to 44px instead of shrinking them.
+    // Measured for real: an iframe is its own viewport, so style.css's media queries evaluate
+    // against the width set here. No app boot, so no service worker / CacheStorage is involved.
+    { // block-scoped
+      // Mirrors buildGameScreen()'s header, in order: [glyph, extra classes, speech-only?].
+      // ☰ is a direct child of the header; the rest live in .header-actions.
+      const CONTROLS = [
+        ['☰', ''],                              // More…               — essential
+        ['↩️', 'in-menu'],                       // Undo                — menu duplicate
+        ['📖', 'in-menu'],                       // Rules               — menu duplicate
+        ['🗺', 'in-menu'],                       // Maps                — menu duplicate
+        ['🌙', 'theme-toggle in-menu'],          // theme               — menu duplicate
+        ['🔊', '', 'tts'],                       // narration play/stop — essential
+        ['🔁', 'in-menu', 'tts'],                // auto-narrate        — Narration settings
+        ['1×', 'speed-btn in-menu', 'tts'],      // narration speed     — Narration settings
+        ['💾', ''],                              // Save & quit         — essential
+        ['📜', 'sheet-toggle'],                  // Adventure Sheet     — essential
+      ];
+      // Build the strip in an iframe of the given CSS width and report what the real
+      // stylesheet does with it. `legacy` strips the .in-menu markers to reproduce the
+      // pre-fix ten-control header, so the overflow metric is shown to detect the bug.
+      const layout = async (width, speech, legacy = false) => {
+        const shown = CONTROLS.filter((c) => speech || c[2] !== 'tts');
+        const cls = (c) => (legacy ? c[1].replace(/\bin-menu\b/, '').trim() : c[1]);
+        const btn = (c) => `<button class="icon-btn${cls(c) ? ' ' + cls(c) : ''}">${c[0]}</button>`;
+        const frame = document.createElement('iframe');
+        frame.setAttribute('scrolling', 'no');
+        frame.style.cssText = `position:absolute;left:-20000px;top:0;border:0;width:${width}px;height:400px;`;
+        frame.srcdoc = '<!doctype html><html><head><meta charset="utf-8">'
+          + '<link rel="stylesheet" href="css/style.css"></head><body>'
+          + '<div id="app" class="screen-game"><header class="game-header">'
+          + btn(shown[0]) + '<div class="header-title">Fabled Lands</div>'
+          + '<div class="header-actions">' + shown.slice(1).map(btn).join('') + '</div>'
+          + '</header></div></body></html>';
+        document.body.appendChild(frame);
+        await new Promise((res) => frame.addEventListener('load', res, { once: true }));
+        const doc = frame.contentDocument, win = frame.contentWindow;
+        const vw = doc.documentElement.clientWidth;
+        const strip = doc.querySelector('.header-actions'), header = doc.querySelector('.game-header');
+        const all = [...doc.querySelectorAll('.icon-btn')];
+        const vis = all.filter((b) => win.getComputedStyle(b).display !== 'none');
+        const rects = vis.map((b) => b.getBoundingClientRect());
+        const res = {
+          vw,
+          // .header-actions is a shrinkable flex item, so an overflowing strip spills its own
+          // box before the header's — check both.
+          fits: strip.scrollWidth <= strip.clientWidth && header.scrollWidth <= header.clientWidth,
+          inside: rects.every((r) => r.left >= -0.01 && r.right <= vw + 0.01),
+          minSide: Math.min(...rects.map((r) => Math.min(r.width, r.height))),
+          glyphs: vis.map((b) => b.textContent).join(' '),
+          // Hidden controls must be display:none — off-screen-but-focusable would leave
+          // phantom tab stops.
+          hiddenAllNone: all.filter((b) => !vis.includes(b)).every((b) => win.getComputedStyle(b).display === 'none'),
+          need: strip.scrollWidth + (header.scrollWidth - header.clientWidth),
+        };
+        frame.remove();
+        return res;
+      };
+
+      // Control experiment: the pre-fix ten-control header really does overflow at 320px.
+      const legacy320 = await layout(320, true, true);
+      ok('task191: the unmarked ten-control header still overflows 320px (metric detects the bug)',
+         legacy320.vw === 320 && (!legacy320.fits || !legacy320.inside),
+         `vw=${legacy320.vw} fits=${legacy320.fits} inside=${legacy320.inside} need=${legacy320.need}`);
+
+      for (const w of [320, 360]) {
+        const r = await layout(w, true);
+        ok(`task191: at ${w}px with speech the header does not overflow`,
+           r.vw === w && r.fits && r.inside, `vw=${r.vw} fits=${r.fits} inside=${r.inside} need=${r.need}`);
+        ok(`task191: at ${w}px exactly More / narration / Save / Sheet remain`,
+           r.glyphs === '☰ 🔊 💾 📜', r.glyphs);
+        ok(`task191: at ${w}px the remaining touch targets are at least 44px`,
+           r.minSide >= 44, 'min side=' + r.minSide);
+        ok(`task191: at ${w}px the dropped controls are display:none, not off-screen tab stops`,
+           r.hiddenAllNone);
+      }
+
+      // Speech unsupported: the three speech controls are never built, and the rest still fit.
+      const quiet320 = await layout(320, false);
+      ok('task191: at 320px without speech support More / Save / Sheet remain and fit',
+         quiet320.fits && quiet320.inside && quiet320.glyphs === '☰ 💾 📜' && quiet320.minSide >= 44,
+         `${quiet320.glyphs} fits=${quiet320.fits} min=${quiet320.minSide}`);
+
+      // Wide layouts are untouched: every control stays in the header at the 601px breakpoint
+      // edge, and only the Sheet toggle drops at the 900px permanent-aside breakpoint.
+      const wide601 = await layout(601, true);
+      ok('task191: at 601px all ten controls are still in the header and fit',
+         wide601.fits && wide601.inside && wide601.glyphs === '☰ ↩️ 📖 🗺 🌙 🔊 🔁 1× 💾 📜',
+         `${wide601.glyphs} fits=${wide601.fits} inside=${wide601.inside}`);
+      const desk900 = await layout(900, true);
+      ok('task191: at 900px the desktop header keeps every control but the Sheet toggle',
+         desk900.fits && desk900.inside && desk900.glyphs === '☰ ↩️ 📖 🗺 🌙 🔊 🔁 1× 💾',
+         `${desk900.glyphs} fits=${desk900.fits} inside=${desk900.inside}`);
+
+      // Source contract: the built header must keep marking exactly the six duplicates, so a
+      // new control cannot quietly re-inflate the narrow strip.
+      const appSrc191 = await (await fetch('./js/app.js')).text();
+      const at191 = appSrc191.indexOf("const header = el('header', 'game-header')");
+      const hdrSrc = appSrc191.slice(at191, appSrc191.indexOf('app.appendChild(header);', at191));
+      const built = [...hdrSrc.matchAll(/iconBtn\(/g)].length;
+      const markers = [...hdrSrc.matchAll(/'in-menu'|'theme-toggle in-menu'|'speed-btn in-menu'/g)].length;
+      ok('task191: the header builds ten controls and marks exactly six as menu duplicates',
+         built === 10 && markers === 6, `iconBtn calls=${built} in-menu=${markers}`);
+      ok('task191: the four essential controls carry no in-menu marker',
+         hdrSrc.includes("iconBtn('☰', 'More…', showGameMenu)")
+         && hdrSrc.includes("iconBtn('🔊', 'Read aloud', () => narrator.toggle(currentFlow()))")
+         && hdrSrc.includes("iconBtn('💾', 'Save & quit to title'")
+         && hdrSrc.includes("() => toggleSheet(), 'sheet-toggle')")
+         && !/'sheet-toggle in-menu'/.test(hdrSrc));
+      // Nothing the narrow header drops may become unreachable: the More menu carries the four
+      // quick actions, and its Narration settings carry auto-narrate and speed.
+      const menuSrc = appSrc191.slice(appSrc191.indexOf('async function showGameMenu()'), appSrc191.indexOf('// ---- Rules & Map'));
+      ok('task191: the More menu still offers every dropped quick action',
+         /add\('↩️', 'Undo last move'/.test(menuSrc) && /add\('📖', 'Rules'/.test(menuSrc)
+         && /add\('🗺', 'Maps'/.test(menuSrc) && /'Light mode' : 'Dark mode'/.test(menuSrc)
+         && /'Narration settings'/.test(menuSrc));
+      ok('task191: narration settings still offer auto-narrate and speed',
+         /Auto-narrate each new section/.test(menuSrc) && /el\('label', null, 'Speed'\)/.test(menuSrc));
+    }
+
     // --- task 33: narrate sections whose prose is bare text (no <p> wrapper) ---
     { // block-scoped
       const nar = new Narrator();

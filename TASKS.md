@@ -25,7 +25,7 @@ audit pass.
 - [x] 188. `<rest hidden="t"/>` is optional instead of automatic
 - [x] 189. A failed initial adventure load strands a new save on a blank game screen
 - [x] 190. Service-worker activation and lookup touch unrelated origin caches
-- [ ] 191. Speech-enabled narrow headers clip critical controls
+- [x] 191. Speech-enabled narrow headers clip critical controls
 - [ ] 192. The mobile Adventure Sheet is visually hidden but remains keyboard-exposed
 - [ ] 193. Stale speech callbacks can advance or cancel a newer narration
 - [ ] 194. SPA section transitions provide no focus target or announcement
@@ -1117,6 +1117,44 @@ At 320 and 360 CSS pixels with speech support enabled, verify in a real browser 
 Menu/Save/Sheet plus narration remain keyboard- and touch-reachable. Keep desktop layout and
 speech-disabled widths covered. A connected browser was unavailable during filing, so retain
 this explicit live layout check as acceptance evidence.
+
+**Done.** Narrow-chrome policy: a header control that duplicates a ☰ More entry now carries
+`.in-menu` and `display: none`s below 600px, leaving the four a phone must reach directly —
+More, narration play/stop, Save & quit and the Adventure Sheet. The six that drop out stay
+reachable: Undo / Rules / Maps / Light-Dark mode are More-menu entries, and auto-narrate +
+narration speed are in its Narration settings. `iconBtn()` gained an optional class argument
+so each call site declares its own classes (the three existing `classList.add` lines for
+`sheet-toggle` / `theme-toggle` / `speed-btn` folded into it). Because four controls fit where
+ten did not, the narrow breakpoint now *grows* the touch targets from 2.2rem (35.2px) to
+2.75rem (44px) instead of shrinking them, and the action gap from 0.15rem to 0.25rem.
+`display: none` (rather than an off-screen translate) is what keeps the dropped controls out of
+the tab order — no phantom focus stops.
+
+Live layout measured in headless Chrome via an iframe, which is its own viewport, so
+`css/style.css`'s media queries evaluate against the width under test — and no app boot means
+no service worker or CacheStorage is involved (16 assertions in `suite-economy`). Measured
+`.header-actions` and `.game-header` `scrollWidth`/`clientWidth`, every visible control's
+rect, and computed `display`:
+
+| viewport | visible controls | required width | min touch target | all inside |
+|---|---|---|---|---|
+| 320 / 360 (ten unmarked controls — the bug) | all ten | 484.8px | 40px | **no** |
+| 320 | ☰ 🔊 💾 📜 | 200.8px | 44px | yes |
+| 360 | ☰ 🔊 💾 📜 | 200.8px | 44px | yes |
+| 600 (breakpoint edge) | ☰ 🔊 💾 📜 | 200.8px | 44px | yes |
+| 320, speech unsupported | ☰ 💾 📜 | 152.8px | 44px | yes |
+| 601 | all ten | 481.2px min | 40px | yes |
+| 900 | all but 📜 (permanent aside) | fits | 40px | yes |
+
+The control experiment (ten controls with the markers stripped) is kept as an assertion so the
+overflow metric is shown to detect the original bug rather than passing vacuously; it reads
+484.8px because it inherits the new 44px sizing — under the old 35.2px sizing the same ten
+controls needed ~393px, and both overflow 320 and 360. Wide layouts are unchanged, and there
+is no clipped band left between the breakpoints: the ten-control header fits from 482px up.
+Source contracts assert the header still builds exactly ten controls with exactly six markers,
+that the four essentials carry none, and that the More menu and its Narration settings still
+offer everything the narrow header drops. Full browser suite: RESULT ALL PASS pass=1953
+fail=0, all 4,369 sections rendering.
 
 ## 192. The mobile Adventure Sheet is visually hidden but remains keyboard-exposed
 
