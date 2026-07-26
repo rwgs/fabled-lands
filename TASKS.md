@@ -28,7 +28,7 @@ audit pass.
 - [x] 191. Speech-enabled narrow headers clip critical controls
 - [x] 192. The mobile Adventure Sheet is visually hidden but remains keyboard-exposed
 - [x] 193. Stale speech callbacks can advance or cancel a newer narration
-- [ ] 194. SPA section transitions provide no focus target or announcement
+- [x] 194. SPA section transitions provide no focus target or announcement
 - [ ] 195. DOM-free rule modules are not directly importable in Node
 - [ ] 196. The build stamp is date/EOL dependent and omits service-worker code
 - [ ] 197. CI tests committed bundles without rebuilding their XML source

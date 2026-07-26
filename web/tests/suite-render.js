@@ -766,6 +766,133 @@ export async function run(ctx) {
       ok('152.5: buyOptions reads |-alt buytags', Array.isArray(opts.tags) && opts.tags.includes('a') && opts.tags.includes('b'));
     }
 
+    // --- task 194: transitions announce the new section; redraws keep the player's place ----
+    // Focus is only observable for a MOUNTED pane (every other fixture here renders detached),
+    // so this one attaches its story root for real and tears it down afterwards. The mock
+    // navigate mirrors app.navigate — goTo, snapshot, begin — so a click drives the whole
+    // transition, and undo mirrors app.undo (state.undo + drop the return frame + begin).
+    {
+      const pane = document.createElement('article');
+      pane.className = 'story';
+      document.body.appendChild(pane);
+      const g194 = GameState.create({ name: 'A194', gender: 'm', profession: 'Warrior', book: 1, adv });
+      g194.ephemeral = true;
+      const S194 = {
+        A: parse('<section name="A"><p>Alpha.</p><choices><choice section="B">Take the path</choice></choices></section>'),
+        B: parse('<section name="B"><p>Beta.</p><goto section="C">Onward</goto></section>'),
+        C: parse('<section name="C"><p>Gamma.</p><return>Go back</return></section>'),
+      };
+      const st194 = new Story(pane, g194, {
+        navigate: (b, s) => {
+          const el = S194[String(s)];
+          if (!el) return false;
+          g194.goTo(b, s); g194.snapshot();
+          st194.begin(el, b, s);
+          return true;
+        },
+        onDeath() {}, notify() {},
+      });
+      const head194 = () => pane.querySelector('.section-num');
+      const onHead = () => document.activeElement === head194();
+      const enter194 = (sec) => { g194.goTo(1, sec); g194.snapshot(); st194.begin(S194[sec], 1, sec); };
+
+      enter194('A');
+      ok('task194: the section number is a real heading, out of the tab order',
+         !!head194() && head194().tagName === 'H2' && head194().tabIndex === -1,
+         head194() ? `${head194().tagName} tabindex=${head194().tabIndex}` : 'none');
+      ok('task194: a fresh visit focuses the section heading', onHead(), 'active=' + document.activeElement.tagName);
+      ok('task194: the heading names the arrived-at section', / · A$/.test(head194().textContent), head194().textContent);
+
+      // (choice) activating a choice replaces the button the player was on — focus must land on
+      // the DESTINATION heading, not fall to <body>.
+      const choiceA = Array.from(pane.querySelectorAll('.choice')).find((c) => !c.disabled);
+      choiceA.focus();
+      choiceA.click();
+      ok('task194: activating a choice announces the destination heading',
+         onHead() && / · B$/.test(head194().textContent), `active=${document.activeElement.tagName} head="${head194().textContent}"`);
+
+      // (undo) app.undo re-enters the previous section directly; it is a real transition too.
+      const back194 = g194.undo();
+      ok('task194: undo has a section to return to', !!back194 && String(back194.section) === 'A', JSON.stringify(back194));
+      st194._returnFrame = null;
+      st194.begin(S194[String(back194.section)], back194.book, back194.section);
+      ok('task194: undo announces the section it reverts to',
+         onHead() && / · A$/.test(head194().textContent), `active=${document.activeElement.tagName} head="${head194().textContent}"`);
+
+      // (goto) the same for a bare <goto>.
+      const choiceA2 = Array.from(pane.querySelectorAll('.choice')).find((c) => !c.disabled);
+      choiceA2.focus(); choiceA2.click();
+      const gotoB = pane.querySelector('.goto');
+      gotoB.focus(); gotoB.click();
+      ok('task194: following a goto announces the destination heading',
+         onHead() && / · C$/.test(head194().textContent), `active=${document.activeElement.tagName} head="${head194().textContent}"`);
+
+      // (return) goBack() restores the source visit without begin() — it must announce too.
+      const retC = Array.from(pane.querySelectorAll('.goto')).find((b) => !b.disabled);
+      ok('task194: the detour offers a live return', !!retC && /Go back/.test(retC.textContent));
+      retC.focus(); retC.click();
+      ok('task194: a <return> announces the section it restores',
+         onHead() && / · B$/.test(head194().textContent), `active=${document.activeElement.tagName} head="${head194().textContent}"`);
+
+      // (negative — roll) a resolved roll is a same-section redraw. The player has not gone
+      // anywhere, so the heading must NOT take focus.
+      window.__FL_INSTANT_DICE__ = true;
+      const settle194 = () => new Promise((r) => setTimeout(r, 30));
+      st194.begin(parse('<section name="R194"><difficulty ability="COMBAT" level="4" var="m"/></section>'), 1, 'R194');
+      const rollBtn194 = pane.querySelector('.btn-roll');
+      rollBtn194.focus();
+      ok('task194: (roll precondition) the Roll button holds focus', document.activeElement === rollBtn194);
+      rollBtn194.click(); await settle194();
+      ok('task194: a resolved roll does not steal focus to the section heading',
+         !!head194() && document.activeElement !== head194(), 'active=' + document.activeElement.tagName);
+
+      // (negative — combat) a round redraws the pane but rebuilds the same Attack button, so the
+      // player keeps their place instead of being dumped on <body>.
+      g194.data.stamina = 999; g194.data.staminaMax = 999;
+      st194.begin(parse('<section name="F194"><fight name="ogre" combat="4" defence="6" stamina="999"/></section>'), 1, 'F194');
+      const attack194 = () => Array.from(pane.querySelectorAll('.fight-controls .btn-roll')).find((b) => /Attack/.test(b.textContent));
+      const atkBefore = attack194();
+      atkBefore.focus(); atkBefore.click(); await settle194();
+      ok('task194: a combat round rebuilds the Attack button and keeps focus on it',
+         !!attack194() && attack194() !== atkBefore && document.activeElement === attack194() && document.activeElement !== head194(),
+         'active=' + document.activeElement.className);
+      window.__FL_INSTANT_DICE__ = false;
+
+      // (negative — market) a purchase redraw likewise restores the rebuilt Buy button.
+      g194.data.items = []; g194.data.shards = 100;
+      st194.begin(parse('<section name="M194"><market><item name="lantern" buy="2"/></market></section>'), 1, 'M194');
+      const buy194 = () => Array.from(pane.querySelectorAll('.trade .btn-mini')).find((b) => /^Buy/.test(b.textContent));
+      const buyBefore = buy194();
+      ok('task194: (market precondition) the shop row offers an affordable Buy', !!buyBefore && buyBefore.disabled === false);
+      buyBefore.focus(); buyBefore.click();
+      ok('task194: a purchase keeps focus on the rebuilt Buy button, not the heading',
+         g194.hasItem('lantern') && !!buy194() && buy194() !== buyBefore
+         && document.activeElement === buy194() && document.activeElement !== head194(),
+         `has=${g194.hasItem('lantern')} active=${document.activeElement.className}`);
+
+      // (negative — inventory) an Adventure-Sheet change rerenders the story from OUTSIDE the
+      // pane; that must not drag focus out of the sheet control the player is using.
+      const sheetBtn = document.createElement('button');
+      sheetBtn.textContent = 'Drop';
+      document.body.appendChild(sheetBtn);
+      sheetBtn.focus();
+      st194.rerender();
+      ok('task194: a sheet-driven rerender leaves focus in the sheet',
+         document.activeElement === sheetBtn && document.activeElement !== head194(), 'active=' + document.activeElement.textContent);
+      sheetBtn.remove();
+
+      // A resume is a page load, not a transition: it announces nothing.
+      const outside = document.createElement('button');
+      document.body.appendChild(outside); outside.focus();
+      st194.resumeStale(S194.A, 1, 'A');
+      ok('task194: resuming a save does not grab focus on load',
+         document.activeElement === outside && document.activeElement !== head194(), 'active=' + document.activeElement.tagName);
+      outside.remove();
+
+      st194.dispose();
+      pane.remove();
+    }
+
     // task 150: an if/elseif/else inside a choice label is dispatched per-node via
     // renderElement (appendChildrenList), with no cross-sibling chain state — a bare
     // <else>/<elseif> must be inert, not rendered (and its effects run) unconditionally.

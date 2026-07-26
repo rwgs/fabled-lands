@@ -197,7 +197,10 @@ function makeFleeButton(story, fleeNode, markFled) {
 // to the pre-round state (task 162). `resolved` and `redraw` are supplied per widget.
 function afterAction(story, resolved, redraw) {
   if (resolved || story.state.isDead()) { story.rerender(); return; }
-  redraw();
+  // The in-place redraw replaces the Attack button the player just used — and the pane freeze
+  // has already blurred it — so route through keepFocus to put them back on the rebuilt one
+  // instead of on <body> for every round of a long fight. (task 194)
+  story.keepFocus(redraw);
   story.state.commitVisit();
 }
 

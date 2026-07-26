@@ -219,7 +219,12 @@ img { max-width: 100%; }
 }
 
 /* ---- Story content -------------------------------------------------------- */
-.section-num { text-align: center; font-variant: small-caps; letter-spacing: 0.08em; color: var(--gold); font-size: 0.85rem; border-bottom: 1px solid var(--parchment-edge); padding-bottom: 0.6rem; margin-bottom: 1rem; }
+/* The section number is an <h2> (the story's accessible heading and the focus target a
+   transition lands on — task 194); font-weight/margin keep the pre-heading look. Focus is
+   moved there programmatically, so hide the ring for pointer users and keep it for keyboard. */
+.section-num { text-align: center; font-variant: small-caps; letter-spacing: 0.08em; color: var(--gold); font-size: 0.85rem; font-weight: 400; border-bottom: 1px solid var(--parchment-edge); padding-bottom: 0.6rem; margin: 0 0 1rem; }
+.section-num:focus { outline: none; }
+.section-num:focus-visible { outline: 2px solid var(--gold); outline-offset: 4px; border-radius: 4px; }
 .section-boxes { text-align: center; font-size: 1.25rem; letter-spacing: 0.25rem; color: var(--gold); margin: -0.4rem 0 0.8rem; }
 .section-boxes .tick-box.ticked { color: var(--crimson); }
 .take-item, .pay-action { font-style: normal; }

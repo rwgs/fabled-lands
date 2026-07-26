@@ -148,6 +148,49 @@ export function previewProse(sectionEl) {
   return wrap;
 }
 
+// ---- section focus (task 194) ------------------------------------------------
+// The pane is rebuilt from scratch on every draw, so the control the player was on is always
+// destroyed and the browser drops focus to <body>. Who gets focus next depends on WHY we drew,
+// and the two answers must stay apart:
+//   * a real transition — a fresh visit (begin(): a choice, a goto, undo) or a <return>
+//     (goBack()) — moves focus to the section heading. A screen reader announces the heading it
+//     lands on, so that one move both conveys the newly loaded section and gives the keyboard
+//     somewhere to Tab onward from. Nothing else ever focuses the heading, so it announces once.
+//   * a same-section redraw (rerender(): a roll result, a purchase, a combat round, an
+//     Adventure-Sheet change) must NOT touch the heading — the player has not gone anywhere.
+//     It puts focus back on the same control when the redraw rebuilt one, and otherwise leaves
+//     focus where the browser put it.
+// Every story control is a real focusable element and the heading is the only thing here
+// carrying tabindex, so this selector is exactly "the controls" — the heading cannot be
+// restored by the redraw path and re-announced.
+const STORY_CONTROL_SEL = 'button, input, select, textarea';
+
+// A control's identity across a redraw: what it is, what it says, and which of the identical
+// ones it is. Deliberately conservative — a control the redraw CHANGED (a newly gated button
+// gains .gated, a spent Roll button disappears entirely) simply fails to match, and focus is
+// left alone rather than landing somewhere the player never was.
+const controlSig = (n) => `${n.tagName}|${n.className}|${(n.textContent || '').trim().slice(0, 80)}`;
+
+function controlIdentity(root, node) {
+  const list = Array.from(root.querySelectorAll(STORY_CONTROL_SEL));
+  const at = list.indexOf(node);
+  if (at < 0) return null;
+  const sig = controlSig(node);
+  let nth = 0;
+  for (let i = 0; i < at; i++) if (controlSig(list[i]) === sig) nth++;
+  return { sig, nth };
+}
+
+function findControl(root, id) {
+  let nth = 0;
+  for (const n of root.querySelectorAll(STORY_CONTROL_SEL)) {
+    if (controlSig(n) !== id.sig) continue;
+    if (nth === id.nth) return n;
+    nth++;
+  }
+  return null;
+}
+
 // resolveNodePath / newCtx / (de)serializeCtx / serializeFrame moved to visit-state.js
 // (task 119); the Story visit methods below delegate to them.
 
@@ -299,6 +342,13 @@ export class Story {
     // the handler's finally, and never DOM state, so releasing it cannot re-enable a control the
     // render deliberately disabled.
     this._actionInFlight = 0;
+    // The control that held focus when a delayed action was armed, so the redraw its result
+    // triggers can put the player back on it (task 194). Set by beginAction() before the
+    // button freeze blurs it; consumed by the next _keepFocus and cleared by the action's end().
+    this._focusAtAction = null;
+    // The current section's heading element — the story's accessible title and the focus target
+    // a real transition lands on (task 194). Rebuilt by every render().
+    this._sectionHeading = null;
     // Retry target for a durable-consequence move whose destination failed to load (task 169).
     // The effect (a flee wound, a resolved combat round, a revival price) has already applied,
     // so rather than a spent dead-end source we present a retry that re-reaches this SAME
@@ -380,11 +430,18 @@ export class Story {
    */
   beginAction() {
     const ctxAtClick = this.ctx;
+    // Note which control the player is on BEFORE freezeButtons runs (task 194): disabling the
+    // focused button blurs it to <body> straight away, so by the time the result redraws the
+    // pane there is nothing left for _keepFocus to read. It falls back to this.
+    this._focusAtAction = controlIdentity(this.root, typeof document !== 'undefined' ? document.activeElement : null);
     this._actionInFlight++;
     freezeButtons(this.root);
     return {
       live: () => !this.disposed && this.ctx === ctxAtClick,
-      end: () => { if (this._actionInFlight > 0) this._actionInFlight--; },
+      end: () => {
+        this._focusAtAction = null; // an action dropped mid-animation redraws nothing — don't leave it armed
+        if (this._actionInFlight > 0) this._actionInFlight--;
+      },
     };
   }
 
@@ -445,6 +502,11 @@ export class Story {
       const f = n.getAttribute('flag'); if (f && this.state.getFlag(f)) this.state.setFlag(f, false);
     });
     this.render();
+    // A fresh visit is a real arrival — every one of them comes from a choice/goto, an undo or
+    // an item detour — so hand focus to the new section's heading (task 194). Before the commit
+    // below: a quota failure there raises the "Progress not saved" dialog, which takes focus for
+    // itself and must not have it pulled back out from under it.
+    this.focusSection();
     // Commit the transition (task 161). The position was set by goTo() (or state.undo())
     // BEFORE begin(), but that autosave still named the SOURCE visit; the state-clearing
     // calls above only save incidentally, so a prose-only destination (nothing to clear,
@@ -466,7 +528,47 @@ export class Story {
   // of every interactive handler, so persisting once here — after the memo is in place —
   // keeps the saved visit record in step with the state it guards (the interactive
   // counterpart to the passive path, which already memoises before applying). (task 155)
-  rerender() { this.render(); this.state.commitVisit(); }
+  rerender() { this.keepFocus(() => this.render()); this.state.commitVisit(); }
+
+  // The section's accessible title, and the focus target a real transition lands on (task 194).
+  // A real heading (it was a plain <div>, so the section a screen-reader user had just arrived
+  // at was not exposed as anything at all); tabindex="-1" makes it programmatically focusable
+  // without adding a stop to the tab order. The retry view builds one too, so a failed
+  // destination is announced like any other arrival.
+  _makeSectionHeading() {
+    const h = document.createElement('h2');
+    h.className = 'section-num';
+    h.tabIndex = -1;
+    h.textContent = `${bookTitle(this.book)} · ${this.section}`;
+    this._sectionHeading = h;
+    return h;
+  }
+
+  // Announce the section a real transition has just loaded by moving focus to its heading
+  // (task 194 — see the notes above STORY_CONTROL_SEL). Called only by begin() and goBack();
+  // preventScroll leaves the caller's scroll reset in charge of position. A root that is not in
+  // the document is skipped: resumeStale's throwaway probe Story runs a full begin() and must
+  // never reach the real UI, and a headless fixture has nothing to focus.
+  focusSection() {
+    if (!this.root || !this.root.isConnected) return;
+    const h = this._sectionHeading;
+    if (h && h.isConnected) h.focus({ preventScroll: true });
+  }
+
+  // Run a same-section redraw without losing the player's place — the other half of task 194.
+  // Note what held focus, redraw, then restore focus to the control the redraw rebuilt. Never
+  // falls back to the section heading: that is the arrival announcement, and a redraw is not an
+  // arrival. Wraps the whole-pane render() (rerender) and the fight widget's in-place redraw
+  // (render-combat's afterAction), which is why it is public.
+  keepFocus(redraw) {
+    const active = typeof document !== 'undefined' ? document.activeElement : null;
+    const id = controlIdentity(this.root, active) || this._focusAtAction;
+    this._focusAtAction = null;
+    redraw();
+    if (!id) return;
+    const back = findControl(this.root, id);
+    if (back && !back.disabled) back.focus({ preventScroll: true });
+  }
 
   // Use a usable Adventure-Sheet item effect (task 41) and route any section detour it
   // opens through the SAME navigation entry point as a choice/goto (task 115). Applying
@@ -573,6 +675,9 @@ export class Story {
     // sanitizeVisit already validated the { book, section }; a fresh/successful begin() clears it.
     this._pendingRetry = (record && record.retry && record.retry.section != null)
       ? { book: record.retry.book, section: record.retry.section } : null;
+    // No focusSection() here (nor in resumeStale): opening a save is a page load, not a
+    // transition within it. The player has not left anything, so there is nothing to announce
+    // and grabbing focus on load would only jump them past the header controls. (task 194)
     this.render();
   }
 
@@ -621,10 +726,7 @@ export class Story {
     const imgName = el.getAttribute('image');
     if (imgName) this.root.appendChild(this.makeIllustration(imgName));
 
-    const label = document.createElement('div');
-    label.className = 'section-num';
-    label.textContent = `${bookTitle(this.book)} · ${this.section}`;
-    this.root.appendChild(label);
+    this.root.appendChild(this._makeSectionHeading());
 
     // Tick boxes for this section (the empty boxes printed beside the number in
     // the books). setSectionBoxes must run before appendChildren so an in-section
@@ -755,10 +857,7 @@ export class Story {
   // The consequence stayed applied; this button re-attempts the SAME target as another durable
   // move, so a repeated failure re-arms the retry and a success clears it (via begin()).
   _renderRetry() {
-    const label = document.createElement('div');
-    label.className = 'section-num';
-    label.textContent = `${bookTitle(this.book)} · ${this.section}`;
-    this.root.appendChild(label);
+    this.root.appendChild(this._makeSectionHeading());
     const flow = document.createElement('div');
     flow.className = 'flow';
     const msg = document.createElement('p');
@@ -1338,6 +1437,7 @@ export class Story {
     this.deferredCleanups = new Map(); // rebuilt as the restored section re-renders (task 88)
     this.state.restoreReturn(frame);  // pop history + restore position/vars/location (autosaves — now coherent)
     this.render();
+    this.focusSection(); // a <return> lands on a different section than the player was on (task 194)
   }
 
   // renderReturn / the <choices> table / individual <choice> buttons / appendChildrenList
