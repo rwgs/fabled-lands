@@ -23,7 +23,7 @@ audit pass.
 - [x] 186. Automatic highest-bonus equipment can select a worse loadout
 - [x] 187. Named market sales ignore item kind and equipment stats
 - [x] 188. `<rest hidden="t"/>` is optional instead of automatic
-- [ ] 189. A failed initial adventure load strands a new save on a blank game screen
+- [x] 189. A failed initial adventure load strands a new save on a blank game screen
 - [ ] 190. Service-worker activation and lookup touch unrelated origin caches
 - [ ] 191. Speech-enabled narrow headers clip critical controls
 - [ ] 192. The mobile Adventure Sheet is visually hidden but remains keyboard-exposed
@@ -1028,6 +1028,30 @@ load-failure language/policy rather than adding another screen framework.
 
 Test failed fetch, missing start section, successful retry and normal creation. Assert no
 unhandled rejection, duplicate/ghost slot or unusable blank game.
+
+**Done.** `startGame()` now returns its `navigate()` result, and the Begin Adventure handler
+awaits a new `openNewAdventure()` that owns both failure modes: `open()` resolving false (the
+start section is not in the book) and `open()` rejecting (the book fetch failed, which used to
+escape the click handler as an unhandled rejection). It loops on "Try again", so a retry
+re-opens **this** character — the creation handler, and therefore `nextFreeSlot()`/`save()`, run
+exactly once, so no second or ghost slot can appear. The dialog (`askNewAdventureRecovery`)
+reuses the load-failure language and is driven by whether `state.save()` actually succeeded:
+"Back to saves" is offered only for a persisted character, and `openNewAdventure` ignores a
+`saves` answer when `persisted` is false, so a blocked/full storage write is never reported as
+a recoverable slot. Backing out to the title screen is always available; both exits tear down
+the shell via task 182's `releaseGameScreen`, so the blank game screen cannot be left behind.
+
+`openNewAdventure` takes its collaborators as parameters and is exported, which is what makes
+this testable at all — app.js's screens are unreachable from the harness, and importing app.js
+is side-effect free because it only auto-boots when a `#app` element exists (task 65). 11 new
+assertions in `suite-economy`: a normal start opens once with no dialog; a rejected fetch is
+caught (nothing thrown out of the call) and its message is passed to the dialog; a retry
+re-opens and succeeds while `loadSlotMeta()` is byte-identical before and after; a missing start
+section reports its own reason and survives two retries; a persisted character can be routed to
+the saves screen; an unpersisted one is routed to the title screen instead, with the dialog told
+which case it is; and backing out returns to the title. The app page was also loaded headlessly
+to confirm the title screen still renders after the handler became async. Full browser suite:
+RESULT ALL PASS pass=1924 fail=0, all 4,369 sections rendering.
 
 ## 190. Service-worker activation and lookup touch unrelated origin caches
 

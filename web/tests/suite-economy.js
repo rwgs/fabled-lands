@@ -9,6 +9,9 @@ import { Story } from '../js/render.js';
 import { isRollGate } from '../js/render-rules.js';
 import { renderGoto } from '../js/render-choices.js';
 import { renderMarket, renderRest } from '../js/render-market.js';
+// app.js only auto-boots when a #app element exists (task 65), so importing its exported
+// new-adventure recovery contract here is side-effect free. (task 189)
+import { openNewAdventure } from '../js/app.js';
 import { Narrator } from '../js/tts.js';
 import { renderSheet, renderStatic } from '../js/ui.js';
 
@@ -771,6 +774,60 @@ export async function run(ctx) {
       ok('task137: corrupt meta is rebuilt from readable blobs', !!recon2[4] && recon2[4].name === 'Rebuilt', JSON.stringify(recon2[4]));
 
       restore();
+    }
+
+    // --- task 189: a failed first navigation must not strand a new adventurer ----------
+    // The Begin Adventure handler called startGame(1) without awaiting it, so a rejected book
+    // fetch escaped as an unhandled rejection and a missing §1 (navigate → false) left the
+    // player on an empty story pane. openNewAdventure() owns that recovery: it awaits both
+    // failure modes, retries the SAME character in a loop (so no second slot is ever claimed),
+    // and routes to the saves screen only when the character actually reached storage.
+    {
+      const askedWith = [];
+      const run189 = async (opens, answers, persisted = true) => {
+        let calls = 0, saves = 0, titles = 0, threw = null;
+        const seq = answers.slice();
+        let result = null;
+        try {
+          result = await openNewAdventure({
+            open: () => { const step = opens[calls++]; return step(); },
+            persisted,
+            name: 'Newborn',
+            ask: (info) => { askedWith.push(info); return Promise.resolve(seq.shift()); },
+            onSaves: () => { saves++; },
+            onTitle: () => { titles++; },
+          });
+        } catch (e) { threw = e; }
+        return { result, calls, saves, titles, threw };
+      };
+      const okOpen = () => Promise.resolve(true);
+      const missingSection = () => Promise.resolve(false);      // navigate(): section not in book
+      const failedFetch = () => Promise.reject(new Error('fetch failed: book6.json'));
+      // Normal creation: one call, no dialog, no screen change.
+      const r189ok = await run189([okOpen], []);
+      ok('§189 a normal start opens once with no recovery dialog', r189ok.result === true && r189ok.calls === 1 && r189ok.saves === 0 && r189ok.titles === 0 && askedWith.length === 0);
+      // A rejected book fetch is caught (never an unhandled rejection) and offered as a retry
+      // that succeeds — with only the ONE character, never a second slot claim.
+      const before189 = JSON.stringify(loadSlotMeta());
+      const r189fetch = await run189([failedFetch, okOpen], ['retry']);
+      ok('§189 a rejected book fetch does not escape as an unhandled rejection', r189fetch.threw === null);
+      ok('§189 the retry re-opens the same adventure and succeeds', r189fetch.result === true && r189fetch.calls === 2 && r189fetch.saves === 0 && r189fetch.titles === 0);
+      ok('§189 the recovery names the underlying failure', /fetch failed/.test(askedWith[askedWith.length - 1].reason), askedWith[askedWith.length - 1].reason);
+      ok('§189 no extra save slot is claimed while retrying', JSON.stringify(loadSlotMeta()) === before189);
+      // A missing start section reports its own reason and can also be retried.
+      const r189miss = await run189([missingSection, missingSection, okOpen], ['retry', 'retry']);
+      ok('§189 a missing start section is recoverable, not a blank screen', r189miss.result === true && r189miss.calls === 3 && r189miss.threw === null);
+      ok('§189 the missing-section reason says so', /opening section could not be found/i.test(askedWith[askedWith.length - 1].reason), askedWith[askedWith.length - 1].reason);
+      // Giving up: back to the saves screen when the character was persisted…
+      const r189saves = await run189([failedFetch], ['saves']);
+      ok('§189 a persisted adventurer can be opened from the saves screen', r189saves.result === false && r189saves.saves === 1 && r189saves.titles === 0);
+      // …but a FAILED storage write must never be reported as a recoverable slot.
+      const r189ghost = await run189([failedFetch], ['saves'], false);
+      ok('§189 an unsaved adventurer is never sent to the saves screen', r189ghost.saves === 0 && r189ghost.titles === 1);
+      ok('§189 the dialog is told whether the character was persisted', askedWith[askedWith.length - 1].persisted === false && askedWith[askedWith.length - 2].persisted === true);
+      // Backing out to the title screen is always available.
+      const r189title = await run189([missingSection], [null]);
+      ok('§189 backing out returns to the title screen', r189title.result === false && r189title.titles === 1 && r189title.saves === 0);
     }
 
     // --- task 12: focused unit tests for the extracted rules --------------

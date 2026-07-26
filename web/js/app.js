@@ -366,8 +366,21 @@ async function showCreate() {
     const name = nameInput.value.trim() || pregenFor(profession)?.name || 'Adventurer';
     state = GameState.create({ name, gender: genderSel.value, profession, book, adv });
     state.slot = slot;
-    if (!state.save()) surfaceSaveError(true); // storage blocked/full — warn, but let them play
-    startGame(1); // book start section
+    const persisted = state.save();
+    if (!persisted) surfaceSaveError(true); // storage blocked/full — warn, but let them play
+    // Await the first navigation and handle BOTH of its failures (task 189): a rejected book
+    // fetch used to escape this handler as an unhandled rejection, and a missing §1 returned
+    // false and left the player on the empty story pane with no way out. Retrying re-opens
+    // THIS adventurer (never a second slot), and the saves screen is offered only when the
+    // character actually reached storage.
+    await openNewAdventure({
+      open: () => startGame(1), // book start section
+      persisted,
+      name: state.data.name,
+      ask: askNewAdventureRecovery,
+      onSaves: showSaves,
+      onTitle: showTitle,
+    });
   });
 }
 
@@ -677,7 +690,45 @@ async function undo() {
 
 async function startGame(section) {
   buildGameScreen();
-  await navigate(state.data.book, section);
+  return navigate(state.data.book, section); // false when the section is missing; rejects on a failed book fetch
+}
+
+/** Open a freshly created adventurer's first section, recovering from either failure mode:
+ *  `open()` resolving false (the start section isn't in the book) or rejecting (the book fetch
+ *  failed). Loops on "Try again" so the retry re-opens the SAME character — never a second
+ *  slot — and offers the saves screen only when `persisted`, because a failed storage write
+ *  leaves nothing there to open. Its collaborators are injected so the recovery contract is
+ *  testable without app.js's screens. Returns true once the adventure is open. (task 189) */
+export async function openNewAdventure({ open, persisted, name, ask, onSaves, onTitle }) {
+  for (;;) {
+    let reason = null;
+    try {
+      if (await open()) return true;
+      reason = 'The opening section could not be found in this book.';
+    } catch (e) {
+      reason = String((e && e.message) || e) || 'The adventure could not be loaded.';
+    }
+    const choice = await ask({ persisted, name, reason });
+    if (choice === 'retry') continue;
+    if (choice === 'saves' && persisted) { onSaves(); return false; }
+    onTitle();
+    return false;
+  }
+}
+
+/** The recovery dialog for a new adventure that would not open. Reuses the load-failure
+ *  language and promises nothing about a save that never landed. (task 189) */
+function askNewAdventureRecovery({ persisted, name, reason }) {
+  const buttons = [{ label: 'Try again', value: 'retry', primary: true }];
+  if (persisted) buttons.push({ label: 'Back to saves', value: 'saves' });
+  buttons.push({ label: 'Back to title', value: null });
+  return modal({
+    title: 'Could not start adventure',
+    body: persisted
+      ? `<p>Something went wrong opening this adventure. <b>${escapeHtml(name)}</b> has been saved, so you can try again now or open it later from your saves.</p><small>${escapeHtml(reason)}</small>`
+      : `<p>Something went wrong opening this adventure, and it could not be saved either. Try again, or start over from the title screen.</p><small>${escapeHtml(reason)}</small>`,
+    buttons,
+  });
 }
 
 async function loadCurrent() {
