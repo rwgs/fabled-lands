@@ -3,10 +3,42 @@
 Backlog of recommended improvements. Open tasks are filed under priority buckets
 (**HIGH** / **MEDIUM** / **LOW**) — work the first open (`- [ ]`) item top-down;
 each task's detail section carries the same stable ID. **All filed tasks are
-complete through 179** — the backlog has no open items. Completed detail
-sections are archived in
+complete through 179**. The eleventh full review filed tasks 180–202 below.
+Completed detail sections are archived in
 [`TASKS-archive.md`](TASKS-archive.md); the Review log at the end records each
 audit pass.
+
+**HIGH**
+
+- [ ] 180. Imported visit/combat memos can execute HTML/JavaScript on resume
+- [ ] 181. Finish task 175: a blessing-reroll result is still observable before Keep
+- [ ] 182. Delayed rolls and attacks can mutate a save after Save & quit
+- [ ] 183. Disease/poison immunity blessings do not prevent infection
+- [ ] 184. Named removal leaves stacked cumulative curses behind
+
+**MEDIUM**
+
+- [ ] 185. Wildcard affliction effects (`ability="*"`) are discarded
+- [ ] 186. Automatic highest-bonus equipment can select a worse loadout
+- [ ] 187. Named market sales ignore item kind and equipment stats
+- [ ] 188. `<rest hidden="t"/>` is optional instead of automatic
+- [ ] 189. A failed initial adventure load strands a new save on a blank game screen
+- [ ] 190. Service-worker activation and lookup touch unrelated origin caches
+- [ ] 191. Speech-enabled narrow headers clip critical controls
+- [ ] 192. The mobile Adventure Sheet is visually hidden but remains keyboard-exposed
+- [ ] 193. Stale speech callbacks can advance or cancel a newer narration
+- [ ] 194. SPA section transitions provide no focus target or announcement
+- [ ] 195. DOM-free rule modules are not directly importable in Node
+- [ ] 196. The build stamp is date/EOL dependent and omits service-worker code
+- [ ] 197. CI tests committed bundles without rebuilding their XML source
+
+**LOW**
+
+- [ ] 198. A failed save deletion can leave an unrecoverable ghost slot
+- [ ] 199. Build validation misses source-schema typos and bundled-book dangling targets
+- [ ] 200. AGENTS.md overstates test-suite parse-error isolation
+- [ ] 201. A service-worker update can erase an unsaved character-creation draft
+- [ ] 202. Complete remaining form, selection and progress semantics
 
 **Done**
 
@@ -595,11 +627,475 @@ the focused economy suite and the full browser suite.
 
 ---
 
+## 180. Imported visit/combat memos can execute HTML/JavaScript on resume
+
+**Priority: HIGH — task 6 treats imported saves as untrusted, but this path can execute
+attacker-controlled script with access to every save on the origin.**
+
+`sanitizeVisit()` passes `visit.ctx` and its return frame through as arbitrary objects;
+`deserializeCtx()` then accepts every two-element `fights` entry verbatim. Group combat
+interpolates the restored `fight.name`, Combat, Defence and Stamina fields into
+`stats.innerHTML`; the single-fight row does the same for its numeric fields. A crafted
+Book 6 §192 import whose `fightgrp@s.0` memo contains an `<img onerror=…>` name therefore
+creates and executes that element when the visit resumes.
+
+Validate imported visit/frame memos field by field against the current section tree. Rebuild
+static fight identity from the source node where possible, bound/coerce the genuinely dynamic
+fields, and construct every fight-stat row with elements and `textContent`; do not rely on
+sanitizing one string before another state-derived field is interpolated.
+
+Add malicious group- and single-fight import regressions: no injected element, handler or
+sentinel side effect may appear, while an ordinary mid-fight save must still resume the same
+opponents, Stamina, outcome, bonuses and log. Re-run the focused persistence/combat suites
+and the full browser suite.
+
+## 181. Finish task 175: a blessing-reroll result is still observable before Keep
+
+**Priority: HIGH — rejected Luck/blessing results can still grant rewards, inflict permanent
+losses, reveal choices or let the player leave before accepting a result.**
+
+Task 175 protects direct random→`<outcomes>` effects, but the provisional-result boundary is
+not general. Ordinary `<if>/<elseif var>` chains evaluate the live roll variable directly:
+§2.389 can grant 150 Shards, or expose a Take control, before Keep. A stored pending roll lets
+`<while>` advance: at §5.218 the player can start later attempts and escape without accepting
+earlier 3-Stamina failures. `_scanPendingRerolls()` also tracks only the direct roll variable,
+so a following `<set value="roll*100">` commits a derived value; §2.698 pays it immediately
+and leaves its plain goto live, while §2.684 reveals the derived success/failure branch.
+
+Define one DOM-free invariant: an eligible reroll result is wholly provisional until Keep or
+the replacement roll settles. Propagate dependency through `<set>` expressions and suppress
+dependent conditions, passive effects, controls, redirects, loop completion and onward
+navigation. Persist the boundary in the visit record; do not patch each view widget with a
+different special case.
+
+Test §2.389 (no reward/control until final), §5.218 (one pending iteration; Keep applies one
+loss; a successful reroll exits), §6.700 (a rejected non-six cannot set `y`, damage or stop
+the loop), §2.698 (no Shards/live goto before Keep; final amount exactly once), §2.684
+(branches hidden until final), and save/resume at each pending state. Run all sections.
+
+## 182. Delayed rolls and attacks can mutate a save after Save & quit
+
+**Priority: HIGH — a detached action can overwrite the explicit quit save and advance or
+damage an adventurer while the title or another game is visible.**
+
+`rollButton()` and `animatedStrike()` capture only `story.ctx` while awaiting the dice
+animation. Save & quit removes the game DOM but does not replace that context, so the guard
+still passes when the animation resolves: the old roll/round mutates state, rerenders the
+detached Story and commits over the save made immediately before `showTitle()`. Task 146
+tests a section-context swap and therefore misses this same-visit shell disposal.
+
+Give Story/app actions an active-screen generation or disposal token in addition to the
+visit identity, and invalidate it whenever the game shell is left, replaced or rebound.
+Keep controls locked for the action lifetime and release them in `finally`; normal rolls and
+task-146 navigation cancellation must retain their current behavior.
+
+With a controllable dice promise, start a roll and a single/group attack, invoke Save & quit
+or replace the game screen, then resolve the promise. Assert no variable, fight, Stamina,
+death UI or persisted slot changes after the quit save. Also prove a normal action resolves
+once and navigation to a new ctx still drops the stale callback.
+
+## 183. Disease/poison immunity blessings do not prevent infection
+
+**Priority: HIGH — blessings explicitly bought for immunity are consumed by neither the
+rules engine nor the affliction model, so permanent penalties land anyway.**
+
+`GameState.addAffliction()` always adds a disease or poison and `applyAffliction()` delegates
+to it without consulting blessings. Several source nodes rely on the affliction rule itself,
+not an enclosing XML guard: §2.136 says Maka's blessing negates Leprosy; §5.306 and §5.620
+say Immunity to Disease/Poison is crossed off instead of taking the poison/disease. Task 123
+aliased the two blessing names but did not implement this admission rule.
+
+Centralize immunity in affliction admission so both canonical aliases protect against either
+`disease` or `poison`. Spend an ordinary blessing through the existing blessing API, retain a
+permanent blessing, and add neither the record nor any effect/Stamina clamp when protected.
+Curses remain unaffected.
+
+Test grant/check under both aliases and both affliction types, ordinary consumption,
+permanent retention, absence of every penalty/record, and unchanged unprotected infection.
+Exercise the three live sections and persistence, then run all sections.
+
+## 184. Named removal leaves stacked cumulative curses behind
+
+**Priority: HIGH — a temporary per-wound COMBAT drain can survive its explicit cleanup and
+become a permanent penalty.**
+
+Every `cumulative="t"` application is stored as a separate record, but
+`removeAffliction(type, name)` splices only the first match. §5.489 can stack Avenger's Bite
+once per wound; the hidden named loss on entering §5.565 is intended to clear the first
+fight's entire temporary drain, yet it removes only one copy. The reference model aggregates
+same-name cumulative curses before named removal.
+
+Either aggregate compatible cumulative records or make named removal clear the complete
+same-name aggregate. Preserve `?` as removal of one arbitrary affliction and `*` as removal
+of all; do not accidentally collapse unrelated same-name records with incompatible metadata
+without defining their merge.
+
+Test two or more Avenger wounds stacking, §5.565 restoring the whole prior COMBAT loss, new
+drains in the second fight, named/`?`/`*` semantics and a save/load round trip.
+
+## 185. Wildcard affliction effects (`ability="*"`) are discarded
+
+**Priority: MEDIUM — §2.136 records Leprosy but silently omits its stated one-point penalty
+to all six abilities.**
+
+`afflictionAbility()` accepts the six named abilities and Stamina but returns null for `*`,
+so `readEffects()` drops Leprosy's sole `<effect ability="*" bonus="-1"/>`. The state-side
+affliction calculations likewise match only an exact ability key. The prose explicitly says
+to reduce every ability down to a minimum score of 1.
+
+Preserve a wildcard affliction effect through parsing, sanitization and persistence, and
+apply it to each core ability (not Rank/Stamina unless separately named). Keep the existing
+minimum-one rule and natural/affected semantics.
+
+Test all six scores before/after Leprosy, the floor at 1, save/load, duplicate infection
+semantics and full restoration on cure.
+
+## 186. Automatic highest-bonus equipment can select a worse loadout
+
+**Priority: MEDIUM — a numerically stronger weapon can disable a lower-bonus weapon whose
+wielded effect produces the better or required rules outcome.**
+
+`wieldedWeapon()`, `wornArmour()` and `reconcileEquipment()` always select the highest numeric
+bonus; the Adventure Sheet only decorates those computed flags. The Jade Defender is a
++3 weapon with a +3 wielded Defence effect (§5.628/§5.672), explicitly worth +6 Defence.
+Owning any plain +4 weapon automatically unwields it, lowering Defence and changing which
+possession a `using="t"` loss can target. The player has no way to choose the legal loadout.
+
+Store explicit selected weapon/armour IDs and provide compact Sheet controls to change them.
+Reconciliation should choose a sensible default only when selection is absent/invalid, and
+the selected items must be the single source for base bonuses, wielded effects, display and
+`using="t"` matching. Migrate old saves deterministically.
+
+Test choosing either Jade Defender or a plain +4 weapon, the resulting COMBAT/Defence and
+loss target, selection persistence, and fallback after dropping the selected item. Cover
+armour and equipment-lock behavior too.
+
+## 187. Named market sales ignore item kind and equipment stats
+
+**Priority: MEDIUM — a cheap/plain possession can be sold as a distinct enchanted tool or
+weapon merely because its display name matches.**
+
+For named non-armour goods, `ownsGoods()` falls through to `hasItem(name)` and
+`sellCandidates()` to `findItems(name)`, ignoring `kind`, `ability`, `bonus` and tags.
+§5.238 awards a plain item named “silver flute”; §5.244 sells a CHARISMA +2 tool with the
+same name for 360 Shards, and the ordinary tomb trinket currently satisfies that row.
+
+Match named equipment sale candidates by descriptor kind plus the relevant ability, bonus
+and tags as well as name. Retain the intentional armour-by-Defence-tier rule and unnamed
+weapon-by-bonus rule; keep the task-134 candidate picker for genuinely interchangeable or
+ambiguous matches.
+
+Test that the plain silver flute cannot be sold on the tool row, the exact tool can, and
+same-name equipment with the wrong kind/ability/bonus/tags cannot. Audit the corpus for other
+cross-kind name collisions and run the economy/full suites.
+
+## 188. `<rest hidden="t"/>` is optional instead of automatic
+
+**Priority: MEDIUM — the sole live hidden rest lets the player leave wounded despite the
+section stating that every injury has already been healed.**
+
+Book 6 §479 contains `<rest hidden="t"/>` followed by “All your injuries are mysteriously
+healed.” `renderRest()` never reads `hidden`; it always creates a Rest button and therefore
+turns the mandatory full heal into an optional action.
+
+Auto-apply a hidden rest once on entry, render no control, and memoize the action before its
+state mutation so reload/rerender ordering cannot repeat it. Use the effective Stamina
+maximum and preserve ordinary priced/fixed visible-rest behavior.
+
+Test wounded entry to §6.479 (full Stamina, no button), damage plus rerender/resume during the
+same visit (no re-heal), a fresh visit (heal again), and entry while already full.
+
+## 189. A failed initial adventure load strands a new save on a blank game screen
+
+**Priority: MEDIUM — a transient first-book fetch failure leaves an unhandled rejection,
+blank shell and already-claimed slot with no recovery action.**
+
+The Begin Adventure handler creates and saves the character, then calls `startGame(1)`
+without awaiting it. `startGame()` builds the game screen before `navigate()`; a rejected
+book fetch escapes the click handler, while a missing §1 returns false and leaves the empty
+story pane. The demo/load/import paths already recover these failures.
+
+Await and handle both rejected and false initial navigation. Show an actionable retry/back
+state instead of a blank game, keep at most one successfully persisted new adventurer, and
+do not report a failed storage write as a recoverable saved slot. Reuse the existing
+load-failure language/policy rather than adding another screen framework.
+
+Test failed fetch, missing start section, successful retry and normal creation. Assert no
+unhandled rejection, duplicate/ghost slot or unusable blank game.
+
+## 190. Service-worker activation and lookup touch unrelated origin caches
+
+**Priority: MEDIUM — hosting another scoped app on the same origin can have its offline data
+deleted or returned through Fabled Lands' cache lookup.**
+
+Fabled Lands cache names use the `fl-` prefix, but activation deletes every cache key except
+the current version. Fetch handling also calls origin-global `caches.match(req)`. CacheStorage
+is shared by origin, not service-worker scope, so these operations can delete an unrelated
+app's cache or select its matching URL.
+
+Restrict cleanup to obsolete `fl-*` caches. Implement current/older Fabled Lands fallback
+lookup without searching unrelated namespaces, preserving task 8's incomplete-upgrade
+fallback, task 138's query navigation behavior and task 179's event-owned lazy write.
+
+In a service-worker contract test, seed `other-app-v1`, the current cache and an obsolete
+`fl-*` cache. Prove the unrelated cache survives and is never read, obsolete FL cache is
+removed only after a complete install, and all required/optional/offline paths remain green.
+
+## 191. Speech-enabled narrow headers clip critical controls
+
+**Priority: MEDIUM — at common 320/360 px widths the non-wrapping action strip exceeds the
+viewport, while horizontal overflow is hidden.**
+
+Below 600 px the title disappears and icons shrink, but the header still contains the menu,
+four general quick actions, three speech controls, Save and Adventure Sheet. Their fixed
+widths, gaps and header padding require roughly 388 px, so trailing critical controls can be
+clipped on narrow phones when Speech API support enables the full set.
+
+Define a narrow-chrome policy: keep only the essential reachable controls in the header and
+move duplicated quick/speech actions into the existing More menu or another compact control.
+Do not shrink touch targets below an accessible size.
+
+At 320 and 360 CSS pixels with speech support enabled, verify in a real browser that
+`scrollWidth <= clientWidth`, every visible control is inside the viewport, and
+Menu/Save/Sheet plus narration remain keyboard- and touch-reachable. Keep desktop layout and
+speech-disabled widths covered. A connected browser was unavailable during filing, so retain
+this explicit live layout check as acceptance evidence.
+
+## 192. The mobile Adventure Sheet is visually hidden but remains keyboard-exposed
+
+**Priority: MEDIUM — keyboard and assistive-technology users can tab through off-screen
+controls, with no announced drawer state or reliable way back.**
+
+`toggleSheet()` changes only `body.sheet-open`; the closed `aside` is translated off-screen
+but remains in the accessibility tree and tab order. The toggle has no `aria-expanded` or
+`aria-controls`, opening does not move focus or isolate the story, and there is no Escape,
+explicit Close or focus restoration behavior. Task 177 fixed modal isolation, not this
+separate drawer.
+
+Give the mobile Sheet a drawer lifecycle: synchronize `inert`/`aria-hidden`, expanded state
+and control relationship; move focus on open, support Close/Escape/backdrop, restore the
+invoker, and isolate the background while open. Clear mobile-only state cleanly on the
+desktop breakpoint so the permanent aside remains usable.
+
+Add keyboard tests for closed/open Tab order, Escape/backdrop/button close, focus restoration
+and mobile↔desktop transitions, plus touch behavior and the existing sheet mutation tests.
+
+## 193. Stale speech callbacks can advance or cancel a newer narration
+
+**Priority: MEDIUM — a delayed callback from cancelled speech can skip the first chunk of a
+new section or stop its playback.**
+
+`Narrator.stop()`/`play()` cancel utterances without changing a session identity.
+`onend`/`onerror` guard only on `playing` and the numeric chunk index. If an old index-0
+utterance fires after a new index-0 narration starts, it satisfies both checks and advances
+the new session to chunk 1. Navigation, rerender and autoplay make this hand-off routine.
+
+Increment a narration generation on play, stop and rerender; capture it in each utterance
+callback and ignore older generations. Keep the existing chunk/highlight/state behavior and
+normal completion sequence.
+
+With a speech-synthesis stub, begin a new narration and then fire the cancelled utterance's
+late start/end/error callbacks. Assert the new first chunk and highlight remain current;
+verify ordinary multi-chunk completion, manual stop and autoplay navigation.
+
+## 194. SPA section transitions provide no focus target or announcement
+
+**Priority: MEDIUM — after activating a choice, keyboard and screen-reader focus falls off
+the removed control without conveying the newly loaded section.**
+
+The Story article has no focus target/live-region labeling and the rendered section number
+is a plain `div`. Navigation, undo and return only reset scroll position. When the activated
+button is replaced, focus commonly falls to the document body; same-section rerenders make
+it important not to solve this with an indiscriminate focus steal.
+
+Expose an accessible section heading/story target and focus or announce it exactly once for
+real navigation, undo and return. Preserve the user's focus during rolls, markets, combat
+redraws and other same-section rerenders; narration/autoplay should not duplicate the
+announcement.
+
+Add DOM/browser regressions for choice, goto, undo and return transitions, plus negative
+checks for roll, inventory and market rerenders.
+
+## 195. DOM-free rule modules are not directly importable in Node
+
+**Priority: MEDIUM — the documented architecture/test seam fails before any test can run and
+rule modules acquire a browser-data dependency.**
+
+`engine.js` and `render-rules.js` import `availableBooks()` from `data.js`, whose module top
+level constructs `new DOMParser()`. Direct Node import therefore throws
+`ReferenceError: DOMParser is not defined`; the dependency also reaches the engine/combat/
+market chain despite the rule-module invariant forbidding browser globals.
+
+Move bundled-book availability behind a DOM-free registry or an explicit value supplied by
+the app/planner. Keep XML parsing/fetching in `data.js`; do not make the rules query the view
+or install a Node DOM dependency merely to mask the coupling.
+
+Add a direct Node import check for `engine`, `combat`, `market`, `state`, `render-rules`,
+`render-gates` and `visit-state`, plus browser tests for every available/unavailable-book
+condition and navigation gate.
+
+## 196. The build stamp is date/EOL dependent and omits service-worker code
+
+**Priority: MEDIUM — identical deployed content can get a new cache key, while a real
+service-worker-only release can keep the old version identity.**
+
+`stamp-version.ps1` culture-sorts absolute paths, hashes raw checkout bytes, excludes all of
+`sw.js`, and prefixes `Get-Date`. With `core.autocrlf=true` and mixed working EOLs, the same
+tracked content hashes differently: this review's no-source-change build changed
+`26.07.22.5eb892d` to `26.07.26.a39de8b`; canonical-LF content yields a third digest,
+`5143ac4`. Task 144 removed the same no-op date churn from `meta.json`, but the stamp itself
+still has it.
+
+Hash ordinal-sorted repo-relative paths plus LF-normalized content. Include `sw.js` after
+replacing only its generated VERSION assignment in memory with a fixed placeholder, avoiding
+the circularity noted in task 64. Preserve the existing date when the digest is unchanged
+(or remove the date component); choose a new date only for a genuine content change.
+
+Verify LF/CRLF checkouts and a later-day no-op yield the identical full stamp and clean tree;
+a service-worker body edit and ordinary app edit change the digest/cache key; changing only
+the generated VERSION line does not; repeated builds are byte-identical.
+
+## 197. CI tests committed bundles without rebuilding their XML source
+
+**Priority: MEDIUM — source-of-truth XML can be malformed or changed without regenerated
+JSON, while CI passes by exercising the old committed bundle.**
+
+The workflow's `build-scripts` job only checks ASCII/`#Requires`; the smoke job immediately
+serves `web/data`. It never runs `build-data.ps1`, so neither its 4,377-file validation nor a
+source/generated drift check protects a pull request.
+
+After task 196 makes output machine-stable, run the PowerShell 7 build in CI and fail on any
+generated diff (`web/data`, copied assets, `version.js`, `sw.js`) before running smoke against
+the newly built files. Keep the dependency-free runtime and current full-section browser
+test.
+
+Verify clean HEAD builds with zero diff, malformed source fails validation, a valid XML-only
+edit fails generated-drift, and the same edit with regenerated output passes build plus
+smoke.
+
+## 198. A failed save deletion can leave an unrecoverable ghost slot
+
+**Priority: LOW — the failure needs a storage exception at one narrow point, but it can lose
+the save blob while permanently reserving its slot.**
+
+`deleteSlot()` removes `fl_save_<slot>` before rewriting `fl_meta`. If the metadata write
+throws, the blob is already gone while its stale card remains. `reconcileSlotMeta()` repairs
+only blob-without-meta, not the inverse, and `nextFreeSlot()` treats the ghost metadata entry
+as occupied. The async Delete handler neither catches nor reports the error.
+
+Write the metadata deletion first and remove the blob only after it succeeds, so interruption
+leaves the task-137 recoverable blob-only form. Catch both storage operations and surface the
+existing persistence warning without redrawing a false-success list.
+
+Force the metadata write to throw: the blob and visible slot must remain and no rejection may
+escape. Then retry successfully and prove both records disappear and the slot is reusable.
+
+## 199. Build validation misses source-schema typos and bundled-book dangling targets
+
+**Priority: LOW — the corpus is currently clean, but the validation step would accept the
+same tag/attribute mistakes that caused earlier player-facing tasks.**
+
+`Test-XmlDoc` checks well-formedness and numeric section root/name only; Adventurers/Rules
+even pass no expected root. Unknown live tags/attributes, invalid enumerated values, malformed
+referenced pregen biographies and explicit missing targets inside Books 1–6 can reach output.
+Historical `safeAddGodd` and `tag`/`tags` source typos illustrate the silent failure mode.
+
+Before writing any generated file, validate required roots, live tag/attribute/value
+allowlists (including documented project extensions), referenced pregen XML, and explicit
+targets whose destination book is bundled. Continue to allow intentional Books 7–12 links,
+computed targets and missing optional artwork.
+
+Add small mutation fixtures for wrong root, unknown tag/attribute, bad enum, dangling
+bundled target and malformed referenced bio. The unmodified 4,377-file corpus must pass with
+byte-identical output.
+
+## 200. AGENTS.md overstates test-suite parse-error isolation
+
+**Priority: LOW — the false troubleshooting advice can waste time precisely when a focused
+suite refuses to start.**
+
+AGENTS.md says separate module scopes mean a duplicate top-level declaration aborts only
+that suite. `_test.html` statically imports all seven suites, so a syntax error in any
+dependency prevents the harness module from evaluating and the classic bootstrap reports one
+global `RESULT FATAL`; `?suite=` does not isolate an unselected suite from parse failure.
+Separate scopes only prevent declarations in different valid modules from colliding.
+
+Correct the paragraph to match the current static import/bootstrap behavior. This is a
+docs-only change; verify the revised troubleshooting text agrees with `_test.html` and CI.
+
+## 201. A service-worker update can erase an unsaved character-creation draft
+
+**Priority: LOW — the race is infrequent, but every creation field exists only in local
+variables until Begin Adventure.**
+
+On `controllerchange`, `registerSW()` reloads immediately because game progress normally
+autosaves. The creation screen's selected book/profession, edited name and gender are not
+state yet, so an update that activates while the form is open silently resets the entire
+draft. `skipWaiting()` makes that timing possible without a user reload.
+
+Defer the reload while an unsaved screen is active (or preserve and restore the minimal
+draft), then apply it once the user safely leaves/commits. Keep the one-reload guard and
+automatic update behavior for title/saved gameplay.
+
+Mock `controllerchange` during edited creation: no immediate reload and every field survives;
+after Begin/Back, exactly one deferred reload may occur. A controller change during normal
+autosaved play should keep the existing behavior.
+
+## 202. Complete remaining form, selection and progress semantics
+
+**Priority: LOW — the controls work visually, but several common interactions expose no
+programmatic label or selected/value state.**
+
+Starting book, name and gender render adjacent `<label>` elements without `for`/nesting;
+voice and speed repeat the pattern. Profession cards and map tabs show selection only by
+class. Cache amount inputs lack names, and the Stamina meter is only styled divs rather than
+a value-bearing progress object. Task 153/177 covered live regions and dialogs, not these
+semantics.
+
+Associate labels/inputs, expose profession and map selection with the appropriate
+pressed/tab state and keyboard model, name numeric cache controls from their action/context,
+and give Stamina current/max progress semantics. Preserve the current visual design and avoid
+inventing a generic component system.
+
+Add focused DOM/accessibility assertions for each control family and keyboard selection,
+then check creation, narration settings, maps, caches and the mobile/desktop Sheet manually.
+
+---
+
 ## Review log
 
 *Running audit log of the backlog — each pass re-verifies the open items against
 the current code and records what was filed, split, or re-confirmed. Task
 numbers refer to the contents checklist at the top of the file.*
+
+Reviewed 2026-07-26 (eleventh full pass, after tasks 175–179): started clean at
+`d8e8c59`. Re-read the rule/state/economy modules, every renderer and app lifecycle,
+service worker/build/CI paths, focused suites and workflow docs; compared live rule seams
+against the XML/reference implementation; and checked source/generated parity, all explicit
+bundled-book targets and every live tag/condition family. Filed **180–184** (HIGH):
+untrusted fight memos reach `innerHTML`; task 175 leaves ordinary/derived/loop/navigation
+consumers of a provisional reroll live; dice callbacks survive Save & quit; disease immunity
+does not block affliction admission; and named cleanup removes only one stacked cumulative
+curse.
+
+Filed **185–197** (MEDIUM): wildcard affliction penalties, explicit equipment selection,
+descriptor-correct market sales, hidden rest, failed-new-game recovery, cache namespace
+ownership, narrow header and mobile-Sheet behavior, speech callback generations, transition
+focus, the DOM-free import boundary, canonical app stamping and CI source/generated
+verification. Filed **198–202** (LOW): deletion failure ordering, stronger source validation,
+accurate suite-fatal documentation, creation-draft survival across SW activation, and the
+remaining bounded accessibility semantics. The optional full-art basename collision was
+reviewed but not filed: all three shipped illustrations are unique and broader art import is
+not current scope.
+
+Organization verdict remains the same: no framework, dependency, folder move or wholesale
+module split is warranted. The fixes have existing owners; task 181 belongs in the DOM-free
+planner/visit boundary, 180 at import rehydration plus safe DOM construction, 182 in Story
+lifecycle, and the accessibility items are small app/view contracts. PowerShell 7 build:
+**4,377 XML files valid**, 4,369 sections generated, with source/data parity intact. The
+build exposed task 196 by changing only the generated stamp/cache identity on unchanged
+tracked content. Fresh-profile aggregate smoke: **`RESULT ALL PASS pass=1692 fail=0`**,
+including every section of all six books. The review changed only this backlog.
 
 Reviewed 2026-07-22 (tenth full pass, after tasks 173–174): started clean at
 `2245eae`. Reviewed every first-party runtime/rule/view/persistence module, the web shell
