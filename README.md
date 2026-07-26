@@ -147,6 +147,19 @@ pwsh -ExecutionPolicy Bypass -File build/stamp-version.ps1
 
 (`build-data.ps1` runs this automatically at the end.)
 
+The stamp identifies content, so identical content always yields an identical stamp — which
+takes some care to get right (task 196):
+
+- Digest inputs are **repo-relative paths sorted ordinally**, and text is **LF-normalised**
+  before hashing, so neither the machine's locale nor a `core.autocrlf=true` checkout can
+  change the digest. Renaming a file does change it.
+- `sw.js` is **included**, with only its generated `VERSION = …` line swapped for a fixed
+  placeholder in memory. A service-worker-only release therefore gets a new version identity,
+  while re-stamping the cache key stays non-circular.
+- The **date is reused while the digest is unchanged**, so re-running the build on a later day
+  with no source change is a byte-for-byte no-op: no dirty tree, and no pointless cache
+  eviction for installed players. A new date is only chosen for a genuine change.
+
 ---
 
 ## Narration (text-to-speech)

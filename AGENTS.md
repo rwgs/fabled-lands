@@ -47,7 +47,10 @@ itself* still has no runtime dependencies; only the offline build step needs pws
    refresh the build stamp so the in-game version and the service-worker cache
    key move (otherwise returning players keep the cached old build):
    `pwsh -ExecutionPolicy Bypass -File build/stamp-version.ps1`
-   The stamp is a content hash of the app source, so it changes on any edit.
+   The stamp is a content hash of the app source (including `sw.js`), so it changes on any
+   edit — and only on an edit: paths sort ordinally, text is LF-normalised, and the date is
+   reused while the digest holds, so a rebuild with no source change is a byte-for-byte
+   no-op and leaves the tree clean. Never hand-edit `version.js`/`sw.js`'s `VERSION`. (task 196)
 2. Run the headless smoke test (serves `web/`, exercises the engine, and renders
    **every section of all six books** to confirm none throw):
    - Serve from the repo root: `python -m http.server 8848`
