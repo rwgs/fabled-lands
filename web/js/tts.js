@@ -25,6 +25,10 @@ export class Narrator {
     this.index = 0;
     this.playing = false;
     this._active = null;
+    // Narration session id. Cancelling an utterance does not un-queue its callbacks, so every
+    // utterance records the session it was created in and its callbacks are ignored once that
+    // session is over. Bumped by play/stop/handleRerender. (task 193)
+    this._gen = 0;
     this.onState = null; // (playing:boolean) => void, for UI
     if (SUPPORTED) {
       this._loadVoices();
@@ -96,6 +100,7 @@ export class Narrator {
     this.stop();
     this.prepare(flowEl);
     if (!this.chunks.length) return;
+    this._gen++; // a fresh narration: nothing queued before this point speaks for it
     this.playing = true;
     this._emit();
     this._speakFrom(0);
@@ -104,6 +109,7 @@ export class Narrator {
   /** Called by the app when a section (re)renders — narration must not outlive the DOM. */
   handleRerender() {
     if (this.playing) this.stop();
+    this._gen++; // the DOM these chunks point at is going away; retire the session either way
     // Drop the chunk list even when not playing: it holds element refs into the previous
     // section's now-detached DOM until the next play() rebuilds it. (task 152)
     this.chunks = []; this.index = 0;
@@ -116,14 +122,20 @@ export class Narrator {
     this._clearHighlight();
     if (!this.playing || i >= this.chunks.length) { this._finish(); return; }
     this.index = i;
+    const gen = this._gen; // the session this utterance belongs to
     const { el, text } = this.chunks[i];
     const u = new SpeechSynthesisUtterance(text);
     const v = this._voice(); if (v) u.voice = v;
     u.rate = this.settings.rate;
     u.pitch = this.settings.pitch;
-    u.onstart = () => this._highlight(el);
-    u.onend = () => { if (this.playing && this.index === i) this._speakFrom(i + 1); };
-    u.onerror = () => { if (this.playing && this.index === i) this._speakFrom(i + 1); };
+    // A cancelled utterance still delivers start/end/error, and `playing` + `index` cannot tell
+    // it apart from the current one: a late index-0 end arriving after a new narration began
+    // satisfied both and advanced the NEW session to chunk 1, skipping its first sentence,
+    // while a late start cleared the new highlight. Gate every callback on the session too —
+    // navigation, rerender and autoplay make that hand-off routine. (task 193)
+    u.onstart = () => { if (gen === this._gen) this._highlight(el); };
+    u.onend = () => { if (gen === this._gen && this.playing && this.index === i) this._speakFrom(i + 1); };
+    u.onerror = () => { if (gen === this._gen && this.playing && this.index === i) this._speakFrom(i + 1); };
     try { speechSynthesis.speak(u); } catch { this._finish(); }
   }
 
@@ -139,6 +151,7 @@ export class Narrator {
   _finish() { this.playing = false; this.index = 0; this._clearHighlight(); this._emit(); }
 
   stop() {
+    this._gen++; // whatever is already queued belongs to a session that is over
     if (SUPPORTED) { try { speechSynthesis.cancel(); } catch {} }
     this.playing = false;
     this._clearHighlight();

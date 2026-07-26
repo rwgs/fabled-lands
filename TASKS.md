@@ -27,7 +27,7 @@ audit pass.
 - [x] 190. Service-worker activation and lookup touch unrelated origin caches
 - [x] 191. Speech-enabled narrow headers clip critical controls
 - [x] 192. The mobile Adventure Sheet is visually hidden but remains keyboard-exposed
-- [ ] 193. Stale speech callbacks can advance or cancel a newer narration
+- [x] 193. Stale speech callbacks can advance or cancel a newer narration
 - [ ] 194. SPA section transitions provide no focus target or announcement
 - [ ] 195. DOM-free rule modules are not directly importable in Node
 - [ ] 196. The build stamp is date/EOL dependent and omits service-worker code
@@ -1226,6 +1226,26 @@ normal completion sequence.
 With a speech-synthesis stub, begin a new narration and then fire the cancelled utterance's
 late start/end/error callbacks. Assert the new first chunk and highlight remain current;
 verify ordinary multi-chunk completion, manual stop and autoplay navigation.
+
+**Done.** `Narrator` carries a `_gen` narration-session counter, bumped by `play()`, `stop()`
+and `handleRerender()`. `_speakFrom()` captures it when it builds the utterance and all three
+callbacks are gated on `gen === this._gen` in addition to the existing `playing` / `index`
+checks, so nothing queued by a retired session can act. Chunk advancement within a session
+keeps the same generation, so the normal chain, the highlight moves and the `_finish()`
+sequence are untouched.
+
+Ten assertions in `suite-economy` (last block in the suite, so its stub can never be visible to
+another) install a stubbed `speechSynthesis` / `SpeechSynthesisUtterance` — restored in a
+`finally` — which records each utterance so its callbacks can be fired by hand. They cover the
+routine hand-off (`handleRerender()` then `autoplayIfEnabled()` on the new flow) followed by the
+old utterance's late `start`/`end`/`error`; ordinary two-chunk completion with the highlight
+following each chunk and then clearing; a manual `stop()` whose own late callbacks speak nothing
+more; and navigating on from a stopped narration.
+
+Verified as a real regression test by removing the `gen === this._gen` guard: three of the ten
+fail, and the detail is exactly the filed bug — `index=1` (the new narration advanced past its
+own first chunk, `spoken=3/2`) with the new highlight cleared to `null`. With the guard back:
+RESULT ALL PASS pass=1989 fail=0, all 4,369 sections rendering.
 
 ## 194. SPA section transitions provide no focus target or announcement
 

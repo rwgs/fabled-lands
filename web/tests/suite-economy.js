@@ -2156,4 +2156,100 @@ export async function run(ctx) {
       ok('§5.244 selling the tool pays 360 and removes it', mTool.g.data.shards === 360 && mTool.g.findItems('silver flute').length === 0, `shards=${mTool.g.data.shards}`);
     }
 
+    // --- task 193: a stale speech callback must not touch a newer narration ---
+    // Cancelling an utterance does not un-queue its callbacks. They guarded only on `playing`
+    // and the numeric chunk index, so a late index-0 `end` arriving after a new narration had
+    // started satisfied both and advanced the NEW session to chunk 1 — its first sentence never
+    // spoken — while a late `start` cleared the new highlight. Every utterance now records its
+    // narration session, and play/stop/handleRerender retire it. Driven with a stubbed speech
+    // API so the callbacks can be fired by hand; the real globals are restored either way.
+    // Runs last in this suite so the stub can never be visible to another block.
+    { // block-scoped
+      const realU = window.SpeechSynthesisUtterance, realS = window.speechSynthesis;
+      const setGlobal = (name, value) => Object.defineProperty(window, name, { value, configurable: true, writable: true });
+      const spoken = [];
+      class StubUtterance {
+        constructor(text) { this.text = text; this.onstart = null; this.onend = null; this.onerror = null; }
+      }
+      const stubSynth = { cancels: 0, cancel() { this.cancels++; }, speak(u) { spoken.push(u); }, getVoices: () => [], addEventListener() {} };
+      setGlobal('SpeechSynthesisUtterance', StubUtterance);
+      setGlobal('speechSynthesis', stubSynth);
+      try {
+        const flowOf = (html) => {
+          const d = document.createElement('div'); d.className = 'flow'; d.innerHTML = html;
+          document.body.appendChild(d); // connected, so _highlight() will actually mark a span
+          return d;
+        };
+        const active = (flow) => { const a = flow.querySelector('.tts-active'); return a ? a.textContent : null; };
+        const last = () => spoken[spoken.length - 1];
+        const nar193 = new Narrator();
+        ok('task193: the stubbed speech API is visible to the narrator', nar193.supported);
+        const flowA = flowOf('<p>Alpha one. Alpha two.</p>');
+        const flowB = flowOf('<p>Beta one. Beta two.</p>');
+
+        nar193.play(flowA);
+        const uA0 = last();
+        uA0.onstart();
+        ok('task193: A speaks and highlights its first chunk',
+           /Alpha one/.test(uA0.text) && /Alpha one/.test(active(flowA) || ''), uA0.text + ' | ' + active(flowA));
+
+        // The routine hand-off: a section change rerenders, then autoplay starts the new flow.
+        nar193.handleRerender();
+        nar193.settings.autoplay = true;
+        nar193.autoplayIfEnabled(flowB);
+        const uB0 = last();
+        uB0.onstart();
+        ok('task193: autoplay after a rerender starts B at its own first chunk',
+           /Beta one/.test(uB0.text) && nar193.index === 0 && nar193.playing, uB0.text);
+
+        // Now A's cancelled utterance delivers its late callbacks.
+        const before = spoken.length;
+        uA0.onstart(); uA0.onend(); uA0.onerror();
+        ok('task193: a stale end/error neither advances nor stops the new narration',
+           nar193.playing && nar193.index === 0 && spoken.length === before,
+           `index=${nar193.index} playing=${nar193.playing} spoken=${spoken.length}/${before}`);
+        ok('task193: a stale start does not steal the new highlight',
+           /Beta one/.test(active(flowB) || '') && active(flowA) === null, active(flowB) + ' | ' + active(flowA));
+
+        // Ordinary multi-chunk completion still chains, highlights, and finishes.
+        uB0.onend();
+        const uB1 = last();
+        ok('task193: a real end advances to the next chunk',
+           /Beta two/.test(uB1.text) && nar193.index === 1, uB1.text);
+        uB1.onstart();
+        ok('task193: the highlight follows the chunk', /Beta two/.test(active(flowB) || ''), active(flowB));
+        uB1.onend();
+        ok('task193: ending the last chunk finishes the narration',
+           !nar193.playing && nar193.index === 0 && active(flowB) === null);
+
+        // Manual stop: playback stops, the highlight clears, and the stopped utterance's own
+        // late end speaks nothing further.
+        nar193.play(flowB);
+        const uB0b = last();
+        uB0b.onstart();
+        nar193.stop();
+        const afterStop = spoken.length;
+        uB0b.onend(); uB0b.onerror();
+        ok('task193: a manual stop clears playback and its late callbacks speak nothing more',
+           !nar193.playing && active(flowB) === null && spoken.length === afterStop,
+           `playing=${nar193.playing} spoken=${spoken.length}/${afterStop}`);
+
+        // Navigating on from a stopped narration: the retired utterance cannot drive the
+        // autoplayed one either.
+        nar193.handleRerender();
+        nar193.autoplayIfEnabled(flowA);
+        const uA0b = last();
+        const beforeStale = spoken.length;
+        uB0b.onend(); uB0b.onerror();
+        ok('task193: the newly autoplayed narration ignores the retired session entirely',
+           nar193.playing && nar193.index === 0 && spoken.length === beforeStale && /Alpha one/.test(uA0b.text),
+           `index=${nar193.index} spoken=${spoken.length}/${beforeStale} text=${uA0b.text}`);
+        nar193.stop();
+        flowA.remove(); flowB.remove();
+      } finally {
+        setGlobal('SpeechSynthesisUtterance', realU);
+        setGlobal('speechSynthesis', realS);
+      }
+    }
+
 }
