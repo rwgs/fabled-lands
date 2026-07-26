@@ -9,7 +9,7 @@ import {
   resolveValue, rollDifficulty, rollRankCheck, rollTraining, rollDice,
   childAdjustment, abilityChoiceOptions,
 } from './engine.js';
-import { branchPlan, blessingSpendForReroll, isRollGate } from './render-rules.js';
+import { branchPlan, blessingSpendForReroll, isRollGate, viewPendingVars } from './render-rules.js';
 // renderChoices (render-choices) is reached through story.dispatchChoices, not a direct
 // import, so render-rolls and render-choices no longer form an ES-module cycle. (task 163)
 import { animateDice, freezeButtons } from './ui.js';
@@ -73,6 +73,10 @@ export function showDiceResult(widget, dice, detail, outcome, ok) {
 // permanent; keeping marks the stored result accepted so its branch reveals next render.
 export function appendRerollControls(story, widget, blessings, stored, reroll) {
   if (story.inactive) return;
+  // The decision is now on screen and settleable, so the section's exits lock behind it
+  // (applyPendingRerollGate, task 181) — never on a stored pending roll alone, which could
+  // sit inside an untaken branch that renders no way to keep or reroll it.
+  story.pendingRerollDecision = true;
   for (const name of blessings) {
     const label = name === 'luck' ? 'Luck' : name === 'travel' ? 'Safe Travel' : name.toUpperCase();
     const btn = document.createElement('button');
@@ -129,14 +133,16 @@ function rollGate(story, node, key) {
   return { flag, gated, armed, stored };
 }
 
-// Hold the enclosing <while> pass on an unrolled roll (task 100): the loop can't advance until
-// the player rolls it, and (for a <random> feeding a var) that var is marked stale so a
-// downstream effect waits for THIS pass's value, not the previous one.
-function markWhilePending(story, stored, varName = null) {
-  if (story.inWhileIter && !story.inactive && !stored) {
-    story.whileIterPending = true;
-    if (varName && story.whileIterPendingVars) story.whileIterPendingVars.add(varName);
-  }
+// Hold the enclosing <while> pass on a roll that has not SETTLED (tasks 100 + 181): unrolled,
+// or resolved but still a provisional reroll decision. Either way the loop can't advance (or
+// complete) past this pass, and the roll's var is marked stale for the pass so a downstream
+// effect/condition waits for THIS pass's settled value rather than the previous one — which is
+// how §6.700's rejected non-six neither damages the player nor sets the loop's exit var.
+function markWhilePending(story, stored, path, varName = null) {
+  if (!story.inWhileIter || story.inactive) return;
+  if (stored && !story.rerollPendingRolls.has(path)) return; // settled — the pass may advance
+  story.whileIterPending = true;
+  if (varName && story.whileIterPendingVars) story.whileIterPendingVars.add(varName);
 }
 
 // Write a roll's result into its var= and mark it wrote/rolled this visit (task 172): the
@@ -212,9 +218,10 @@ export function renderDifficulty(story, container, node, path) {
   // payment re-arms (dropping any stale result). Extends task 30's <random> gate
   // to <difficulty> — book6/731 CHARISMA boon, book2/122/book6/630 "MAGIC or …".
   const { flag, gated, armed, stored } = rollGate(story, node, key);
-  // An unresolved roll inside a <while> pass holds the loop until the player rolls
-  // it (§5.218's per-pass COMBAT re-attempt to wriggle free). (task 100)
-  markWhilePending(story, stored);
+  // An unsettled roll inside a <while> pass holds the loop until the player rolls it — and,
+  // holding a reroll, until the result is kept (§5.218's per-pass COMBAT re-attempt to wriggle
+  // free, whose 3-Stamina failure must not bank while a reroll stands). (tasks 100 + 181)
+  markWhilePending(story, stored, path, node.getAttribute('var'));
   if (stored) {
     const abLabel = (stored.ability || spec.split('|')[0] || '').toUpperCase();
     showDiceResult(widget, stored.dice, `${abLabel} ${stored.abilityScore >= 0 ? '+' : ''}${stored.abilityScore} = ${stored.total} vs ${level}`, stored.success ? 'Success' : 'Failure', stored.success);
@@ -267,9 +274,9 @@ export function renderRandom(story, container, node, path) {
   // Pay-gated roll (book2/157 etc.): the roll enables only once its payment sets the flag;
   // rolling consumes the flag, and a fresh payment re-arms it (dropping the old result). (task 30)
   const { flag, gated, armed, stored } = rollGate(story, node, key);
-  // A <while> pass that has not yet rolled blocks the loop and marks its var stale
-  // (so its downstream `<lose stamina="x">` waits for THIS six, not the last). (task 100)
-  markWhilePending(story, stored, varName);
+  // A <while> pass whose roll has not settled blocks the loop and marks its var stale
+  // (so its downstream `<lose stamina="x">` waits for THIS six, not the last). (tasks 100 + 181)
+  markWhilePending(story, stored, path, varName);
 
   // One shared "spin the dice" action: consume the payment if gated, roll + apply the node's
   // <adjust> children, and store the result under its var. Reused by the first roll and by a
@@ -308,7 +315,7 @@ export function renderRankcheck(story, container, node, path) {
   const { key, widget } = makeRollWidget(container, path);
   // Pay-to-roll gate (task 51), as for <difficulty>/<random>.
   const { flag, gated, armed, stored } = rollGate(story, node, key);
-  markWhilePending(story, stored); // hold a <while> pass (task 100)
+  markWhilePending(story, stored, path, node.getAttribute('var')); // hold a <while> pass (tasks 100 + 181)
   if (stored) {
     showDiceResult(widget, stored.dice, `Rolled ${stored.total} vs Rank ${story.state.rankValue()}`, stored.success ? 'Success' : 'Failure', stored.success);
     offerReroll(story, widget, path, stored, () => {
@@ -341,7 +348,7 @@ export function renderTraining(story, container, node, path) {
   const add = parseInt(node.getAttribute('add') || '0', 10);
   const { key, widget } = makeRollWidget(container, path);
   const stored = story.ctx.rolls.get(key); // <training> has no pay gate — a plain memo lookup
-  markWhilePending(story, stored); // hold a <while> pass (task 100)
+  markWhilePending(story, stored, path, node.getAttribute('var')); // hold a <while> pass (tasks 100 + 181)
   if (stored) {
     const ab = stored.ability;
     showDiceResult(widget, stored.dice, `Rolled ${stored.total} vs ${ab.toUpperCase()} ${stored.natural}`, stored.success ? `+1 ${ab.toUpperCase()}` : 'No gain', stored.success);
@@ -371,11 +378,12 @@ export function renderTraining(story, container, node, path) {
 export function renderBranch(story, container, node, path, activeRoll) {
   // A roll whose result is still a pending blessing-reroll decision (task 175) is not
   // committed: treat it as unresolved (roll = null) so its <success>/<failure>/<outcome>
-  // stays hidden, and pass the pending vars so branchPlan also skips any var-keyed branch
-  // the same roll feeds — the branch reveals only once the player keeps or exhausts the reroll.
+  // stays hidden, and pass the provisional vars so branchPlan also skips any var-keyed branch
+  // fed by that roll — directly, or through a derived <set> (§2.684's `result`, task 181). The
+  // branch reveals only once the player keeps or exhausts the reroll.
   const pendingRoll = !!activeRoll && story.rerollPendingRolls.has(activeRoll.path);
   const roll = (activeRoll && !pendingRoll) ? story.ctx.rolls.get('roll@' + activeRoll.path) : null;
-  const plan = branchPlan(story.state, story.ctx, node, roll, story.rerollPendingVars);
+  const plan = branchPlan(story.state, story.ctx, node, roll, viewPendingVars(story));
   switch (plan.kind) {
     case 'skip': return;
     case 'reveal': revealBranch(story, container, node, path); return;

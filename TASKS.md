@@ -3,8 +3,8 @@
 Backlog of recommended improvements. Open tasks are filed under priority buckets
 (**HIGH** / **MEDIUM** / **LOW**) — work the first open (`- [ ]`) item top-down;
 each task's detail section carries the same stable ID. **All filed tasks are
-complete through 180**. The eleventh full review filed tasks 180–202 below; 203
-was filed while working task 180.
+complete through 181**. The eleventh full review filed tasks 180–202 below; 203
+was filed while working task 180, and 204–205 while working task 181.
 Completed detail sections are archived in
 [`TASKS-archive.md`](TASKS-archive.md); the Review log at the end records each
 audit pass.
@@ -12,7 +12,7 @@ audit pass.
 **HIGH**
 
 - [x] 180. Imported visit/combat memos can execute HTML/JavaScript on resume
-- [ ] 181. Finish task 175: a blessing-reroll result is still observable before Keep
+- [x] 181. Finish task 175: a blessing-reroll result is still observable before Keep
 - [ ] 182. Delayed rolls and attacks can mutate a save after Save & quit
 - [ ] 183. Disease/poison immunity blessings do not prevent infection
 - [ ] 184. Named removal leaves stacked cumulative curses behind
@@ -41,6 +41,8 @@ audit pass.
 - [ ] 200. AGENTS.md overstates test-suite parse-error isolation
 - [ ] 201. A service-worker update can erase an unsaved character-creation draft
 - [ ] 202. Complete remaining form, selection and progress semantics
+- [ ] 204. A derived `<set>` inside a `<while>` body is not traced per iteration
+- [ ] 205. The provisional-result gate locks a flee exit the fight gate deliberately leaves open
 
 **Done**
 
@@ -676,6 +678,29 @@ loss; a successful reroll exits), §6.700 (a rejected non-six cannot set `y`, da
 the loop), §2.698 (no Shards/live goto before Keep; final amount exactly once), §2.684
 (branches hidden until final), and save/resume at each pending state. Run all sections.
 
+**Done.** One DOM-free dependency trace now decides the whole boundary in `render-rules.js`:
+`expressionVars` reports what an attribute value reads, `provisionalVarClosure` grows a seed
+through the section's derived `<set>`s transitively, and three refusal points consume the
+result — `conditionPending` (an `<if>/<elseif>` reading a provisional var holds the WHOLE
+chain, so no `<else>` slips active), `setPending` (a `<set>` deriving from one writes nothing)
+and `pendingRollVar`/`branchResolved` (effects and var-keyed branches wait). `render()`
+pre-scans the section into `rerollPendingVars` before the walk, so document order is
+irrelevant; `markWhilePending` holds a `<while>` pass on a resolved-but-provisional roll (a
+loop roll's var is scoped to its own pass, per task 100, so §6.700's loop-entry gate still
+reads the roll that opened it); and `applyPendingRerollGate` disables every rendered exit while
+the decision's own controls are on screen. The boundary still rides in the roll memo's
+`accepted` flag alone — nothing new is persisted.
+
+Tracing the dependency through `<set>` also exposed and fixed a pre-existing leak with no
+connection to rerolls: a derived `<set>` ran on ENTRY with its roll var unset, so `<gain
+shards="s">`/`<lose amount="y">` applied against **0** and memoised that no-op — the award
+could never arrive. Seven sections were silently paying nothing (§2.266, §2.698, §6.17,
+§6.352, §6.488, §6.625, §6.86). `unsettledRollVars` closes over the roll vars a section has
+still to fill so those effects wait for the real value; `setPending` deliberately tests only
+the READ side, leaving task 61's set-sentinel idiom (§6.628 `y=7`, §2.138 `open=1`) applying on
+entry as before. Two residual gaps filed as tasks 204 and 205. Full browser suite:
+RESULT ALL PASS pass=1791 fail=0, all 4,369 sections rendering.
+
 ## 182. Delayed rolls and attacks can mutate a save after Save & quit
 
 **Priority: HIGH — a detached action can overwrite the explicit quit save and advance or
@@ -1088,6 +1113,58 @@ Test a crafted frame (string/object/NaN vars, a negative fractional `entryTicks`
 location) resuming and then returning: no non-numeric var reaches `data.vars`, the tick gate
 compares against a sane baseline, and an ordinary detour-and-`<return>` still restores its
 exact vars, location, todock and used action. Run the focused persistence suites and the full
+browser suite.
+
+## 204. A derived `<set>` inside a `<while>` body is not traced per iteration
+
+**Priority: LOW — latent: no section in the corpus derives a value inside a loop body, so
+today nothing reaches the gap. It is a hole in an otherwise complete invariant.**
+
+Found while doing task 181. The provisional-dependency trace has two seeds. The
+section-scoped one (`rerollPendingVars`, and `unsettledVars` for not-yet-rolled vars) is run
+through `provisionalVarClosure`, so a derived `<set>` defers with its source. The per-pass one
+is not: `whileIterPendingVars` collects only the roll var the current `<while>` iteration
+re-rolls — deliberately, because a loop roll's var must not suppress the loop-entry gate that
+is showing it (§6.700 reads `x` both inside and outside) — and `viewPendingVars` unions that
+raw set. So a `<set var="s" value="x*5">` inside a loop body, with `x` re-rolled per pass,
+would apply against the PREVIOUS pass's `x` (or 0 on the first), and an effect keyed on `s`
+would not defer. All seven derived-`<set>` sections (§2.266, §2.698, §6.17, §6.352, §6.488,
+§6.625, §6.86) sit outside any loop, which is why `viewPendingVars` documents the limit rather
+than paying for it.
+
+Close it without re-introducing the leak the scoping prevents: the closure must be computed
+over the pass's own vars and confined to the loop body, so a derived var inside the loop
+defers while the same names outside it stay readable. Prefer growing the per-pass set (the
+`<set>` nodes within the `<while>` subtree) over widening the section-scoped one, and keep the
+computation DOM-free in `render-rules.js`.
+
+Add a synthetic `<while>` whose body derives a value from its per-pass roll: prove the derived
+effect applies once per pass with THAT pass's value, that an unrolled pass defers it entirely,
+and that a loop-entry gate outside the body still reads the roll that opened the loop (§6.700
+stays green). Run the focused render/inventory suites and the full browser suite.
+
+## 205. The provisional-result gate locks a flee exit the fight gate deliberately leaves open
+
+**Priority: LOW — latent: no section pairs a `<choice flee="t">` with a die roll, so no live
+combat can currently be reached through it.**
+
+Found while doing task 181. Every other navigation gate exempts fleeing: `computeRollGate`,
+`computeTransferGate` and `computeBuyGate` each skip a node with `flee="t"`, and
+`computeFightGate` leaves both the flee choice and the mid-fight escape `box=` choice ungated,
+because abandoning a fight must stay available. `applyPendingRerollGate` (task 181) works on
+rendered buttons instead of nodes and disables every `.goto`/`.choice`, so a direct
+`<choice flee="t">` would be locked behind a provisional roll while the fight widget's own
+Flee button (a `.btn-secondary`) stays live — the same escape offered twice, gated once. There
+is no softlock (Keep is one click away), but the two paths disagree.
+
+Bring the gate in line with the established convention: leave a flee/escape exit clickable and
+gate only the ordinary onward navigation. That needs the flee/escape role to be legible to the
+gate — tag the rendered button the way `tagFightNav`/`tagRollNav` already tag theirs, rather
+than re-deriving the rule in the view.
+
+Add a fixture with a rerollable roll beside a `<choice flee="t">`: the ordinary exits lock
+while the result is provisional, the flee choice stays live, and taking it still routes through
+the task-178 durable consequence contract. Run the focused actions/combat suites and the full
 browser suite.
 
 ---

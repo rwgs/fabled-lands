@@ -661,6 +661,69 @@ export async function run(ctx) {
       window.__FL_INSTANT_DICE__ = false;
     }
 
+    // --- task 181: every provisional-result state survives save + resume --------------
+    // The boundary is general now (an <if var> chain, a <while> pass, a derived <set>), and the
+    // whole of it rides in the roll memo's `accepted` flag — nothing else is persisted. So for
+    // each of the five real sections that leaked: reach the pending state, save, resume into a
+    // fresh GameState, and prove the reload neither auto-accepts (the probe stays at 0 and the
+    // Keep control is back) nor, once kept, replays the commit on a second reload.
+    {
+      window.__FL_INSTANT_DICE__ = true;
+      const settle = () => new Promise((r) => setTimeout(r, 30));
+      const liveRoll = (c) => Array.from(c.querySelectorAll('.btn-roll')).find((b) => !b.disabled);
+      const revealed = (c) => (/Catch her in the net|She gets away/.test(c.textContent) ? 1 : 0);
+      // Each case: a real section, the seed forcing its die, what the kept result commits, and
+      // the value that commit is worth. `seed: null` means the outcome is forced through state
+      // (§5.218's cursed COMBAT always fails), so no dice control is needed.
+      const cases = [
+        { book: 2, sec: '389', seed: 14, probe: (g) => g.data.shards, worth: 150, what: 'the 150-Shard tribute row' },
+        { book: 2, sec: '698', seed: 5, probe: (g) => g.data.shards, worth: 1000, what: 'the derived 10×100 Shards' },
+        { book: 2, sec: '684', seed: 7, probe: (g, c) => revealed(c), worth: 1, what: 'the derived net branch' },
+        { book: 6, sec: '700', seed: 14, probe: (g) => 40 - g.data.stamina, worth: 3, what: 'the 3 Stamina of pine cones' },
+        { book: 5, sec: '218', seed: null, probe: (g) => 40 - g.data.stamina, worth: 3, what: "the troll's 3-Stamina grip" },
+      ];
+      for (const tc of cases) {
+        const tag = `§${tc.book}.${tc.sec}`;
+        const el = await data.getSection(tc.book, tc.sec);
+        const g = GameState.create({ name: 'T181R', gender: 'm', profession: 'Warrior', book: tc.book, adv });
+        g.data.shards = 0; g.data.rank = 3; g.data.stamina = 40; g.data.staminaMax = 40; g.addBlessing('luck');
+        if (tc.sec === '218') g.setAbilityFlag('combat', 'cursed', true); // force the grapple failure
+        const c1 = document.createElement('div');
+        const s1 = new Story(c1, g, { navigate() {}, onDeath() {}, notify() {} });
+        g.setVisitProvider(() => s1.serializeVisit());
+        g.goTo(tc.book, tc.sec); s1.begin(el, tc.book, tc.sec);
+        if (tc.seed != null) eng.seedRng(tc.seed);
+        liveRoll(c1).click(); await settle();
+        eng.seedRng(null);
+        ok(`task181 ${tag}: the roll lands as a provisional decision, committing nothing`,
+           tc.probe(g, c1) === 0 && !!c1.querySelector('.keep-roll'), 'probe=' + tc.probe(g, c1));
+
+        // Reload at the pending state: the decision is restored, not resolved.
+        const g2 = new GameState(sanitizeData(JSON.parse(JSON.stringify({ ...g.data, visit: s1.serializeVisit() }))));
+        const c2 = document.createElement('div');
+        const s2 = new Story(c2, g2, { navigate() {}, onDeath() {}, notify() {} });
+        s2.resume(el, tc.book, tc.sec, g2.data.visit, null);
+        ok(`task181 ${tag}: resume restores the pending decision without committing ${tc.what}`,
+           tc.probe(g2, c2) === 0 && !!c2.querySelector('.keep-roll') && !!c2.querySelector('.blessing-reroll'),
+           'probe=' + tc.probe(g2, c2));
+
+        // Keep it on the resumed visit: exactly one commit…
+        g2.setVisitProvider(() => s2.serializeVisit());
+        c2.querySelector('.keep-roll').click();
+        ok(`task181 ${tag}: keeping after a resume commits ${tc.what} exactly once`,
+           tc.probe(g2, c2) === tc.worth, 'probe=' + tc.probe(g2, c2));
+
+        // …and a second reload replays none of it.
+        const g3 = new GameState(sanitizeData(JSON.parse(JSON.stringify({ ...g2.data, visit: s2.serializeVisit() }))));
+        const c3 = document.createElement('div');
+        const s3 = new Story(c3, g3, { navigate() {}, onDeath() {}, notify() {} });
+        s3.resume(el, tc.book, tc.sec, g3.data.visit, null);
+        ok(`task181 ${tag}: resume of the kept result replays nothing`,
+           tc.probe(g3, c3) === tc.worth && !c3.querySelector('.keep-roll'), 'probe=' + tc.probe(g3, c3));
+      }
+      window.__FL_INSTANT_DICE__ = false;
+    }
+
     // --- task 154: begin()'s autosaves are atomic — no mid-begin save pairs the NEW
     // section with the PREVIOUS visit's ctx/entry-tick baseline ---
     // begin() clears vars/potion/fight bonuses and arrives at the dock BEFORE it used to
@@ -2098,6 +2161,73 @@ export async function run(ctx) {
          (() => { const s = new Set(['a']); return rules.viewPendingVars({ rerollPendingVars: s }) === s; })());
       ok('task175: viewPendingVars — merges both sets',
          (() => { const u = rules.viewPendingVars({ whileIterPendingVars: new Set(['a']), rerollPendingVars: new Set(['b']) }); return u.has('a') && u.has('b'); })());
+    }
+
+    // --- task 181: the provisional-dependency planners (DOM-free) ---------------------
+    // The invariant "an eligible reroll result is wholly provisional until it settles" is only
+    // as good as the dependency trace behind it: which identifiers a value reads, which vars a
+    // <set> chain makes provisional, and the three refusal points (condition / set / effect).
+    {
+      const vars = (s) => JSON.stringify(rules.expressionVars(s));
+      ok('task181: expressionVars — a blank/literal reads nothing', vars('') === '[]' && vars('150') === '[]' && vars('-3') === '[]');
+      ok('task181: expressionVars — a dice expression is not a variable read', vars('2d6') === '[]' && vars('1d6+2') === '[]');
+      ok('task181: expressionVars — a bare/negated var', vars('roll') === '["roll"]' && vars('-hang') === '["hang"]');
+      ok('task181: expressionVars — every identifier in an expression', vars('(rank+1)-roll') === '["rank","roll"]' && vars('roll*100') === '["roll"]');
+
+      // provisionalVarClosure: a value derived from a provisional var is provisional, transitively.
+      const derived = parse('<section><random dice="2" var="roll"/><set var="cash" value="roll*100"/><set var="more" value="cash+1"/><set var="flat" value="7"/></section>');
+      const clos = rules.provisionalVarClosure(derived, new Set(['roll']));
+      ok('task181: provisionalVarClosure — traces a derived <set> transitively',
+         clos.has('roll') && clos.has('cash') && clos.has('more') && !clos.has('flat'), JSON.stringify([...clos]));
+      ok('task181: provisionalVarClosure — an empty seed stays empty', rules.provisionalVarClosure(derived, new Set()).size === 0);
+      ok('task181: provisionalVarClosure — an independent seed grows nothing',
+         (() => { const c = rules.provisionalVarClosure(derived, new Set(['zz'])); return c.size === 1 && c.has('zz'); })());
+
+      // unsettledRollVars: the roll vars this section has still to fill, plus their derivations.
+      const gU = GameState.create({ name: 'UV181', gender: 'm', profession: 'Warrior', book: 1, adv });
+      const un = rules.unsettledRollVars(derived, gU);
+      ok('task181: unsettledRollVars — an unfilled roll var carries its derived values',
+         un.has('roll') && un.has('cash') && un.has('more'), JSON.stringify([...un]));
+      gU.setVar('roll', 10);
+      ok('task181: unsettledRollVars — a filled roll var settles its whole chain',
+         rules.unsettledRollVars(derived, gU).size === 0);
+
+      // conditionPending: the var read directly, or through a comparator.
+      const pv = new Set(['x']);
+      ok('task181: conditionPending — a condition on a provisional var is undecided',
+         rules.conditionPending(parse('<if var="x" equals="3"/>'), pv) === true);
+      ok('task181: conditionPending — a comparator reading a provisional var is undecided',
+         rules.conditionPending(parse('<if var="a" greaterthan="x"/>'), pv) === true);
+      ok('task181: conditionPending — an unrelated condition decides normally',
+         rules.conditionPending(parse('<if var="a" equals="3"/>'), pv) === false
+         && rules.conditionPending(parse('<if codeword="Dove"/>'), pv) === false);
+      ok('task181: conditionPending — no provisional vars → never undecided',
+         rules.conditionPending(parse('<if var="x" equals="3"/>'), null) === false
+         && rules.conditionPending(parse('<if var="x" equals="3"/>'), new Set()) === false);
+
+      // setPending: only the READ side defers — a set whose TARGET a roll owns is the sentinel
+      // idiom (§6.628 y=7, §2.138 open=1) and must still apply on entry.
+      ok('task181: setPending — a <set> reading a provisional var defers',
+         rules.setPending(parse('<set var="cash" value="x*100"/>'), pv) === true);
+      ok('task181: setPending — a literal <set> applies even when its target is provisional',
+         rules.setPending(parse('<set var="x" value="7"/>'), pv) === false);
+      ok('task181: setPending — a non-set node is never a pending set',
+         rules.setPending(parse('<tick shards="x"/>'), pv) === false);
+
+      // effectPendingVars unions the decision boundary with the unfilled-roll-var set; a
+      // condition deliberately consults only the former (viewPendingVars).
+      ok('task181: effectPendingVars — unions the boundary and unfilled sets',
+         (() => { const u = rules.effectPendingVars({ rerollPendingVars: new Set(['a']), unsettledVars: new Set(['b']) }); return u.has('a') && u.has('b'); })());
+      ok('task181: effectPendingVars — returns the unfilled set alone when nothing is pending',
+         (() => { const s = new Set(['b']); return rules.effectPendingVars({ unsettledVars: s }) === s; })());
+      ok('task181: effectPendingVars — null when every set is empty', rules.effectPendingVars({}) === null);
+
+      // pendingRollVar defers an effect keyed on any unsettled var — including a DERIVED one,
+      // which is what stopped §6.352's `<gain shards="s">` banking 0 and memoising the award away.
+      ok('task181: pendingRollVar — an effect on a derived unsettled var defers',
+         rules.pendingRollVar(parse('<gain shards="s"/>'), gU, derived, new Set(['s'])) === 's');
+      ok('task181: pendingRollVar — a literal amount never defers',
+         rules.pendingRollVar(parse('<gain shards="20"/>'), gU, derived, new Set(['s'])) === null);
     }
 
     // --- task 119 (phase 3): groupPlan — <group> classification ----------------------

@@ -18,7 +18,10 @@ import { GameState } from './state.js';
 import { ABILITY_LABEL } from './rules.js';
 import { bookTitle, availableBooks, loadBook, getSection } from './data.js';
 import { modal, mountDialog } from './ui.js';
-import { computeOutcomeBlessings, pendingRerollBlessings } from './render-rules.js';
+import {
+  computeOutcomeBlessings, pendingRerollBlessings, provisionalVarClosure,
+  unsettledRollVars, conditionPending, viewPendingVars,
+} from './render-rules.js';
 import {
   computeFightGate, computeEscapeCodewords, isDeferredDeadChain,
   computeRollGate, computeTransferGate, computeBuyGate,
@@ -289,10 +292,17 @@ export class Story {
     // passed; cleared by begin() on a successful arrival. { book, section } or null.
     this._pendingRetry = null;
     // Pending blessing-reroll decisions this render (task 175): a resolved roll's path → its
-    // eligible blessings, and the vars those rolls feed. Rebuilt at the top of every render()
-    // by _scanPendingRerolls; initialised here so any pre-render read is safe.
+    // eligible blessings, and the vars those rolls (and the <set>s deriving from them, task
+    // 181) feed. Rebuilt at the top of every render() by _scanPendingRerolls; initialised here
+    // so any pre-render read is safe. pendingRerollDecision records that such a decision's
+    // controls actually rendered this pass, which is what locks the onward navigation.
     this.rerollPendingRolls = new Map();
     this.rerollPendingVars = new Set();
+    this.pendingRerollDecision = false;
+    // The vars a roll in this section has yet to fill, plus everything derived from them
+    // (task 181) — an effect keyed on one waits rather than applying against 0 and memoising
+    // that no-op away. Rebuilt per render() from state, so it is order-independent.
+    this.unsettledVars = new Set();
   }
 
   // Snapshot the current visit so a later <return> can restore it (task 110). Null
@@ -582,18 +592,26 @@ export class Story {
     // nested inside a preceding `<p>` (a very common structure).
     this.activeRoll = null;
     this.blocked = false; // set true by an unresolved forced economic payment
-    // Rerollable-result decision boundary (task 175): a resolved roll the player still holds
-    // an eligible blessing reroll for is a PENDING decision — its <success>/<failure>/<outcome>
-    // branch, that branch's effects/awards/redirect, and the roll-gate's onward choices must
-    // stay uncommitted until the player keeps the result or exhausts the rerolls. Pre-scan the
-    // section's stored rolls BEFORE the walk so a var-dependent effect or branch is suppressed
-    // regardless of document order (a <lose ="x"> can precede its feeding <random var="x">).
-    // rerollPendingRolls maps a pending roll's path → its eligible blessings; rerollPendingVars
-    // holds the vars those rolls feed. Both are empty for a player holding no reroll blessing,
-    // so the pre-175 immediate-reveal behaviour is unchanged for the common case.
+    // Rerollable-result decision boundary (tasks 175 + 181): a resolved roll the player still
+    // holds an eligible blessing reroll for is a PENDING decision, and its result is wholly
+    // provisional — its <success>/<failure>/<outcome> branch, that branch's effects/awards/
+    // redirect, any condition or derived value reading its var, a <while> pass it drives, and
+    // the section's onward navigation all stay uncommitted until the player keeps the result or
+    // exhausts the rerolls. Pre-scan the section's stored rolls BEFORE the walk so a dependent
+    // effect, condition or branch is suppressed regardless of document order (a <lose
+    // multiple="x"> can precede its feeding <random var="x">). rerollPendingRolls maps a
+    // pending roll's path → its eligible blessings; rerollPendingVars holds the provisional
+    // vars (roll-written plus everything derived from them). Both are empty for a player
+    // holding no reroll blessing, so the pre-175 immediate-reveal behaviour is unchanged for
+    // the common case.
     this.rerollPendingRolls = new Map();
     this.rerollPendingVars = new Set();
+    this.pendingRerollDecision = false;
     this._scanPendingRerolls(el);
+    // The other half of the same dependency trace (task 181): the roll vars this section has
+    // still to fill, and every value derived from them. An effect keyed on such a var defers
+    // instead of applying against 0 — which used to memoise seven sections' awards away.
+    this.unsettledVars = unsettledRollVars(el, this.state);
     // An economic <lose> is treated as an opt-in *payment* only when the section
     // offers a way to avoid it — an optional (force="f") "turn back"/decline goto.
     // Without such an escape the loss is unavoidable (e.g. §106 "buy the pearls"),
@@ -642,6 +660,7 @@ export class Story {
     this.applyTransferGate(flow); // gate onward nav on an unresolved forced transfer (task 107)
     this.applyBuyGate(flow); // gate onward nav on an unrun forced buy (task 136.5)
     this.surfaceExtraChoices(flow); // persistent <extrachoice> options active here (task 32)
+    this.applyPendingRerollGate(flow); // hold every exit while a result is provisional (task 181)
     // Draw the box row now (after the walk) so a <tick/> applied this visit reads
     // as ☑ immediately; it sits above the prose, beside the section number (task 70).
     if (nBoxes > 0) {
@@ -708,14 +727,16 @@ export class Story {
   }
 
   // Pre-scan this section's stored rolls for pending blessing-reroll decisions (task 175),
-  // populating rerollPendingRolls (path → eligible blessings) and rerollPendingVars (the vars
-  // those rolls feed) BEFORE the render walk. Reading ctx.rolls (not a DOM walk) keeps every
-  // pending roll known up front, so a branch or var-dependent effect stays suppressed even
-  // when it precedes its feeding roll in document order. pathNodes (from the prior render)
+  // populating rerollPendingRolls (path → eligible blessings) and rerollPendingVars (those
+  // rolls' vars, closed over the section's derived <set> values — task 181) BEFORE the render
+  // walk. Reading ctx.rolls (not a DOM walk) keeps every pending roll known up front, so a
+  // branch, condition or dependent effect stays suppressed even when it precedes the feeding
+  // roll in document order. pathNodes (from the prior render)
   // resolves each roll's node; a resumed visit has no pathNodes yet, so fall back to the
   // positional path. Only 'roll@' entries are rolls (pick@ picker choices are skipped).
   _scanPendingRerolls(sectionEl) {
     if (!this.ctx || !sectionEl) return;
+    const vars = new Set();
     for (const [key, stored] of this.ctx.rolls) {
       if (typeof key !== 'string' || !key.startsWith('roll@') || !stored || stored.accepted) continue;
       const path = key.slice(5);
@@ -725,8 +746,16 @@ export class Story {
       if (!blessings.length) continue;
       this.rerollPendingRolls.set(path, blessings);
       const v = node.getAttribute('var');
-      if (v) this.rerollPendingVars.add(v);
+      // A roll inside a <while> pass owns its var only for THAT iteration (the `~i` path
+      // namespace): §6.700's loop-entry `<if var="x" equals="6">` gate reads the roll made
+      // before the loop, so a pending re-roll inside the loop must not suppress the gate that
+      // is showing it. renderWhile/markWhilePending scope those vars per pass instead
+      // (whileIterPendingVars, task 100), and viewPendingVars unions the two. (task 181)
+      if (v && !path.includes('~')) vars.add(v);
     }
+    // Trace each provisional roll var through the section's derived <set> values, so a
+    // dependent condition, effect or branch defers wherever it sits in document order. (task 181)
+    this.rerollPendingVars = provisionalVarClosure(sectionEl, vars);
   }
 
   makeIllustration(name, title = '') {
@@ -816,6 +845,12 @@ export class Story {
       // hidden, so the reader keeps the full context ("If you have codeword X…").
       if (tag === 'if' || tag === 'elseif' || tag === 'else') {
         let active = false;
+        // A condition reading a still-provisional reroll result is UNDECIDED (task 181):
+        // §2.389's `<if var="x" equals="3"><tick shards="150"/>` must neither award nor arm a
+        // Take control before the player keeps the die. Like the fight-outcome chain below, an
+        // undecided branch holds the WHOLE chain inactive — otherwise a later <else> would slip
+        // active in its place — and the post-decision rerender resolves it for real.
+        const pendingCond = conditionPending(node, viewPendingVars(this));
         if (tag === 'if' || !chainActive) {
           chainActive = true;
           // A dead=-gated chain sitting AFTER an unresolved fight is that fight's
@@ -824,13 +859,15 @@ export class Story {
           // confiscate-return <transfer> (book2/462) — mid-fight. Hold the WHOLE chain
           // inactive until the fight is decided (won or lost); the else must not slip
           // active either, so the flag rides the whole chain. (task 39)
-          chainDeferred = tag === 'if' && isDeferredDeadChain(node, this.sectionFights);
+          chainDeferred = pendingCond || (tag === 'if' && isDeferredDeadChain(node, this.sectionFights));
           active = chainDeferred ? false : (tag === 'else' ? true : evaluateCondition(node, this.state));
           chainDone = active;
         } else if (chainDeferred) {
-          active = false; // still inside the deferred (fight-outcome) chain
+          active = false; // still inside the deferred (fight-outcome / provisional-result) chain
         } else if (chainDone) {
           active = false; // a previous branch already matched
+        } else if (pendingCond) {
+          chainDeferred = true; active = false; // an undecided <elseif> holds the rest of the chain (task 181)
         } else if (tag === 'else') {
           active = true; chainDone = true;
         } else { // elseif with no prior match
@@ -1181,6 +1218,9 @@ export class Story {
     // only hardens a latent path. (task 150)
     const tag = node.tagName.toLowerCase();
     if (tag === 'elseif' || tag === 'else') return null;
+    // Undecided while it reads a provisional reroll result — the same hold the walker's
+    // chain applies, so a choice-label/group conditional can't commit early either. (task 181)
+    if (conditionPending(node, viewPendingVars(this))) return null;
     const ok = evaluateCondition(node, this.state);
     const chainKey = 'chain@' + path;
     if (ok) {
@@ -1356,6 +1396,25 @@ export class Story {
       btn.disabled = true;
       btn.classList.add('gated');
       btn.title = 'Resolve the transfer above first.';
+    });
+  }
+
+  // ---- provisional-result gating (task 181) --------------------------------
+  // A resolved roll the player can still reroll is an open DECISION, so no exit may commit
+  // while it stands: §2.698 would otherwise leave its plain "turn to 222" live beside the
+  // unbanked Shard count, and §5.218's player could walk away from an unaccepted 3-Stamina
+  // failure. Disable every rendered exit (goto/choice/return/extra choice — the Continue link
+  // of a revealed branch included) until the result is kept or rerolled. Keyed on
+  // pendingRerollDecision, set by the reroll/Keep controls actually rendering, so a stored
+  // pending roll inside an untaken (grayed) branch can never lock a section with no way to
+  // settle it. Only ADDS a disable, so it composes with the fight/roll/transfer/buy gates.
+  applyPendingRerollGate(flow) {
+    if (!this.pendingRerollDecision) return;
+    flow.querySelectorAll('.goto, .choice').forEach((btn) => {
+      if (btn.disabled) return; // already gated for another reason — keep its own reason
+      btn.disabled = true;
+      btn.classList.add('gated');
+      btn.title = 'Keep or reroll the result above first.';
     });
   }
 

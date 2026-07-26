@@ -374,7 +374,15 @@ export function choiceGate(state, node, view) {
   return { reasons, isSail, cost, coinLabel, payment: { pay, cost, currency, foreignCoin, item: itemReq, itemTags } };
 }
 
-// ---- rerollable-result decision boundary (task 175) -------------------------
+// ---- rerollable-result decision boundary (tasks 175 + 181) ------------------
+//
+// ONE invariant, decided here and honoured by every view: while the player still holds an
+// eligible reroll for a resolved roll, that result is WHOLLY PROVISIONAL. Nothing it feeds
+// may commit — not a branch, a condition, an effect's magnitude, a derived <set>, a control,
+// a redirect, a <while> pass, or the section's onward navigation — until the player keeps the
+// result or the replacement roll settles. pendingRerollBlessings decides which results are
+// provisional; expressionVars/provisionalVarClosure trace what depends on them; conditionPending/
+// setPending/pendingRollVar/branchResolved are the four places a dependency is refused.
 
 // The rerollBlessings opts for a resolved roll, derived from the node kind and the stored
 // result. difficulty/rankcheck are ability CHECKS (a failed ability roll may be rerolled by
@@ -400,10 +408,94 @@ export function pendingRerollBlessings(state, node, stored) {
   return state.rerollBlessings(rerollOptsFor(node, stored));
 }
 
+// The variable identifiers an attribute value would READ once resolved (resolveValue /
+// evalExpression): none for a blank, a plain integer or a dice expression, otherwise every
+// bare identifier in the expression. This is how a provisional roll result is traced through
+// the values derived from it (task 181). Sheet keywords (stamina/rank/…) are left in the list:
+// no roll in this corpus names its var after one, so a keyword can never itself be pending.
+export function expressionVars(str) {
+  const s = String(str == null ? '' : str).trim();
+  if (s === '' || /^-?\d+$/.test(s) || isDiceExpr(s)) return [];
+  return s.match(/[A-Za-z_][A-Za-z0-9_]*/g) || [];
+}
+
+// Every variable whose value is still PROVISIONAL this render (task 181): `seed` (the vars a
+// pending reroll decision's roll wrote) grown through the section's <set var="V" value="expr">
+// nodes, transitively — a value derived from a provisional var is itself provisional
+// (§2.698's `roll*100` → cash, §2.684's `(rank+1)-roll` → result). The scan is deliberately
+// position- and branch-blind: an over-wide set only DEFERS work until the decision settles,
+// whereas a missed dependency would commit a rejected result.
+export function provisionalVarClosure(sectionEl, seed) {
+  const out = new Set(seed || []);
+  if (!sectionEl || !out.size) return out;
+  const sets = Array.from(sectionEl.querySelectorAll('set[var][value]'));
+  for (let pass = 0; pass <= sets.length; pass++) {
+    let grew = false;
+    for (const s of sets) {
+      const v = s.getAttribute('var');
+      if (!v || out.has(v)) continue;
+      if (expressionVars(s.getAttribute('value')).some((id) => out.has(id))) { out.add(v); grew = true; }
+    }
+    if (!grew) break;
+  }
+  return out;
+}
+
+// Is this <if>/<elseif> condition undecided because it reads a provisional variable? (task 181)
+// §2.389's `<if var="x" equals="3"><tick shards="150"/>` must neither award the 150 Shards nor
+// expose a Take control while x is a pending reroll result. The renderer holds the WHOLE
+// if/elseif/else chain when any branch is undecided, so no later <else> slips active instead.
+export function conditionPending(node, pendingVars) {
+  if (!pendingVars || !pendingVars.size) return false;
+  const v = node.getAttribute('var');
+  if (v != null && pendingVars.has(String(v).trim())) return true;
+  for (const a of ['equals', 'greaterthan', 'lessthan', 'shards', 'ticks']) {
+    const raw = node.getAttribute(a);
+    if (raw != null && expressionVars(raw).some((id) => pendingVars.has(id))) return true;
+  }
+  return false;
+}
+
+// Is this <set> itself unsettled — does its expression READ a var that is not settled yet
+// (task 181)? Such a set must not write: §2.698's `<set var="cash" value="roll*100">` would
+// otherwise bank a rejected roll's Shard value through the `<tick shards="cash">` beneath it,
+// and §2.684's `result` would resolve its <outcomes> branch. Rendered inert, it applies on the
+// render after the result settles; a chain (`b = a+1` over a derived `a`) defers because the
+// closure already holds `a`. Only the READ side counts — a set whose TARGET var a roll owns is
+// the sentinel idiom (§6.628's `y=7` "not yet rolled", §2.138's `open=1` key shortcut) and must
+// still apply on entry; task 61's rollOwned check is what freezes it afterwards.
+export function setPending(node, pendingVars) {
+  if (!pendingVars || !pendingVars.size) return false;
+  if (node.tagName.toLowerCase() !== 'set') return false;
+  return expressionVars(node.getAttribute('value')).some((id) => pendingVars.has(id));
+}
+
+// The vars a roll in this section is going to fill but has NOT yet (task 181): every
+// <random|rankcheck|difficulty var="V"> still unset, grown through the derived <set> values
+// that read them. pendingRollVar has always deferred an effect keyed on an unfilled roll var
+// DIRECTLY (§521's `<lose multiple="x">` above its `<random var="x">`); the derivation step is
+// what was missing, and it silently voided seven awards. §6.352's `<set var="s" value="x*5"/>`
+// ran on entry with x unset, so the `<gain shards="s">` beneath it banked 0 and MEMOISED that
+// no-op — the 5-30 Shards could never arrive (likewise §2.266/§2.698/§6.17/§6.86/§6.488/§6.625).
+// Treating s as unfilled until x lands makes the award wait for the real value.
+// Computed once per render from state, so it is order-independent within the walk.
+export function unsettledRollVars(sectionEl, state) {
+  const seed = new Set();
+  if (!sectionEl) return seed;
+  sectionEl.querySelectorAll('random[var], rankcheck[var], difficulty[var]').forEach((r) => {
+    const v = r.getAttribute('var');
+    if (v && !state.hasVar(v)) seed.add(v);
+  });
+  return provisionalVarClosure(sectionEl, seed);
+}
+
 // The union of a view's "not yet resolved this render" variable sets: the <while> pass's
-// re-rolled vars (whileIterPendingVars, task 100) and a pending blessing-reroll decision's
-// roll var (rerollPendingVars, task 175). Either may be absent; returns null when both are
-// empty so callers keep the cheap "no pending vars" path.
+// re-rolled vars (whileIterPendingVars, task 100) and a provisional blessing-reroll decision's
+// vars (rerollPendingVars — the roll var plus everything derived from it, tasks 175/181). This
+// is the DECISION-BOUNDARY set: what a condition, a branch or the onward navigation must not
+// read yet. Either may be absent; returns null when both are empty so callers keep the cheap
+// "no pending vars" path. (A derived <set> inside a <while> body would need the per-pass set
+// closed over too; no section in the corpus writes one, so the pass set stays direct.)
 export function viewPendingVars(view) {
   const a = view.whileIterPendingVars, b = view.rerollPendingVars;
   const aHas = a && a.size, bHas = b && b.size;
@@ -411,6 +503,19 @@ export function viewPendingVars(view) {
   if (aHas && !bHas) return a;
   if (bHas && !aHas) return b;
   const u = new Set(a); for (const v of b) u.add(v); return u;
+}
+
+// The vars an EFFECT (or a derived <set>) must not read yet: the decision-boundary set above
+// plus the roll vars this section has still to fill (unsettledRollVars, held on the view as
+// `unsettledVars`). A *condition* deliberately does NOT consult the unfilled set — an unwritten
+// var reads as 0 and its branch simply doesn't match, which is the long-standing behaviour —
+// whereas an effect that applies against 0 memoises its own award away. (task 181)
+export function effectPendingVars(view) {
+  const base = viewPendingVars(view);
+  const u = view.unsettledVars;
+  if (!u || !u.size) return base;
+  if (!base) return u;
+  const out = new Set(base); for (const v of u) out.add(v); return out;
 }
 
 // ---- branch resolution (success/failure/outcomes — tasks 50/104/108/109/122) --
@@ -551,13 +656,14 @@ export function branchPlan(state, ctx, node, roll, pendingVars = null) {
 // It returns a verdict {mode, …} the view merely switches on. The `view` argument is the
 // renderer's per-visit rule surface — any object exposing { state, sectionEl, ctx,
 // inactive, outcomeBlessings, escapeCodewords, sectionFights, fightGate, hasDecline,
-// whileIterPendingVars } (the Story instance satisfies it; tests pass a plain object).
+// whileIterPendingVars, rerollPendingVars, unsettledVars } (the Story instance satisfies it;
+// tests pass a plain object — the three var sets are optional and default to empty).
 
 // The name of a not-yet-set variable that this effect's magnitude depends on and that a
 // roll in this section will fill — or null. Only such vars defer (see classifyPassive): a
 // literal, a dice expression, or an already-set var applies now, and a var no roll here
 // fills is left to apply (harmlessly as 0) rather than hang.
-export function pendingRollVar(node, state, sectionEl, whileIterPendingVars = null) {
+export function pendingRollVar(node, state, sectionEl, pendingVars = null) {
   const QTY = ['multiple', 'shards', 'stamina', 'staminato', 'amount', 'count', 'itemAt', 'quantity'];
   for (const a of QTY) {
     const v = node.getAttribute(a);
@@ -565,10 +671,12 @@ export function pendingRollVar(node, state, sectionEl, whileIterPendingVars = nu
     const s = String(v).trim();
     if (/^-?\d/.test(s) || isDiceExpr(s)) continue; // numeric literal or dice expr
     const bare = s.replace(/^[+-]/, '');            // a signed var ref ("-hang") → "hang" (task 50)
-    // Inside a <while> pass, a var this iteration re-rolls is STALE until this
-    // pass's roll resolves — defer even though hasVar() is true from a prior pass
-    // (§6.700's per-iteration `<lose stamina="x">` must use this six, not the last). (task 100)
-    if (whileIterPendingVars && whileIterPendingVars.has(bare)) return bare;
+    // `pendingVars` (effectPendingVars) holds every var whose value is not settled for THIS
+    // render, so a var that hasVar() reports set must still defer: one a <while> pass re-rolls
+    // is stale until that pass resolves (§6.700's per-iteration `<lose stamina="x">` must use
+    // this six, not the last — task 100); one owned by a provisional reroll decision, or
+    // derived from an unfilled roll var, is not committed yet (task 181).
+    if (pendingVars && pendingVars.has(bare)) return bare;
     if (state.hasVar(bare)) continue;               // already set (e.g. by an earlier <set>/roll)
     if (sectionEl && sectionEl.querySelector(`random[var="${bare}"], rankcheck[var="${bare}"], difficulty[var="${bare}"]`)) return bare;
   }
@@ -643,7 +751,12 @@ export function classifyPassive(node, view) {
   // section has not filled yet (e.g. §521 "<lose multiple="x">" sitting above its
   // "<random var="x">"). Applying now would use x=0 and then memoise that no-op;
   // instead show the words and let the post-roll rerender apply the real count.
-  if (pendingRollVar(node, view.state, view.sectionEl, viewPendingVars(view))) {
+  // A <set> deriving its value from such a var defers the same way (task 181), so a
+  // provisional (or not-yet-rolled) result cannot leak into the section through a computed
+  // variable — nor bank a 0 that memoises the real award away.
+  const pendingVars = effectPendingVars(view);
+  if (setPending(node, pendingVars)) return { mode: 'inert', showWords: !hidden };
+  if (pendingRollVar(node, view.state, view.sectionEl, pendingVars)) {
     return { mode: 'inert', showWords: !hidden };
   }
 

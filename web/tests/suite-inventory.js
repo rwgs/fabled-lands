@@ -1106,6 +1106,160 @@ export async function run(ctx) {
       ok('§T175C only the kept (high) outcome fires, exactly once', cc.g.data.stamina === 17 && /HIGH/.test(cc.c.textContent), 'stamina=' + cc.g.data.stamina);
     }
 
+    // --- task 181: a provisional result is provisional EVERYWHERE, not just in its branch ---
+    // Task 175 held the <success>/<failure>/<outcome> branch, but the boundary was not general:
+    // an ordinary <if var> chain read the live roll variable, a stored pending roll let a
+    // <while> advance, and a `<set value="roll*100">` committed a derived value. These are the
+    // five real sections that leaked, driven through the deterministic PRNG.
+    {
+      const liveRoll = (c) => Array.from(c.querySelectorAll('.btn-roll')).find((b) => !b.disabled);
+      const keepBtn = (c) => c.querySelector('.keep-roll');
+      const luckBtn = (c) => Array.from(c.querySelectorAll('.blessing-reroll')).find((b) => /Luck/i.test(b.textContent));
+      const exits = (c) => Array.from(c.querySelectorAll('.goto, .choice'));
+      const mk181 = async (book, sec, setup) => {
+        const g = GameState.create({ name: 'T181', gender: 'm', profession: 'Warrior', book, adv });
+        g.ephemeral = true; g.data.stamina = 999; g.data.staminaMax = 999; g.addBlessing('luck');
+        if (setup) setup(g);
+        const c = document.createElement('div');
+        const st = new Story(c, g, { navigate() {}, onDeath() {}, notify() {} });
+        g.setVisitProvider(() => st.serializeVisit());
+        st.begin(await data.getSection(book, sec), book, sec);
+        return { g, c, st };
+      };
+      // Seeds (asserted, so a PRNG change fails loudly here rather than misreading a scenario):
+      // one die — 14→3, 7→1, 4→6; two dice — 5→10, 30→12.
+      eng.seedRng(14); ok('task181: seed 14 rolls a 3', eng.rollD6() === 3);
+      eng.seedRng(7); ok('task181: seed 7 rolls a 1', eng.rollD6() === 1);
+      eng.seedRng(4); ok('task181: seed 4 rolls a 6', eng.rollD6() === 6);
+      eng.seedRng(5); ok('task181: seed 5 rolls 2d6 = 10', eng.rollDice(2).total === 10);
+      eng.seedRng(30); ok('task181: seed 30 rolls 2d6 = 12', eng.rollDice(2).total === 12);
+      eng.seedRng(null);
+
+      // (§2.389) the wizards' tribute is a plain <if var="x" equals="N"> table, so the matched
+      // row used to grant its 150 Shards — or expose its Take control — the instant the die
+      // landed, while a Luck reroll was still on offer.
+      {
+        const a = await mk181(2, '389', (g) => { g.data.shards = 0; });
+        eng.seedRng(14); liveRoll(a.c).click(); await settle42(); eng.seedRng(null); // x = 3 → 150 Shards
+        ok('§2.389 a provisional die grants no Shards', a.g.data.shards === 0, 'shards=' + a.g.data.shards);
+        ok('§2.389 a provisional die exposes no live award control',
+           !!keepBtn(a.c) && !Array.from(a.c.querySelectorAll('.take-item')).some((b) => !b.disabled));
+        ok('§2.389 a provisional die locks the section exit', exits(a.c).length > 0 && exits(a.c).every((b) => b.disabled));
+        eng.seedRng(7); luckBtn(a.c).click(); eng.seedRng(null); // reroll → x = 1 (the scarab amulet row)
+        ok('§2.389 the rejected row never paid its 150 Shards', a.g.data.shards === 0, 'shards=' + a.g.data.shards);
+        ok('§2.389 the kept row offers its own award, exactly one', !keepBtn(a.c)
+           && Array.from(a.c.querySelectorAll('.take-item')).filter((b) => !b.disabled).length === 1);
+        const b = await mk181(2, '389', (g) => { g.data.shards = 0; });
+        eng.seedRng(14); liveRoll(b.c).click(); await settle42(); eng.seedRng(null);
+        keepBtn(b.c).click();
+        ok('§2.389 keeping the die pays the 150 Shards exactly once', b.g.data.shards === 150, 'shards=' + b.g.data.shards);
+        b.st.rerender();
+        ok('§2.389 a re-render after keeping does not pay again', b.g.data.shards === 150, 'shards=' + b.g.data.shards);
+      }
+
+      // (§5.218) the troll's grapple: a failed COMBAT check costs 3 Stamina and opens a
+      // <while> of re-attempts. A stored pending failure used to let the loop advance, so the
+      // player could start (and escape through) later attempts without accepting the earlier
+      // 3-Stamina losses.
+      {
+        const t = await mk181(5, '218', (g) => { g.setAbilityFlag('combat', 'cursed', true); }); // every COMBAT roll fails
+        const st0 = t.g.data.stamina;
+        liveRoll(t.c).click(); await settle42();                    // fail the grapple → provisional
+        ok('§5.218 a provisional grapple failure costs no Stamina', t.g.data.stamina === st0, 'stamina=' + t.g.data.stamina);
+        ok('§5.218 a provisional failure opens no wriggle-free pass', !t.c.querySelector('.while-iter') && !!keepBtn(t.c));
+        keepBtn(t.c).click();
+        ok('§5.218 keeping the failure costs 3 Stamina once and opens the loop',
+           t.g.data.stamina === st0 - 3 && !!t.c.querySelector('.while-iter'), 'stamina=' + t.g.data.stamina);
+        liveRoll(t.c).click(); await settle42();                    // fail the first loop attempt → provisional
+        ok('§5.218 a provisional loop failure costs no further Stamina', t.g.data.stamina === st0 - 3, 'stamina=' + t.g.data.stamina);
+        ok('§5.218 the loop holds at ONE pending pass (no next attempt yet)',
+           t.c.querySelectorAll('.while-iter').length === 1 && !t.g.hasVar('free') && !!keepBtn(t.c));
+        t.g.setAbilityFlag('combat', 'cursed', false); t.g.data.abilities.combat = 12; // now the reroll succeeds
+        luckBtn(t.c).click();
+        ok('§5.218 a successful reroll wriggles free and ends the loop', t.g.hasVar('free') && !!t.c.querySelector('.fight'));
+        ok('§5.218 the rejected loop failure never cost its 3 Stamina', t.g.data.stamina === st0 - 3, 'stamina=' + t.g.data.stamina);
+      }
+
+      // (§6.700) the pine-cone shower: lose the die you roll, and on a six roll again inside a
+      // <while var="y">. A rejected non-six must neither damage, nor set y (stopping the loop).
+      {
+        const p = await mk181(6, '700');
+        const st0 = p.g.data.stamina;
+        eng.seedRng(4); liveRoll(p.c).click(); await settle42(); eng.seedRng(null); // x = 6 → provisional
+        ok('§6.700 a provisional die inflicts no Stamina loss', p.g.data.stamina === st0, 'stamina=' + p.g.data.stamina);
+        ok('§6.700 a provisional die does not open the six-loop', !p.c.querySelector('.while-loop') && !!keepBtn(p.c));
+        keepBtn(p.c).click();
+        ok('§6.700 keeping the six costs 6 Stamina and opens the loop',
+           p.g.data.stamina === st0 - 6 && !!p.c.querySelector('.while-iter'), 'stamina=' + p.g.data.stamina);
+        eng.seedRng(14); liveRoll(p.c).click(); await settle42(); eng.seedRng(null); // loop x = 3 → provisional
+        ok('§6.700 a provisional non-six costs nothing and cannot set y',
+           p.g.data.stamina === st0 - 6 && !p.g.hasVar('y'), `stamina=${p.g.data.stamina} y=${p.g.hasVar('y')}`);
+        ok('§6.700 a provisional non-six cannot stop the loop', p.c.querySelectorAll('.while-iter').length === 1 && !!keepBtn(p.c));
+        eng.seedRng(4); luckBtn(p.c).click(); eng.seedRng(null); // reroll → 6: final (Luck spent)
+        ok('§6.700 the rerolled six costs its 6 and keeps the loop running',
+           p.g.data.stamina === st0 - 12 && !p.g.hasVar('y') && p.c.querySelectorAll('.while-iter').length === 2,
+           `stamina=${p.g.data.stamina} iters=${p.c.querySelectorAll('.while-iter').length}`);
+      }
+
+      // (§2.698) the wight's mound: `<set var="cash" value="roll*100"/>` then
+      // `<tick shards="cash">`. The derived value used to be banked — and the plain "turn to
+      // 222" left live — the moment the dice landed.
+      {
+        const w = await mk181(2, '698', (g) => { g.data.shards = 0; });
+        eng.seedRng(5); liveRoll(w.c).click(); await settle42(); eng.seedRng(null); // 2d6 = 10 → 1000 Shards
+        ok('§2.698 a provisional roll banks no Shards', w.g.data.shards === 0, 'shards=' + w.g.data.shards);
+        ok('§2.698 the derived cash variable is not written while provisional', !w.g.hasVar('cash'), JSON.stringify(w.g.data.vars));
+        ok('§2.698 the plain onward goto is locked while provisional',
+           exits(w.c).length > 0 && exits(w.c).every((b) => b.disabled) && !!keepBtn(w.c));
+        eng.seedRng(30); luckBtn(w.c).click(); eng.seedRng(null); // reroll → 12 → 1200 Shards, final
+        ok('§2.698 only the final roll is banked, exactly once', w.g.data.shards === 1200, 'shards=' + w.g.data.shards);
+        ok('§2.698 the settled result unlocks the onward goto', exits(w.c).some((b) => !b.disabled));
+        w.st.rerender();
+        ok('§2.698 a re-render does not bank the treasure twice', w.g.data.shards === 1200, 'shards=' + w.g.data.shards);
+      }
+
+      // (§2.684) the mermaid net: `<set var="result" value="(rank+1)-roll"/>` drives a var-keyed
+      // <success>/<failure>. The derived branch used to reveal (and offer its redirect) before
+      // the roll was kept.
+      {
+        const m = await mk181(2, '684', (g) => { g.data.rank = 3; });
+        eng.seedRng(4); liveRoll(m.c).click(); await settle42(); eng.seedRng(null); // roll 6 → result -2 → failure
+        ok('§2.684 neither derived branch reveals while the roll is provisional',
+           !/Catch her in the net|She gets away/.test(m.c.textContent) && !!keepBtn(m.c), m.c.textContent.replace(/\s+/g, ' ').slice(-90));
+        ok('§2.684 the derived result variable is not written while provisional', !m.g.hasVar('result'), JSON.stringify(m.g.data.vars));
+        eng.seedRng(7); luckBtn(m.c).click(); eng.seedRng(null); // reroll → 1 → result 3 → success
+        ok('§2.684 only the kept roll’s branch reveals', /Catch her in the net/.test(m.c.textContent) && !/She gets away/.test(m.c.textContent));
+        ok('§2.684 the revealed success offers its own redirect', !!Array.from(m.c.querySelectorAll('.goto')).find((b) => /732/.test(b.textContent)));
+      }
+
+      // (derived awards, no blessing) Propagating the dependency through <set> also closes a
+      // leak that had nothing to do with rerolls: the derived <set> ran on ENTRY with its roll
+      // var unset, so `<gain shards="s">` banked 0 and memoised that no-op — the award could
+      // never arrive. Seven sections share the shape; §6.352 (x*5) and §6.488 (x*1000) stand
+      // for them, rolled by a player holding no blessing at all.
+      {
+        const mkPlain = async (book, sec) => {
+          const g = GameState.create({ name: 'T181P', gender: 'm', profession: 'Warrior', book, adv });
+          g.ephemeral = true; g.data.shards = 0;
+          const c = document.createElement('div');
+          const st = new Story(c, g, { navigate() {}, onDeath() {}, notify() {} });
+          g.setVisitProvider(() => st.serializeVisit());
+          st.begin(await data.getSection(book, sec), book, sec);
+          return { g, c, st };
+        };
+        const s352 = await mkPlain(6, '352');
+        ok('§6.352 the derived award is not banked as 0 on entry', s352.g.data.shards === 0 && !s352.g.hasVar('s'), JSON.stringify(s352.g.data.vars));
+        eng.seedRng(1); liveRoll(s352.c).click(); await settle42(); eng.seedRng(null); // x = 4 → 20 Shards
+        ok('§6.352 rolling banks the real 5×die award', s352.g.data.shards === 20, 'shards=' + s352.g.data.shards);
+        s352.st.rerender();
+        ok('§6.352 a re-render does not bank it twice', s352.g.data.shards === 20, 'shards=' + s352.g.data.shards);
+        const s488 = await mkPlain(6, '488');
+        eng.seedRng(4); liveRoll(s488.c).click(); await settle42(); eng.seedRng(null); // x = 6 → 6000 Shards
+        ok('§6.488 the dragon hoard pays x*1000 once rolled', s488.g.data.shards === 6000, 'shards=' + s488.g.data.shards);
+      }
+      eng.seedRng(null);
+    }
+
     // --- task 123: "Immunity to Disease and Poison" is one blessing under two spellings ---
     // The XML grants it as blessing="poison" (§2.133) and blessing="disease" (9 places),
     // and tests/spends it under either spelling. Alias them to one canonical blessing so a
