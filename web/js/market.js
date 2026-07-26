@@ -81,7 +81,25 @@ export function ownsGoods(state, goods) {
   if (kind === 'armour' || (kind === 'weapon' && !named)) {
     return state.data.items.some((it) => it.kind === kind && (it.bonus || 0) === bonus);
   }
-  return state.hasItem(name);
+  return state.findItems(name).some((it) => matchesNamedGoods(it, goods));
+}
+
+/** Does an owned possession satisfy a NAMED (non-armour) sale row? The name alone is not
+ *  enough: §5.244/§4.417 sell a "silver flute" that is a CHARISMA +2 tool for 360 Shards,
+ *  while §5.238's tomb chest holds a plain `<item>` of the same name (upgraded to the real
+ *  tool only in §5.118). The row's descriptor is the contract — the possession must be that
+ *  kind, carry the stated ability, hold at least the stated bonus, and bear the stated tags.
+ *  The books do use the generic `item` kind loosely for things they elsewhere declare as
+ *  weapons (§1.452/§2.493 sell a "pickaxe" awarded as a weapon in §3.376/§3.396/§4.248;
+ *  §3.715 sells a "golden katana" awarded as a weapon), so an `item` row accepts any kind —
+ *  a weapon/tool row does not. A corpus audit found these three names to be the only
+ *  cross-kind collisions on a named sale row, and no tag mismatches at all. (task 187) */
+function matchesNamedGoods(it, goods) {
+  if (goods.kind !== 'item' && it.kind !== goods.kind) return false;
+  if (goods.ability && normalize(it.ability || '') !== normalize(goods.ability)) return false;
+  if ((it.bonus || 0) < (goods.bonus || 0)) return false;
+  const have = (it.tags || []).map(normalize);
+  return (goods.tags || []).map(normalize).filter(Boolean).every((t) => have.includes(t));
 }
 
 /** Buy `goods` for `price` in `currency` (Shards by default). Mutates state.
@@ -160,7 +178,9 @@ export function sellCandidates(state, goods) {
   if (kind === 'armour' || (kind === 'weapon' && !named)) {
     return state.data.items.filter((it) => it.kind === kind && (it.bonus || 0) === bonus).sort((a, b) => itemWeight(a) - itemWeight(b));
   }
-  return state.findItems(name);
+  // A named row takes only possessions its descriptor actually describes (task 187) — the
+  // same predicate ownsGoods uses, so the row can never offer a sale it cannot complete.
+  return state.findItems(name).filter((it) => matchesNamedGoods(it, goods));
 }
 
 /** What a sell needs from the view: the `kind`, the ordered `candidates`, and whether the

@@ -1564,4 +1564,72 @@ export async function run(ctx) {
       ok('task134: picking the empty ship leaves the laden one', g.data.ships.length === 1 && g.data.ships[0].name === 'Laden', JSON.stringify(g.data.ships.map((s) => s.name)));
     }
 
+    // --- task 187: a named sale row is satisfied by its DESCRIPTOR, not just the name -----
+    // ownsGoods()/sellCandidates() fell through to hasItem(name)/findItems(name) for named
+    // non-armour goods, so §5.238's plain <item name="silver flute"> tomb trinket could be
+    // sold on §5.244's CHARISMA +2 tool row for 360 Shards. The row's kind/ability/bonus/tags
+    // are now the contract — while the generic `item` kind stays loose, because the books
+    // themselves sell a weapon pickaxe / golden katana through an <item> row.
+    {
+      const fluteRow = () => goodsFrom(parse('<tool name="silver flute" ability="charisma" bonus="2" buy="400" sell="360"/>'), 'tool', 'silver flute', 2);
+      const mk187 = (item) => {
+        const g = GameState.create({ name:'S187', gender:'m', profession:'Warrior', book:5, adv });
+        g.ephemeral = true; g.data.items = []; g.data.shards = 0;
+        if (item) g.addItem(item);
+        return g;
+      };
+      // The plain tomb trinket (§5.238) is NOT the enchanted flute (§5.118 upgrades it).
+      const gPlain = mk187(makeItem('item', 'silver flute', 0, null, [], [], '5.238'));
+      ok('§187 the plain <item> silver flute cannot be sold on the tool row', sellPlan(gPlain, fluteRow()).candidates.length === 0 && sellTrade(gPlain, fluteRow(), 360).ok === false && gPlain.data.shards === 0 && gPlain.findItems('silver flute').length === 1);
+      // The real §5.118 tool can.
+      const gTool = mk187(makeItem('tool', 'silver flute', 2, 'charisma'));
+      const rTool = sellTrade(gTool, fluteRow(), 360);
+      ok('§187 the CHARISMA +2 tool sells for 360', rTool.ok === true && rTool.item.name === 'silver flute' && gTool.data.shards === 360 && gTool.data.items.length === 0);
+      // Same name, wrong stats: a lesser bonus, a different ability, another kind.
+      ok('§187 a same-name tool with a lower bonus cannot be sold on the +2 row', sellTrade(mk187(makeItem('tool', 'silver flute', 1, 'charisma')), fluteRow(), 360).ok === false);
+      ok('§187 a same-name tool with the wrong ability cannot be sold', sellTrade(mk187(makeItem('tool', 'silver flute', 2, 'magic')), fluteRow(), 360).ok === false);
+      ok('§187 a same-name weapon cannot be sold on a tool row', sellTrade(mk187(makeItem('weapon', 'silver flute', 2)), fluteRow(), 360).ok === false);
+      // A stronger piece still satisfies the row (the price is the row's, as before).
+      ok('§187 a better same-kind piece still satisfies the row', sellTrade(mk187(makeItem('tool', 'silver flute', 3, 'charisma')), fluteRow(), 360).ok === true);
+      // tags= on a row must be borne by the possession (§3.480's "lantern (light)").
+      const lanternRow = () => goodsFrom(parse('<item name="lantern" tags="light" buy="75" sell="60"/>'), 'item', 'lantern', 0);
+      ok('§187 an untagged same-name item cannot be sold on a tags= row', sellTrade(mk187(makeItem('item', 'lantern', 0)), lanternRow(), 60).ok === false);
+      ok('§187 the tagged item can', sellTrade(mk187(makeItem('item', 'lantern', 0, null, ['light'])), lanternRow(), 60).ok === true);
+      // The books' loose `item` rows must keep working: §1.452/§2.493 sell a "pickaxe" that
+      // §3.376/§3.396/§4.248 award as a WEAPON; §3.715 sells a weapon "golden katana".
+      const pickRow = () => goodsFrom(parse('<item name="pickaxe" sell="90"/>'), 'item', 'pickaxe', 0);
+      ok('§187 a weapon pickaxe still sells on the <item> pickaxe row', sellTrade(mk187(makeItem('weapon', 'pickaxe', 2)), pickRow(), 90).ok === true);
+      const katanaRow = () => goodsFrom(parse('<item name="golden katana" sell="3000"/>'), 'item', 'golden katana', 0);
+      ok('§187 a weapon golden katana still sells on the <item> katana row', sellTrade(mk187(makeItem('weapon', 'golden katana', 1)), katanaRow(), 3000).ok === true);
+      // The intentional bonus-tier rules are untouched: any armour of the row's bonus, and
+      // any weapon of an unnamed row's bonus.
+      const leatherRow = () => goodsFrom(parse('<armour name="leather" bonus="1" buy="50" sell="45"/>'), 'armour', 'leather', 1);
+      ok('§187 armour still sells by Defence tier regardless of name', sellTrade(mk187(makeItem('armour', 'leather jerkin', 1)), leatherRow(), 45).ok === true);
+      ok('§187 armour of the wrong tier still cannot be sold', sellTrade(mk187(makeItem('armour', 'leather jerkin', 2)), leatherRow(), 45).ok === false);
+      ok('§187 an unnamed weapon row still sells any weapon of that bonus', sellTrade(mk187(makeItem('weapon', 'hand axe', 1)), wRow(), 50).ok === true);
+      // Live §5.244: the silver-flute row offers no sale for the tomb trinket, but does for
+      // the real tool — and takes exactly 360 Shards' worth.
+      const fluteSell = (c) => {
+        const row = Array.from(c.querySelectorAll('.trade')).find((r) => /^Silver Flute/.test(r.querySelector('.trade-name').textContent));
+        return row ? Array.from(row.querySelectorAll('.btn-mini')).find((b) => /^Sell/.test(b.textContent)) : null;
+      };
+      const mkMarket187 = async (item) => {
+        const g = mk187(item);
+        const c = document.createElement('div');
+        const st = new Story(c, g, { navigate(){}, onDeath(){}, notify(){} });
+        g.setVisitProvider(() => st.serializeVisit());
+        st.begin(await data.getSection(5, '244'), 5, '244');
+        return { g, c };
+      };
+      const mPlain = await mkMarket187(makeItem('item', 'silver flute', 0, null, [], [], '5.238'));
+      const bPlain = fluteSell(mPlain.c);
+      ok('§5.244 shows the silver-flute row with a Sell 360 button', !!bPlain && /^Sell 360/.test(bPlain.textContent), bPlain ? bPlain.textContent : 'none');
+      ok('§5.244 the plain trinket leaves that Sell disabled', bPlain.disabled === true && /none to sell/i.test(bPlain.title));
+      const mTool = await mkMarket187(makeItem('tool', 'silver flute', 2, 'charisma'));
+      const bTool = fluteSell(mTool.c);
+      ok('§5.244 the real tool enables the Sell', bTool.disabled === false);
+      bTool.click();
+      ok('§5.244 selling the tool pays 360 and removes it', mTool.g.data.shards === 360 && mTool.g.findItems('silver flute').length === 0, `shards=${mTool.g.data.shards}`);
+    }
+
 }

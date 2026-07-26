@@ -21,7 +21,7 @@ audit pass.
 
 - [x] 185. Wildcard affliction effects (`ability="*"`) are discarded
 - [x] 186. Automatic highest-bonus equipment can select a worse loadout
-- [ ] 187. Named market sales ignore item kind and equipment stats
+- [x] 187. Named market sales ignore item kind and equipment stats
 - [ ] 188. `<rest hidden="t"/>` is optional instead of automatic
 - [ ] 189. A failed initial adventure load strands a new save on a blank game screen
 - [ ] 190. Service-worker activation and lookup touch unrelated origin caches
@@ -945,6 +945,37 @@ ambiguous matches.
 Test that the plain silver flute cannot be sold on the tool row, the exact tool can, and
 same-name equipment with the wrong kind/ability/bonus/tags cannot. Audit the corpus for other
 cross-kind name collisions and run the economy/full suites.
+
+**Done.** One predicate, `matchesNamedGoods(it, goods)`, now decides whether a possession
+satisfies a named non-armour row: same kind, the stated `ability`, at least the stated `bonus`,
+and every stated tag. `ownsGoods()` and `sellCandidates()` both call it (and `sellTrade`/
+`sellPlan` go through `sellCandidates`), so a row can no longer advertise a sale it cannot
+complete. The armour-by-Defence-tier and unnamed-weapon-by-bonus branches are untouched, as is
+task 134's picker — it still sees only genuine matches.
+
+The one deliberate looseness: a `kind="item"` row accepts a possession of any kind. The corpus
+audit (every named row carrying `sell=`, compared against every other declaration of that
+name) found exactly three cross-kind collisions, and two of them are the books being loose with
+`item` for something they elsewhere declare a weapon — §1.452/§2.493 sell a "pickaxe" awarded
+as `<weapon>` in §3.376/§3.396/§4.248 (book4/248 even carries the comment "is the pickaxe a
+weapon or just an item?"), and §3.715 sells a "golden katana" that every award declares as a
+weapon. Requiring strict kind equality there would have made two legitimate sales impossible.
+The third is the reported bug: §5.238's plain `<item name="silver flute">` tomb trinket against
+§5.244/§4.417/§5.101's CHARISMA +2 `<tool>` row (§5.118 is where the trinket becomes the real
+tool). A second audit pass found **no** tag mismatches at all, so requiring the row's tags is
+safe. Using `bonus >= row.bonus` rather than equality keeps a stronger same-kind piece
+sellable at the row's price, matching the pre-existing behaviour for named rows.
+
+17 new assertions in `suite-economy`: the plain trinket yields no candidate, no sale and no
+Shards while staying in the pack; the real tool sells for 360; same-name pieces with a lower
+bonus, the wrong ability or the wrong kind are all refused, while a better same-kind piece is
+accepted; §3.480's `tags="light"` lantern row rejects an untagged lantern and accepts a tagged
+one; the weapon pickaxe and weapon golden katana still sell on their `<item>` rows; armour
+still sells by tier (and the wrong tier still cannot), and an unnamed weapon row still takes
+any weapon of that bonus. Live §5.244 renders the silver-flute row with `Sell 360`, disabled
+("You have none to sell") while holding only the trinket, enabled with the real tool, and the
+click pays exactly 360 and removes it. Full browser suite: RESULT ALL PASS pass=1903 fail=0,
+all 4,369 sections rendering.
 
 ## 188. `<rest hidden="t"/>` is optional instead of automatic
 
