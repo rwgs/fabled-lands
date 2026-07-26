@@ -963,10 +963,13 @@ function applySpecial(el, state) {
     state.data.godless = true;
   } else if (kind === 'difficultyCurse') state.data.oneDieRolls = true; // book3/91: one die on ability rolls
   else if (kind === 'difficultyRestore') state.data.oneDieRolls = false; // book2/102: lifted at the temple
-  // weaponlock/armourlock (book6/135, book2/290): JaFL locks the broken weapon /
-  // melted armour so it can't be swapped to dodge the loss; here the sibling
-  // <lose weapon|armour using="t"> takes it and equipment auto-reconciles, so there
-  // is nothing extra to enforce — recognised as a no-op rather than an unknown tag.
+  // weaponlock/armourlock (book6/135, book2/290): JaFL locks the weapon being broken /
+  // the armour being melted so it can't be swapped to dodge the loss. The sibling
+  // <lose weapon|armour using="t"> is a click-to-apply group, so with the player now
+  // choosing their own loadout (task 186) there IS a window to swap between entry and
+  // the click — hold the slot until the section is left or the possession goes.
+  else if (kind === 'weaponlock') state.setEquipLock('weapon');
+  else if (kind === 'armourlock') state.setEquipLock('armour');
   state.changed();
 }
 

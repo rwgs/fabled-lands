@@ -447,7 +447,11 @@ export async function run(ctx) {
       const jdDefBefore = gjd.defence();
       gjd.addItem(mk('weapon', 'Jade Defender', 3, parse('<weapon name="Jade Defender" bonus="3"><effect type="wielded" ability="defence" bonus="3"/></weapon>')));
       ok('wielded weapon adds its bonus (combat) and wielded aura (defence)', gjd.defence() === jdDefBefore + 3 + 3, `${jdDefBefore}->${gjd.defence()}`);
-      gjd.addItem(makeItem('weapon', 'greatsword', 5)); // now the wielded weapon; Jade Defender is not
+      // Acquiring a bigger blade no longer silently unwields the chosen one (task 186) —
+      // the wielded aura drops only when the player picks the greatsword themselves.
+      const gsword = gjd.addItem(makeItem('weapon', 'greatsword', 5));
+      ok('a stronger weapon does not auto-unwield the chosen one', gjd.data.items.find((it) => it.name === 'Jade Defender').wielded === true && gjd.auraBonus('defence') === 3, `aura=${gjd.auraBonus('defence')}`);
+      gjd.setEquipped('weapon', gsword.id);
       ok('wielded aura drops when the item is not wielded', gjd.auraBonus('defence') === 0, `aura=${gjd.auraBonus('defence')}`);
 
       // use potion (ability): a Drink that boosts the ability for the section, one shot.

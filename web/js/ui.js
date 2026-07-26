@@ -254,6 +254,28 @@ export function renderSheet(state, container, opts = {}) {
       });
     }
 
+    // Which weapon you fight with and which armour you wear is the player's call, not
+    // simply the biggest number: §5.628's +3 Jade Defender carries a +3 wielded Defence
+    // effect, so it beats a plain +4 blade by 2 Defence. The current pick reads as a
+    // pressed button (and the ⚔/🛡 marker on the name); a locked slot (§6.135, §2.290)
+    // disables the others until the section is left. (task 186)
+    if (it.kind === 'weapon' || it.kind === 'armour') {
+      const isWeapon = it.kind === 'weapon';
+      const on = isWeapon ? !!it.wielded : !!it.worn;
+      const locked = state.equipLocked(it.kind);
+      const eq = el('button', 'item-equip' + (on ? ' on' : ''), isWeapon ? 'Wield' : 'Wear');
+      eq.type = 'button';
+      eq.setAttribute('aria-pressed', on ? 'true' : 'false');
+      eq.disabled = on || locked;
+      eq.title = on
+        ? (isWeapon ? `Fighting with the ${it.name}` : `Wearing the ${it.name}`)
+        : locked
+          ? (isWeapon ? 'You cannot change weapons here' : 'You cannot change armour here')
+          : (isWeapon ? `Fight with the ${it.name}` : `Wear the ${it.name}`);
+      eq.addEventListener('click', () => { if (state.setEquipped(it.kind, it.id)) onSheetChange(); });
+      li.appendChild(eq);
+    }
+
     // Reorder controls: the list order decides what a "possessions listed first"
     // theft (§521/§248) takes, so the player can move valuables down out of reach.
     const controls = el('span', 'item-controls');

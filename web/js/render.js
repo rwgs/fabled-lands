@@ -419,6 +419,9 @@ export class Story {
     // Likewise a per-fight attack/Defence bonus from <tick special="attack|defence">
     // (task 49) applies only to the current section's fight — clear it on entry.
     this.state.clearFightBonuses();
+    // A weapon/armour lock (<tick special="weaponlock|armourlock">, task 186) holds only
+    // for the section that set it — JaFL releases both on its NEW_SECTION event.
+    this.state.clearEquipLocks();
     // Variables are section-local (JaFL clears them per section): reset them on entry
     // so a `<while var>` loop starts undefined and a roll var can't be read stale from
     // an earlier section (§6.700's `<if var="x" equals="6">` gate, §5.218's free). (task 100)

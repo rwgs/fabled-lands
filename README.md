@@ -22,7 +22,8 @@ the browser, on any device, with progress saved locally.
 - **Full rules engine** — 2d6 ability checks, difficulty/outcome tables, turn-based
   combat with your live Defence, markets & trading, ships/cargo/crew, blessings, curses,
   codewords, gods, titles, resurrection deals, and the 12-item carry limit.
-- **Live Adventure Sheet** that updates itself as you play.
+- **Live Adventure Sheet** that updates itself as you play — including which weapon you
+  wield and which armour you wear (an enchanted blade can beat a bigger bonus).
 - **Classic-fantasy presentation** — parchment, serif book text, tactile dice.
 - **Mobile, tablet & desktop** — responsive; the sheet becomes a slide-in drawer on phones.
 - **Installable PWA** — works fully **offline** after first load; add it to your home screen.

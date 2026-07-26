@@ -20,7 +20,7 @@ audit pass.
 **MEDIUM**
 
 - [x] 185. Wildcard affliction effects (`ability="*"`) are discarded
-- [ ] 186. Automatic highest-bonus equipment can select a worse loadout
+- [x] 186. Automatic highest-bonus equipment can select a worse loadout
 - [ ] 187. Named market sales ignore item kind and equipment stats
 - [ ] 188. `<rest hidden="t"/>` is optional instead of automatic
 - [ ] 189. A failed initial adventure load strands a new save on a blank game screen
@@ -883,6 +883,49 @@ the selected items must be the single source for base bonuses, wielded effects, 
 Test choosing either Jade Defender or a plain +4 weapon, the resulting COMBAT/Defence and
 loss target, selection persistence, and fallback after dropping the selected item. Cover
 armour and equipment-lock behavior too.
+
+**Done.** `data.equipped = {weapon, armour}` stores the chosen item ids. One pair of readers,
+`wieldedWeapon()`/`wornArmour()`, resolves the choice — the stored id while it still names a
+carried item of that kind, else the strongest of that kind as the default — and everything
+else already went through them: `using="t"` matching (`matchEquipment`, `selectEquipment`,
+`loseEquipmentCandidates`), `setSelectorBonus`, the `type="wielded"` effects in
+`sumAuraBonus`, and the sheet's ⚔/🛡 markers. `itemBonus('combat')` and `armourBonus()` now
+read that one weapon/armour instead of scanning for the biggest number, so the selection is
+the single source for base bonuses too. `reconcileEquipment()` writes the resolved pick back,
+so a stale id self-heals and a *new* stronger weapon no longer steals the wield — matching
+JaFL's `ItemList.addItemEffects`, which wields a newly acquired weapon only when nothing is
+wielded. `setEquipped(kind, id)` is the sheet's entry point (rejects an unknown id, the wrong
+kind, or a locked slot); each weapon/armour row gained a `Wield`/`Wear` button (`aria-pressed`,
+disabled when it is the current pick or the slot is locked), and `onSheetChange` already
+rerenders the story so a `<if weapon="*sword*" using="t">` gate (§2.267) re-evaluates at once.
+
+Migration is deterministic: `sanitizeData` keeps a stored id only while it names a carried
+item of that kind, else falls back to the legacy per-item `wielded`/`worn` flag — which every
+pre-186 save carries on the piece the old reconcile had picked — so an old save loads exactly
+the loadout it was showing; with neither, the default applies.
+
+This also makes `<tick special="weaponlock|armourlock">` real. It was documented as a
+justified no-op *because* selection was automatic; now that the player can swap, §6.135's
+"Remove that weapon" group (a click-to-apply button) leaves a window to dodge the loss. The
+locks are transient (`_equipLock`, never saved), released on entering a section — JaFL clears
+both on its NEW_SECTION event — or when the locked possession itself goes.
+
+27 new assertions. From the real §5.628 `<weapon>` node: the Jade Defender arrives with its
+`type="wielded"` Defence effect, a later plain +4 does not steal the wield, switching to it
+trades 2 Defence for 1 COMBAT, switching back restores both the effect and the flags; a
+`<lose weapon="?" using="t">` takes the *chosen* weapon and the slot then falls back to the
+strongest remaining; the choice survives a `sanitizeData` round trip, a stale id falls back to
+the flag, and a save with neither defaults to the strongest. Armour repeats the shape
+(default = best Defence, choosing the lesser is honoured by `defence()`, a `using="t"` armour
+loss takes the worn piece) plus `setEquipped` rejections. Live: §6.135 locks the weapon slot
+on entry, refuses a swap, renders every `Wield` control disabled, breaks the weapon actually
+in hand when its group is clicked, releases the lock with that loss, and the lock is gone
+after entering another section; §2.290's `armourlock` holds the armour slot only, and its acid
+takes the worn jerkin while sparing the better mail with no Stamina lost. The pre-existing
+"wielded aura drops when the item is not wielded" check in `suite-economy` was updated: it
+asserted the old auto-unwield, and now proves the aura survives the acquisition and drops only
+on an explicit switch. Full browser suite: RESULT ALL PASS pass=1886 fail=0, all 4,369
+sections rendering.
 
 ## 187. Named market sales ignore item kind and equipment stats
 

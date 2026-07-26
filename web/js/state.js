@@ -87,6 +87,7 @@ function freshData() {
     rank: 1,
     shards: 0,
     items: [],            // {id, kind, name, bonus, ability, wielded, worn, tags:[]}
+    equipped: { weapon: null, armour: null }, // item ids the player chose to wield/wear (task 186)
     gods: [],
     godless: false,
     oneDieRolls: false,   // the Three Fortunes' difficultyCurse: 1 die on ability rolls (task 36)
@@ -166,6 +167,12 @@ export class GameState {
     // fight (JaFL FightNode.attackBonus / a Defence blessing). Kept OFF data so it
     // never survives a save; cleared on entering a section (Story.begin). (task 49)
     this._fightBonus = { attack: 0, defence: 0 };
+    // <tick special="weaponlock|armourlock"> stops the player swapping the weapon/armour
+    // a loss in this section is about to take (§6.135 Mister Dragon snaps the weapon you
+    // are using; §2.290 the acid melts the armour you wear). Like JaFL's ItemList locks it
+    // is transient — never saved, and released on entering a section (Story.begin) or when
+    // the locked possession itself goes. (task 186)
+    this._equipLock = { weapon: false, armour: false };
   }
 
   // ---- undo (session-only) --------------------------------------------
@@ -271,21 +278,21 @@ export class GameState {
   }
 
   // ---- derived stats ---------------------------------------------------
-  /** Best bonus among owned items that boost a given ability (tools; weapon for combat). */
+  /** Best bonus among owned items that boost a given ability — the best tool for that
+   *  ability, and for COMBAT the WIELDED weapon (you fight with one weapon, and it is the
+   *  player's choice which: §5.628's +3 Jade Defender carries a +3 wielded Defence effect
+   *  no plain +4 blade can match). Two items never add (§6.207). (task 186) */
   itemBonus(ability) {
     let best = 0;
     for (const it of this.data.items) {
       if (it.kind === 'tool' && it.ability === ability) best = Math.max(best, it.bonus || 0);
-      if (it.kind === 'weapon' && ability === 'combat') best = Math.max(best, it.bonus || 0);
     }
+    if (ability === 'combat') best = Math.max(best, this.wieldedWeapon()?.bonus || 0);
     return best;
   }
 
-  armourBonus() {
-    let best = 0;
-    for (const it of this.data.items) if (it.kind === 'armour') best = Math.max(best, it.bonus || 0);
-    return best;
-  }
+  /** The WORN armour's Defence bonus — again the player's choice, not simply the highest. */
+  armourBonus() { return this.wornArmour()?.bonus || 0; }
 
   effectBonus(ability) {
     let sum = 0;
@@ -461,21 +468,46 @@ export class GameState {
     return this.ability('combat') + this.rankValue() + this.armourBonus() + this.auraBonus('defence');
   }
 
-  wieldedWeapon() {
+  // The weapon being fought with / the armour being worn: the player's explicit choice
+  // (data.equipped) while it still names a carried item of that kind, else the strongest
+  // of that kind as the default. This one pair of readers is the single source for base
+  // bonuses, `type="wielded"` effects, the sheet display and `using="t"` matching. (task 186)
+  wieldedWeapon() { return this._equipped('weapon'); }
+  wornArmour() { return this._equipped('armour'); }
+  _equipped(kind) {
+    const id = this.data.equipped && this.data.equipped[kind];
+    const chosen = id ? this.data.items.find((it) => it.id === id && it.kind === kind) : null;
+    if (chosen) return chosen;
     let best = null;
-    for (const it of this.data.items) if (it.kind === 'weapon') if (!best || (it.bonus || 0) > (best.bonus || 0)) best = it;
-    return best;
-  }
-  wornArmour() {
-    let best = null;
-    for (const it of this.data.items) if (it.kind === 'armour') if (!best || (it.bonus || 0) > (best.bonus || 0)) best = it;
+    for (const it of this.data.items) if (it.kind === kind) if (!best || (it.bonus || 0) > (best.bonus || 0)) best = it;
     return best;
   }
 
-  /** Mark the best weapon/armour as wielded/worn for display. */
+  /** The player's choice of weapon/armour, from the Adventure Sheet. Refused while that
+   *  slot is locked, or when `id` is not a carried item of that kind. (task 186) */
+  setEquipped(kind, id) {
+    if (kind !== 'weapon' && kind !== 'armour') return false;
+    if (this.equipLocked(kind)) return false;
+    const it = this.data.items.find((x) => x.id === id && x.kind === kind);
+    if (!it) return false;
+    (this.data.equipped ||= { weapon: null, armour: null })[kind] = it.id;
+    this.reconcileEquipment();
+    this.changed();
+    return true;
+  }
+  equipLocked(kind) { return !!(this._equipLock && this._equipLock[kind]); }
+  setEquipLock(kind, on = true) { (this._equipLock ||= { weapon: false, armour: false })[kind] = !!on; }
+  clearEquipLocks() { this._equipLock = { weapon: false, armour: false }; }
+
+  /** Settle the equipment choice and its display flags: an absent or stale selection
+   *  falls back to the strongest of that kind and is written back, so the stored ids are
+   *  always the live loadout. */
   reconcileEquipment() {
     const w = this.wieldedWeapon();
     const a = this.wornArmour();
+    const eq = (this.data.equipped ||= { weapon: null, armour: null });
+    eq.weapon = w ? w.id : null;
+    eq.armour = a ? a.id : null;
     for (const it of this.data.items) {
       it.wielded = (it.kind === 'weapon' && it === w);
       it.worn = (it.kind === 'armour' && it === a);
@@ -502,6 +534,10 @@ export class GameState {
     const i = this.data.items.findIndex((x) => x.id === id);
     if (i >= 0) {
       const [it] = this.data.items.splice(i, 1);
+      // Losing the locked weapon/armour releases its lock — what it protected is gone
+      // (JaFL ItemList.removeItemEffects). (task 186)
+      if (it.wielded) this.setEquipLock('weapon', false);
+      if (it.worn) this.setEquipLock('armour', false);
       this.reconcileEquipment();
       this.changed();
       return it;
@@ -1256,6 +1292,19 @@ export function sanitizeData(raw) {
   out.shards = asNum(d.shards, 0, { min: 0, int: true });
 
   out.items = asArr(d.items).map(sanitizeItem).filter(Boolean);
+  // The explicit wielded-weapon / worn-armour choice (task 186). Keep a stored id only
+  // while it still names a carried item of that kind; otherwise migrate from the legacy
+  // per-item wielded/worn flag, which every pre-186 save already carries on the item
+  // reconcileEquipment had picked — so an old save loads the exact loadout it was showing.
+  // With neither, null leaves reconcileEquipment to choose the strongest as the default.
+  const eqIn = asObj(d.equipped);
+  const equippedId = (kind, flag) => {
+    const id = asStr(eqIn[kind]);
+    if (id && out.items.some((it) => it.id === id && it.kind === kind)) return id;
+    const flagged = out.items.find((it) => it.kind === kind && it[flag]);
+    return flagged ? flagged.id : null;
+  };
+  out.equipped = { weapon: equippedId('weapon', 'wielded'), armour: equippedId('armour', 'worn') };
   out.gods = asArr(d.gods).filter((g) => typeof g === 'string');
   out.godless = asBool(d.godless);
   out.oneDieRolls = asBool(d.oneDieRolls);

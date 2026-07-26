@@ -1472,6 +1472,123 @@ export async function run(ctx) {
       ok('§2.136 live: contracting Leprosy costs a point from all six abilities', g136.hasDisease('Leprosy') && ABIL185.every((a) => g136.ability(a) === Math.max(1, b136[a] - 1)), ABIL185.map((a) => `${a}:${b136[a]}→${g136.ability(a)}`).join(' '));
     }
 
+    // --- task 186: the player chooses the loadout; the highest bonus is only a default ---
+    // wieldedWeapon()/wornArmour() always took the biggest number, so acquiring any plain
+    // +4 blade unwielded the +3 Jade Defender and threw away its +3 wielded Defence effect
+    // (worth +6 Defence in total per §5.628) — and changed which weapon a `using="t"` loss
+    // would take. The choice is now stored per slot; reconciliation only fills a gap.
+    {
+      const mk186 = async () => {
+        const g = GameState.create({ name:'T186', gender:'m', profession:'Warrior', book:5, adv });
+        g.ephemeral = true;
+        g.data.items = g.data.items.filter((it) => it.kind !== 'weapon' && it.kind !== 'armour');
+        g.reconcileEquipment();
+        eng.applyEffect((await data.getSection(5, '628')).querySelector('weapon'), g, {}); // Jade Defender +3
+        const jade = g.data.items.find((it) => it.name === 'Jade Defender');
+        const plain = g.addItem(makeItem('weapon', 'broadsword', 4));
+        return { g, jade, plain };
+      };
+      const e186 = await mk186();
+      ok('§186 the Jade Defender arrives with its wielded Defence effect', !!e186.jade && e186.jade.bonus === 3 && e186.jade.effects.some((f) => f.type === 'wielded' && f.ability === 'defence' && f.bonus === 3), JSON.stringify(e186.jade && e186.jade.effects));
+      // The Jade Defender is in hand (it was picked up first); acquiring the plain +4
+      // blade must NOT steal the wield — that was the bug.
+      ok('§186 a stronger later weapon does not steal the wield', e186.g.wieldedWeapon() === e186.jade && e186.jade.wielded === true && e186.plain.wielded === false);
+      const cbJade = e186.g.ability('combat'), defJade = e186.g.defence();
+      ok('§186 switching to the plain +4 trades 2 Defence for 1 COMBAT', e186.g.setEquipped('weapon', e186.plain.id) === true && e186.g.ability('combat') === cbJade + 1 && e186.g.defence() === defJade - 2 && e186.g.auraBonus('defence') === 0, `combat=${e186.g.ability('combat')}/${cbJade} def=${e186.g.defence()}/${defJade}`);
+      ok('§186 switching back restores the wielded Defence effect and the flags', e186.g.setEquipped('weapon', e186.jade.id) === true && e186.g.auraBonus('defence') === 3 && e186.g.defence() === defJade && e186.jade.wielded === true && e186.plain.wielded === false);
+      // The choice is what a `using="t"` loss takes (§6.135 snaps the weapon you are using).
+      const lose186 = parse('<lose weapon="?" using="t"/>');
+      const eKeep = await mk186();
+      eKeep.g.setEquipped('weapon', eKeep.jade.id);
+      eng.applyEffect(lose186, eKeep.g, {});
+      ok('§186 a using="t" loss takes the CHOSEN weapon, not the strongest', !eKeep.g.data.items.some((it) => it.name === 'Jade Defender') && eKeep.g.data.items.some((it) => it.name === 'broadsword'), eKeep.g.data.items.map((it) => it.name).join(','));
+      ok('§186 losing the chosen weapon falls back to the strongest remaining', eKeep.g.wieldedWeapon().name === 'broadsword' && eKeep.g.data.equipped.weapon === eKeep.g.data.items.find((it) => it.name === 'broadsword').id);
+      // Acquiring a stronger weapon later must not silently re-pick it.
+      const eNew = await mk186();
+      eNew.g.setEquipped('weapon', eNew.jade.id);
+      eNew.g.addItem(makeItem('weapon', 'greatsword', 5));
+      ok('§186 a stronger new weapon does not steal the choice', eNew.g.wieldedWeapon() === eNew.jade && eNew.g.auraBonus('defence') === 3);
+      // Persistence: the choice survives a save/load; a stale id falls back to the default.
+      const ePer = await mk186();
+      ePer.g.setEquipped('weapon', ePer.jade.id);
+      const gPer = new GameState(sanitizeData(JSON.parse(JSON.stringify(ePer.g.data))));
+      ok('§186 the chosen weapon survives a save round-trip', gPer.wieldedWeapon().name === 'Jade Defender' && gPer.auraBonus('defence') === 3, JSON.stringify(gPer.data.equipped));
+      const staleData = JSON.parse(JSON.stringify(ePer.g.data));
+      staleData.equipped.weapon = 'no-such-item';
+      const gStale = new GameState(sanitizeData(staleData));
+      ok('§186 a stale selected id falls back to the wielded flag then the strongest', gStale.wieldedWeapon().name === 'Jade Defender', JSON.stringify(gStale.data.equipped));
+      const legacy = JSON.parse(JSON.stringify(ePer.g.data));
+      delete legacy.equipped; legacy.items.forEach((it) => { it.wielded = false; it.worn = false; });
+      const gLegacy = new GameState(sanitizeData(legacy));
+      ok('§186 a save with no selection at all defaults to the strongest', gLegacy.wieldedWeapon().name === 'broadsword', JSON.stringify(gLegacy.data.equipped));
+      // Armour behaves the same way.
+      const gArm = GameState.create({ name:'A186', gender:'m', profession:'Warrior', book:2, adv });
+      gArm.ephemeral = true;
+      gArm.data.items = gArm.data.items.filter((it) => it.kind !== 'armour'); gArm.reconcileEquipment();
+      const defNoArm = gArm.defence();
+      const mail = gArm.addItem(makeItem('armour', 'chain mail', 3));
+      const leather = gArm.addItem(makeItem('armour', 'leather jerkin', 1));
+      ok('§186 the default armour is the best Defence bonus', gArm.wornArmour() === mail && gArm.defence() === defNoArm + 3, `def=${gArm.defence()}`);
+      ok('§186 choosing the lesser armour is honoured by Defence', gArm.setEquipped('armour', leather.id) === true && gArm.defence() === defNoArm + 1 && leather.worn === true && mail.worn === false, `def=${gArm.defence()}`);
+      eng.applyEffect(parse('<lose armour="?" using="t"/>'), gArm, {});
+      ok('§186 a using="t" armour loss takes the WORN armour', !gArm.data.items.some((it) => it.name === 'leather jerkin') && gArm.wornArmour() === mail, gArm.data.items.map((it) => it.name).join(','));
+      ok('§186 setEquipped refuses an unknown id and the wrong kind', gArm.setEquipped('armour', 'nope') === false && gArm.setEquipped('weapon', mail.id) === false);
+      // --- the equipment locks, live ---
+      // §6.135: Mister Dragon snaps the weapon you are using — <tick special="weaponlock">
+      // fires on entry, so the sheet cannot swap to a junk blade before the group is clicked.
+      const eLock = await mk186();
+      eLock.g.setEquipped('weapon', eLock.jade.id);
+      const cLock = document.createElement('div');
+      const stLock = new Story(cLock, eLock.g, { navigate(){}, onDeath(){}, notify(){} });
+      eLock.g.setVisitProvider(() => stLock.serializeVisit());
+      stLock.begin(await data.getSection(6, '135'), 6, '135');
+      ok('§6.135 locks the weapon slot on entry', eLock.g.equipLocked('weapon') === true && eLock.g.equipLocked('armour') === false);
+      ok('§6.135 the lock refuses a weapon swap', eLock.g.setEquipped('weapon', eLock.plain.id) === false && eLock.g.wieldedWeapon() === eLock.jade);
+      const lockSheet = document.createElement('div');
+      renderSheet(eLock.g, lockSheet);
+      const equipBtns = Array.from(lockSheet.querySelectorAll('.item-equip'));
+      ok('§6.135 the sheet shows the Wield controls, all disabled while locked', equipBtns.length >= 2 && equipBtns.every((b) => b.disabled), `n=${equipBtns.length} enabled=${equipBtns.filter((b) => !b.disabled).length}`);
+      const grpLock = Array.from(cLock.querySelectorAll('button')).find((b) => /Remove that weapon/i.test(b.textContent));
+      ok('§6.135 offers the "Remove that weapon" group', !!grpLock);
+      grpLock.click();
+      ok('§6.135 the group breaks the weapon actually being used', !eLock.g.data.items.some((it) => it.name === 'Jade Defender'), eLock.g.data.items.map((it) => it.name).join(','));
+      ok('§6.135 losing the locked weapon releases the lock', eLock.g.equipLocked('weapon') === false);
+      // A lock lasts only for its own section.
+      const eLock2 = await mk186();
+      const cLock2 = document.createElement('div');
+      const stLock2 = new Story(cLock2, eLock2.g, { navigate(){}, onDeath(){}, notify(){} });
+      eLock2.g.setVisitProvider(() => stLock2.serializeVisit());
+      stLock2.begin(await data.getSection(6, '135'), 6, '135');
+      ok('§6.135 the weapon slot is locked in that section', eLock2.g.equipLocked('weapon') === true);
+      stLock2.begin(parse('<section name="9"><p>elsewhere</p></section>'), 6, '9');
+      ok('§186 the lock is released on entering another section', eLock2.g.equipLocked('weapon') === false && eLock2.g.setEquipped('weapon', eLock2.jade.id) === true);
+      // <tick special="armourlock"> holds the armour slot the same way (§2.290's acid).
+      const gArmLock = GameState.create({ name:'AL186', gender:'m', profession:'Warrior', book:2, adv });
+      gArmLock.ephemeral = true;
+      gArmLock.data.items = gArmLock.data.items.filter((it) => it.kind !== 'armour'); gArmLock.reconcileEquipment();
+      const alMail = gArmLock.addItem(makeItem('armour', 'chain mail', 3));
+      const alJerkin = gArmLock.addItem(makeItem('armour', 'leather jerkin', 1));
+      eng.applyEffect(parse('<tick special="armourlock" hidden="t"/>'), gArmLock, {});
+      ok('§186 armourlock holds the armour slot only', gArmLock.equipLocked('armour') === true && gArmLock.equipLocked('weapon') === false);
+      ok('§186 armourlock refuses an armour swap', gArmLock.setEquipped('armour', alJerkin.id) === false && gArmLock.wornArmour() === alMail);
+      // §2.290 live: the acid takes the armour actually being WORN (here the deliberately
+      // chosen lesser piece), not the best one — its loss applies on entry, which also
+      // releases the lock it had just set (JaFL: removing the locked piece cancels it).
+      const gAcid = GameState.create({ name:'Ac186', gender:'m', profession:'Warrior', book:2, adv });
+      gAcid.ephemeral = true;
+      gAcid.data.items = gAcid.data.items.filter((it) => it.kind !== 'armour'); gAcid.reconcileEquipment();
+      const acidMail = gAcid.addItem(makeItem('armour', 'chain mail', 3));
+      const acidJerkin = gAcid.addItem(makeItem('armour', 'leather jerkin', 1));
+      gAcid.setEquipped('armour', acidJerkin.id);
+      const stamAcid = gAcid.data.stamina;
+      const cAcid = document.createElement('div');
+      const stAcid = new Story(cAcid, gAcid, { navigate(){}, onDeath(){}, notify(){} });
+      gAcid.setVisitProvider(() => stAcid.serializeVisit());
+      stAcid.begin(await data.getSection(2, '290'), 2, '290');
+      ok('§2.290 the acid takes the WORN armour, sparing the better piece', !gAcid.data.items.some((it) => it.id === acidJerkin.id) && gAcid.data.items.some((it) => it.id === acidMail.id), gAcid.data.items.map((it) => it.name).join(','));
+      ok('§2.290 the armour branch is taken, so no Stamina is lost instead', gAcid.data.stamina === stamAcid && gAcid.wornArmour() === acidMail, `stamina=${gAcid.data.stamina}/${stamAcid}`);
+    }
+
     // --- task 74: standalone force="f" effects are opt-in, not auto-applied ----------
     // book1/25: an optional mission codeword is a button; NOT recorded on entry.
     const g25 = GameState.create({ name:'M25', gender:'m', profession:'Warrior', book:1, adv });

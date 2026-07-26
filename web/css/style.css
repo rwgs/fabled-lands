@@ -401,6 +401,11 @@ img { max-width: 100%; }
 .item-txt { flex: 1 1 auto; min-width: 0; }
 .item-use { flex: none; background: rgba(200,150,42,0.16); border: 1px solid rgba(200,150,42,0.4); color: #ecdcb8; border-radius: 4px; font-size: 0.74rem; padding: 0.08rem 0.42rem; cursor: pointer; }
 .item-use:hover { background: rgba(200,150,42,0.3); }
+.item-equip { flex: none; background: none; border: 1px solid rgba(200,150,42,0.35); color: #d8c49a; border-radius: 4px; font-size: 0.7rem; padding: 0.06rem 0.4rem; cursor: pointer; }
+.item-equip:hover:not(:disabled) { background: rgba(200,150,42,0.22); color: #ecdcb8; }
+.item-equip.on { background: rgba(200,150,42,0.28); border-color: rgba(200,150,42,0.6); color: #ecdcb8; }
+.item-equip:disabled { cursor: default; }
+.item-equip:disabled:not(.on) { opacity: 0.35; }
 .item-drop { background: none; border: none; color: #c9704f; font-size: 0.9rem; opacity: 0.6; padding: 0 0.2rem; }
 .item-drop:hover { opacity: 1; }
 .item-controls { display: inline-flex; align-items: center; gap: 0.1rem; flex: none; }
