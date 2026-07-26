@@ -42,6 +42,53 @@ export function makeFight(node, state = null) {
   return fight;
 }
 
+/** The only outcomes a fight can hold — the whitelist restoreFight validates against. */
+const FIGHT_OUTCOMES = new Set(['win', 'lose', 'fled']);
+// Generous bounds on a restored fight log: the widget shows only the last six lines, and no
+// real slugfest approaches these, so they cost a legitimate resume nothing while keeping an
+// imported save from carrying an unbounded blob into the DOM. (task 180)
+const MAX_LOG_LINES = 500;
+const MAX_LOG_CHARS = 500;
+
+/** Rebuild a fight from a PERSISTED memo against its own <fight> element (task 180).
+ *  An imported save is untrusted and its fight memo is displayed by the combat widget, so
+ *  nothing is carried through verbatim: the STATIC identity (name, dice, thresholds, damage
+ *  routing) is re-read from `node` via makeFight — a save can neither rename a foe nor
+ *  change how it fights — and only the genuinely DYNAMIC fields are taken from `saved`,
+ *  each coerced to its own type and range. Unknown fields are dropped, because the result is
+ *  makeFight's object rather than a spread of the record. Called WITHOUT a GameState, so the
+ *  pre-fight steps (staminaLost reset / useCache / preDamage) do not re-run — the saved
+ *  numbers already include them. Headless. */
+export function restoreFight(node, saved) {
+  const fight = makeFight(node); // static identity, straight from the section
+  const s = saved && typeof saved === 'object' ? saved : {};
+  const int = (v, dflt, lo, hi) => {
+    const n = Math.trunc(Number(v));
+    return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : dflt;
+  };
+  // Combat/Defence are static too UNLESS the enemy arms itself from a cache (useCache —
+  // §6.635's Warrior Maid), the one path that raises them at fight start. Then they must be
+  // carried, but floored at the section's own value (a loadout only ever adds) and capped.
+  if (node.getAttribute('useCache')) {
+    fight.combat = int(s.combat, fight.combat, fight.combat, fight.combat + 99);
+    fight.defence = int(s.defence, fight.defence, fight.defence, fight.defence + 99);
+  }
+  // Stamina is the fight's live state: 0 … its rolled maximum (preDamage and blows only
+  // reduce it, and each blow is capped at the Stamina remaining).
+  fight.stamina = int(s.stamina, fight.stamina, 0, fight.maxStamina);
+  fight.outcome = FIGHT_OUTCOMES.has(s.outcome) ? s.outcome : null;
+  fight.defenceBonus = int(s.defenceBonus, 0, 0, 99); // Defence through Faith, this fight only
+  fight.wrathUsed = !!s.wrathUsed;
+  fight.defenceUsed = !!s.defenceUsed;
+  fight.lastStrikeMissed = !!s.lastStrikeMissed;
+  fight.attackRerolled = !!s.attackRerolled;
+  fight.log = (Array.isArray(s.log) ? s.log : []).filter((l) => typeof l === 'string')
+    .slice(-MAX_LOG_LINES).map((l) => l.slice(0, MAX_LOG_CHARS));
+  // roundGoto (a <fightdamage>/<fightround> redirect) is deliberately NOT restored: the view
+  // consumes and clears it before the round commits, so a saved one could only be forged.
+  return fight;
+}
+
 /** Pre-fight setup that needs the GameState: reset the staminaLost accumulator,
  *  add the useCache loadout to the enemy, and apply preDamage (which may fell the
  *  enemy before the first blow). Mirrors FightNode.execute()'s opening. */

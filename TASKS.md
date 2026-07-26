@@ -3,14 +3,15 @@
 Backlog of recommended improvements. Open tasks are filed under priority buckets
 (**HIGH** / **MEDIUM** / **LOW**) — work the first open (`- [ ]`) item top-down;
 each task's detail section carries the same stable ID. **All filed tasks are
-complete through 179**. The eleventh full review filed tasks 180–202 below.
+complete through 180**. The eleventh full review filed tasks 180–202 below; 203
+was filed while working task 180.
 Completed detail sections are archived in
 [`TASKS-archive.md`](TASKS-archive.md); the Review log at the end records each
 audit pass.
 
 **HIGH**
 
-- [ ] 180. Imported visit/combat memos can execute HTML/JavaScript on resume
+- [x] 180. Imported visit/combat memos can execute HTML/JavaScript on resume
 - [ ] 181. Finish task 175: a blessing-reroll result is still observable before Keep
 - [ ] 182. Delayed rolls and attacks can mutate a save after Save & quit
 - [ ] 183. Disease/poison immunity blessings do not prevent infection
@@ -31,6 +32,7 @@ audit pass.
 - [ ] 195. DOM-free rule modules are not directly importable in Node
 - [ ] 196. The build stamp is date/EOL dependent and omits service-worker code
 - [ ] 197. CI tests committed bundles without rebuilding their XML source
+- [ ] 203. An imported return frame restores unvalidated vars, ticks and location
 
 **LOW**
 
@@ -224,6 +226,7 @@ section below); detail sections remain in filed order, not this order.*
 - [x] 177. Complete modal keyboard isolation/focus restoration, including the section-view oracle
 - [x] 178. Direct `choice[flee="t"]` navigation omits the durable retry contract
 - [x] 179. Lazy service-worker cache writes can be terminated before `cache.put()` completes
+- [x] 180. Imported visit/combat memos can execute HTML/JavaScript on resume
 
 ---
 
@@ -1059,6 +1062,33 @@ inventing a generic component system.
 
 Add focused DOM/accessibility assertions for each control family and keyboard selection,
 then check creation, narration settings, maps, caches and the mobile/desktop Sheet manually.
+
+## 203. An imported return frame restores unvalidated vars, ticks and location
+
+**Priority: MEDIUM — a `<return>` from an imported save can push non-numeric variables and a
+bogus tick baseline into live state, bypassing `sanitizeData`'s own rules for those fields.**
+
+Found while doing task 180. `sanitizeVisit()` keeps `visit.frame` as a bare `asObj`, and
+`Story.deserializeFrame()` then copies its payload verbatim: `vars` is spread as-is,
+`entryTicks`/`book` are passed through unconverted, and `location`/`sectionTodock` are taken
+without coercion. `restoreReturn()` writes all of them straight into `data.vars`,
+`data.location` and the entry-tick snapshot — so until the next load re-sanitizes, a string or
+object var feeds `resolveValue()` arithmetic and every `<if var=>` gate, and a negative or
+fractional `entryTicks` skews the `<if ticks=>` comparison. The frame's `book`/`section` are
+already effectively validated (`data.getSection` must return a real element), and task 180
+now rebuilds the frame's fight memo, so this is the remaining unvalidated slice.
+
+Coerce these frame fields on the way in, mirroring `sanitizeData`: keep only finite numeric
+vars, floor `entryTicks` to a non-negative integer, force `book` to a positive integer and
+`location`/`sectionTodock` to a string or null. `serializeFrame` lives in `visit-state.js`, so
+put its inverse there too and let the Story method delegate — keep the pair in one place
+rather than validating in the view module.
+
+Test a crafted frame (string/object/NaN vars, a negative fractional `entryTicks`, a non-string
+location) resuming and then returning: no non-numeric var reaches `data.vars`, the tick gate
+compares against a sane baseline, and an ordinary detour-and-`<return>` still restores its
+exact vars, location, todock and used action. Run the focused persistence suites and the full
+browser suite.
 
 ---
 

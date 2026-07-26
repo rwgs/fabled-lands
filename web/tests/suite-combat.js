@@ -3,7 +3,7 @@
 import * as data from '../js/data.js';
 import { GameState, makeItem, sanitizeData } from '../js/state.js';
 import * as eng from '../js/engine.js';
-import { fightRound, makeFight, groupFightRound, isDefeated, useWrathBlessing, useDefenceBlessing, rerollAttack } from '../js/combat.js';
+import { fightRound, makeFight, groupFightRound, isDefeated, useWrathBlessing, useDefenceBlessing, rerollAttack, restoreFight } from '../js/combat.js';
 import { buyTrade, sellTrade, applyInlineBuy, sellCargo } from '../js/market.js';
 import { Story } from '../js/render.js';
 import { renderChoice } from '../js/render-choices.js';
@@ -1346,6 +1346,132 @@ export async function run(ctx) {
       }
 
       Math.random = rnd162;
+    }
+
+    // --- task 180: an imported fight memo cannot execute markup on resume ----------------
+    // Task 6 treats an imported save as untrusted, but ctx.fights was restored verbatim and
+    // the combat widget interpolated fight.name/Combat/Defence/Stamina into stats.innerHTML —
+    // so a crafted §6.192-shaped memo naming a foe `<img onerror=…>` CREATED and RAN that
+    // element, with access to every save on the origin. deserializeCtx now rebuilds each fight
+    // from the section's own <fight> node (static identity re-read, dynamic fields coerced,
+    // unresolvable keys dropped) and every stats row is built from elements + textContent.
+    {
+      const settle180 = () => new Promise((r) => setTimeout(r, 40));
+      const PWN = '<img src="fl-nope-180" onerror="window.__FL_PWN180__=(window.__FL_PWN180__||0)+1">';
+      // Resume a section straight from a hand-crafted (imported) visit record, exactly as a
+      // reload of an imported save would: the record goes through sanitizeData first.
+      const craft = (secXml, book, name, fights) => {
+        const g = GameState.create({ name:'T180', gender:'m', profession:'Warrior', book, adv });
+        g.ephemeral = true;
+        g.data.stamina = 40; g.data.staminaMax = 40; g.data.abilities.combat = 6;
+        g.data.book = book; g.data.section = name;
+        g.data.visit = { v: 1, book, section: name, entryTicks: 0, sectionTodock: null, fightBonus: null, retry: null, ctx: { fights }, frame: null };
+        const g2 = new GameState(sanitizeData(JSON.parse(JSON.stringify(g.data))));
+        g2.ephemeral = true;
+        const cont = document.createElement('div');
+        const st = new Story(cont, g2, { navigate(){}, onDeath(){}, notify(){} });
+        st.resume(parse(secXml), book, name, g2.data.visit, null);
+        return { g2, cont, st };
+      };
+      const clean = (c) => c.querySelector('img') === null && c.querySelector('[onerror]') === null
+        && !/<img/i.test(c.innerHTML) && window.__FL_PWN180__ === undefined;
+
+      // Group fight (the §6.192 shape): every foe's name is the injection, one log line
+      // carries it too, and a third entry names a group that does not exist in the section.
+      const secGrp = '<section name="S180G"><p><fight name="First Spider" combat="8" defence="12" stamina="17" group="s"/>'
+        + '<fight name="Second Spider" combat="8" defence="12" stamina="13" group="s"/></p></section>';
+      const gp = craft(secGrp, 6, 'S180G', [
+        ['fightgrp@s.0', { name: PWN, combat: PWN, defence: PWN, stamina: 14, maxStamina: 999, log: ['A spider hisses ' + PWN] }],
+        ['fightgrp@s.1', { name: PWN, combat: 8, defence: 12, stamina: 13, maxStamina: 13, log: [] }],
+        ['fightgrp@nosuch.0', { name: PWN, combat: 1, defence: 1, stamina: 1, maxStamina: 1, log: [] }],
+      ]);
+      await settle180();
+      ok('task180: a crafted group-fight import injects no element, handler or side effect',
+         clean(gp.cont), `pwn=${window.__FL_PWN180__} imgs=${gp.cont.querySelectorAll('img').length}`);
+      ok('task180: the group foes keep the section\'s own names and stats',
+         /First Spider/.test(gp.cont.textContent) && /Second Spider/.test(gp.cont.textContent)
+         && [...gp.st.ctx.fights.values()].every((f) => /Spider$/.test(f.name)),
+         [...gp.st.ctx.fights.values()].map((f) => f.name).join('|'));
+      ok('task180: a memo key naming no <fight> in this section is dropped',
+         !gp.st.ctx.fights.has('fightgrp@nosuch.0') && gp.st.ctx.fights.size === 2, `n=${gp.st.ctx.fights.size}`);
+      ok('task180: the injected log line survives as inert TEXT, not as an element',
+         /A spider hisses <img src="fl-nope-180"/.test(gp.cont.querySelector('.fight-log').textContent),
+         gp.cont.querySelector('.fight-log').textContent.slice(0, 60));
+      // The imported Stamina is genuinely dynamic, so it is kept — but bounded by the
+      // section's own maximum, so maxStamina="999" cannot inflate the shown ratio.
+      ok('task180: dynamic Stamina is kept, clamped to the section\'s maximum',
+         /Stamina 14\/17/.test(gp.cont.textContent), (gp.cont.textContent.match(/Stamina \d+\/\d+/g) || []).join(' '));
+
+      // Single fight: every numeric field, the outcome and the log entries are hostile.
+      const secOne = '<section name="S180S"><p><fight name="Ogre" combat="5" defence="9" stamina="12"/></p></section>';
+      const one = craft(secOne, 1, 'S180S', [
+        ['fight@r.0.0', { name: PWN, combat: PWN, defence: PWN, stamina: '9' + PWN, maxStamina: 1e9,
+                          outcome: '<script>x</script>', defenceBonus: PWN, log: [PWN, 42, { evil: PWN }] }],
+      ]);
+      await settle180();
+      const of = one.st.ctx.fights.get('fight@r.0.0');
+      ok('task180: a crafted single-fight import injects no element, handler or side effect',
+         clean(one.cont), `pwn=${window.__FL_PWN180__} imgs=${one.cont.querySelectorAll('img').length}`);
+      ok('task180: the single foe\'s stats row shows the section\'s own numbers',
+         /Combat 5/.test(one.cont.textContent) && /Defence 9/.test(one.cont.textContent)
+         && /Stamina 12\/12/.test(one.cont.textContent), one.cont.textContent.replace(/\s+/g, ' ').slice(0, 90));
+      ok('task180: unparseable dynamic fields fall back, a bogus outcome drops, non-strings leave the log',
+         of.name === 'Ogre' && of.stamina === 12 && of.maxStamina === 12 && of.outcome === null
+         && of.defenceBonus === 0 && of.log.length === 1 && typeof of.log[0] === 'string',
+         `st=${of.stamina}/${of.maxStamina} out=${of.outcome} db=${of.defenceBonus} log=${of.log.length}`);
+      ok('task180: the fight is still live (a forged outcome cannot resolve or lock it)',
+         !!Array.from(one.cont.querySelectorAll('.fight .btn-roll')).find((b) => b.textContent === 'Attack'));
+
+      // restoreFight (headless): Combat/Defence are re-read from the node, EXCEPT for a
+      // useCache enemy (§6.635) whose fight-start loadout legitimately raised them — there the
+      // saved values are carried, but only upwards from the section's own figures.
+      const plain180 = parse('<section><fight name="Ogre" combat="5" defence="9" stamina="12"/></section>').childNodes[0];
+      const cache180 = parse('<section><fight name="Maid" combat="8" defence="16" stamina="20" useCache="conf"/></section>').childNodes[0];
+      ok('task180: restoreFight ignores an imported Combat/Defence on an ordinary fight',
+         restoreFight(plain180, { combat: 999, defence: 999 }).combat === 5
+         && restoreFight(plain180, { combat: 999, defence: 999 }).defence === 9);
+      ok('task180: restoreFight keeps a useCache loadout raise across a resume',
+         restoreFight(cache180, { combat: 10, defence: 18, stamina: 14 }).combat === 10
+         && restoreFight(cache180, { combat: 10, defence: 18, stamina: 14 }).defence === 18
+         && restoreFight(cache180, { combat: 10, defence: 18, stamina: 14 }).stamina === 14);
+      ok('task180: restoreFight refuses a useCache value BELOW the section\'s own',
+         restoreFight(cache180, { combat: 1, defence: 1 }).combat === 8
+         && restoreFight(cache180, { combat: 1, defence: 1 }).defence === 16);
+
+      // An ordinary mid-fight save still resumes its outcome, bonuses and log exactly.
+      // (task 162 covers opponents/Stamina/flags; this adds the Defence-through-Faith mark.)
+      {
+        const secB = '<section name="B180"><p><fight name="Wolf" combat="0" defence="15" stamina="20"/></p></section>';
+        const g = GameState.create({ name:'B180', gender:'m', profession:'Warrior', book:5, adv });
+        g.data.stamina = 30; g.data.staminaMax = 30; g.data.abilities.combat = 6;
+        g.data.items = []; g.addItem(makeItem('armour', 'plate', 10));
+        g.addBlessing('defence');
+        const cont = document.createElement('div');
+        const st = new Story(cont, g, { navigate(){}, onDeath(){}, notify(){} });
+        g.setVisitProvider(() => st.serializeVisit());
+        g.goTo(5, 'B180'); st.begin(parse(secB), 5, 'B180');
+        const defBefore = (c) => c.querySelector('.fight-stats.you').textContent;
+        const dBtn = Array.from(cont.querySelectorAll('button')).find((b) => /Defence through Faith/.test(b.textContent));
+        ok('task180: the mid-fight scenario offers Defence through Faith', !!dBtn);
+        if (dBtn) dBtn.click();
+        const live = [...st.ctx.fights.values()][0];
+        live.log.push('The Wolf circles you');
+        st.rerender();
+        ok('task180: the blessing raised this fight\'s Defence by 3', live.defenceBonus === 3, `db=${live.defenceBonus}`);
+
+        const g2 = new GameState(sanitizeData(JSON.parse(JSON.stringify(g.data))));
+        g2.ephemeral = true;
+        const cont2 = document.createElement('div');
+        const st2 = new Story(cont2, g2, { navigate(){}, onDeath(){}, notify(){} });
+        st2.resume(parse(secB), 5, 'B180', g2.data.visit, null);
+        const rf = [...st2.ctx.fights.values()][0];
+        ok('task180: an ordinary mid-fight save resumes the same foe, Stamina, outcome, bonus and log',
+           rf.name === 'Wolf' && rf.stamina === live.stamina && rf.maxStamina === 20 && rf.outcome === live.outcome
+           && rf.defenceBonus === 3 && rf.log.length === live.log.length && rf.log[rf.log.length - 1] === 'The Wolf circles you',
+           `st=${rf.stamina} db=${rf.defenceBonus} log=${rf.log.length}/${live.log.length}`);
+        ok('task180: the resumed player row still shows the +3 raise',
+           defBefore(cont2) === defBefore(cont), `${defBefore(cont2)} vs ${defBefore(cont)}`);
+      }
     }
 
     // --- task 171: single & group combat widgets share one control shell (parity) ---------

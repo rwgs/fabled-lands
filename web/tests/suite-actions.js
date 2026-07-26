@@ -1858,6 +1858,34 @@ export async function run(ctx) {
       const frame = { book: 2, section: '5', sectionTodock: 'Dock', vars: { x: 1 }, location: 'Loc', entryTicks: 3, usedSource: pNode, ctx };
       const fflat = visit.serializeFrame(frame);
       ok('task119: serializeFrame flattens the frame and its ctx', fflat.book === 2 && fflat.section === '5' && fflat.usedSourcePath === 'r.0' && Array.isArray(fflat.ctx.applied));
+
+      // task 180: a fight memo is rebuilt against the section's own <fight> nodes rather than
+      // trusted, so only keys that resolve to a real fight here survive a (possibly imported)
+      // load. Both key shapes are covered: 'fight@<path>' and 'fightgrp@<group>.<i>'.
+      const secF = parse('<section name="tf"><p><fight name="Ogre" combat="5" defence="9" stamina="12"/></p>'
+        + '<p><fight group="s" name="Spider A" combat="8" defence="12" stamina="17"/><fight group="s" name="Spider B" combat="8" defence="12" stamina="13"/></p></section>');
+      const evil180 = { name: '<img onerror="x">', combat: 'NaN', defence: 'NaN', stamina: 7, maxStamina: 999, outcome: 'boom', log: ['ok', 9] };
+      const fctx = visit.deserializeCtx({ fights: [
+        ['fight@r.0.0', evil180],
+        ['fightgrp@s.1', evil180],
+        ['fight@r.0.1', evil180],   // path resolves to nothing
+        ['fight@r.0', evil180],     // path resolves to a <p>, not a <fight>
+        ['fightgrp@s.9', evil180],  // group exists, member index does not
+        ['fightgrp@nope.0', evil180],
+        ['fightgrp@s.x', evil180],  // non-numeric member index
+        ['bogus@r.0.0', evil180],
+      ] }, secF);
+      ok('task180: deserializeCtx keeps only fight memos whose key names a real <fight>',
+         fctx.fights.size === 2 && fctx.fights.has('fight@r.0.0') && fctx.fights.has('fightgrp@s.1'),
+         [...fctx.fights.keys()].join('|'));
+      const f180 = fctx.fights.get('fight@r.0.0');
+      const g180 = fctx.fights.get('fightgrp@s.1');
+      ok('task180: static identity comes from the node, dynamic fields are coerced/bounded',
+         f180.name === 'Ogre' && f180.combat === 5 && f180.defence === 9 && f180.maxStamina === 12
+         && f180.stamina === 7 && f180.outcome === null && f180.log.length === 1,
+         `${f180.name} ${f180.combat}/${f180.defence} ${f180.stamina}/${f180.maxStamina} out=${f180.outcome}`);
+      ok('task180: a group member is rebuilt from its own node, in document order',
+         g180.name === 'Spider B' && g180.maxStamina === 13 && g180.group === 's', `${g180.name} ${g180.maxStamina}`);
     }
 
     // --- task 119 (phase 3): classifyPassive — the renderPassive decision cascade ----

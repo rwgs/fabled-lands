@@ -7,6 +7,8 @@
 // visit. Pure: they operate on plain records and the parsed section tree, never
 // constructing DOM or touching a browser UI global.
 
+import { restoreFight } from './combat.js';
+
 // A fresh per-visit execution context: the renderer's memo of what has already been
 // applied/resolved this visit, keyed by positional node paths. Shared by begin() and
 // deserializeCtx() so the shape has a single definition.
@@ -87,6 +89,30 @@ export function rebuildVisitScaffold(ctx, sectionEl, state = null) {
   });
 }
 
+// The <fight> element a persisted fight-memo key names: 'fight@<node path>' for a lone
+// fight, 'fightgrp@<group>.<i>' for the i-th member of a simultaneous group — exactly the
+// keys renderFight/renderGroupFight mint. Returns null when the key is malformed, or when
+// the section holds no such fight, so a fabricated memo drops instead of resuming. (task 180)
+function resolveFightNode(key, sectionEl) {
+  if (typeof key !== 'string' || !sectionEl) return null;
+  const at = key.indexOf('@');
+  if (at < 0) return null;
+  const kind = key.slice(0, at);
+  const ref = key.slice(at + 1);
+  if (kind === 'fight') {
+    const n = resolveNodePath(ref, sectionEl);
+    return n && n.nodeName && n.nodeName.toLowerCase() === 'fight' ? n : null;
+  }
+  if (kind !== 'fightgrp') return null;
+  // 'fightgrp@<group>.<i>': split the index off the END, so a group id containing a dot
+  // still resolves. The members are re-read in document order, as the widget draws them.
+  const dot = ref.lastIndexOf('.');
+  if (dot <= 0 || !/^\d+$/.test(ref.slice(dot + 1))) return null;
+  const group = ref.slice(0, dot);
+  const members = Array.from(sectionEl.querySelectorAll('fight')).filter((f) => f.getAttribute('group') === group);
+  return members[parseInt(ref.slice(dot + 1), 10)] || null;
+}
+
 // Rebuild a ctx from its serialised form against the (re-parsed) section. Unknown/absent
 // fields degrade to empty rather than throwing, and every list guard tolerates a hand-edited
 // save. groupLimits/rollLockCaches are rebuilt by rebuildVisitScaffold afterwards.
@@ -98,7 +124,14 @@ export function deserializeCtx(rec, sectionEl) {
   arr(r.wroteVars).forEach((k) => { if (typeof k === 'string') ctx.wroteVars.add(k); });
   arr(r.rolledVars).forEach((k) => { if (typeof k === 'string') ctx.rolledVars.add(k); });
   arr(r.rolls).forEach((e) => { if (Array.isArray(e) && e.length === 2) ctx.rolls.set(e[0], e[1]); });
-  arr(r.fights).forEach((e) => { if (Array.isArray(e) && e.length === 2) ctx.fights.set(e[0], e[1]); });
+  // Fights are the one memo the combat widget DISPLAYS, so they are rebuilt against the
+  // section's own <fight> nodes rather than trusted: an entry whose key names no <fight>
+  // here drops entirely, and the rest keep only coerced dynamic state. (task 180)
+  arr(r.fights).forEach((e) => {
+    if (!Array.isArray(e) || e.length !== 2) return;
+    const node = resolveFightNode(e[0], sectionEl);
+    if (node) ctx.fights.set(e[0], restoreFight(node, e[1]));
+  });
   arr(r.buys).forEach((e) => { if (Array.isArray(e) && e.length === 2) ctx.buys.set(e[0], e[1]); });
   arr(r.groupPicks).forEach((e) => { if (Array.isArray(e) && e.length === 2) ctx.groupPicks.set(e[0], e[1]); });
   arr(r.forcedChosen).forEach((e) => { if (Array.isArray(e) && e.length === 2) ctx.forcedChosen.set(e[0], e[1]); });

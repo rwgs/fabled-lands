@@ -108,16 +108,33 @@ function renderGroupFight(story, container, node, group) {
 // commit tail. These small local helpers hold that shared shell once so a persistence/blessing/
 // flee change lands in both widgets (the parity that drifted across tasks 83/87/91/162/166).
 
+// A stats row, built as elements with textContent — never innerHTML. Every cell here is
+// state- or memo-derived, and a restored (possibly imported) fight memo reaches this path, so
+// no value may ever be parsed as markup: an `<img onerror=…>` foe name must render as text,
+// not create an element. `cells` is [text, className?] pairs. (task 180)
+function statsRow(className, cells) {
+  const row = document.createElement('div');
+  row.className = className;
+  for (const [text, cls] of cells) {
+    const span = document.createElement('span');
+    if (cls) span.className = cls;
+    span.textContent = text;
+    row.appendChild(span);
+  }
+  return row;
+}
+
 // The player's stats line. defenceBonus is the per-fight Defence-through-Faith raise (stored on
 // the single fight, or shared on every group member — task 91), folded in with the transient
 // special="attack"/"defence" bonuses so the shown values match what resolution uses. (tasks 49, 87)
 function playerStatsRow(story, defenceBonus = 0) {
-  const you = document.createElement('div');
-  you.className = 'fight-stats you';
   const shownCombat = story.state.ability('combat') + story.state.fightAttackBonus();
   const shownDef = story.state.defence() + story.state.fightDefenceBonus() + (defenceBonus || 0);
-  you.innerHTML = `<span>Your Combat ${shownCombat}</span><span>Your Defence ${shownDef}</span><span>Your Stamina ${story.state.data.stamina}/${story.state.effectiveStaminaMax()}</span>`;
-  return you;
+  return statsRow('fight-stats you', [
+    [`Your Combat ${shownCombat}`],
+    [`Your Defence ${shownDef}`],
+    [`Your Stamina ${story.state.data.stamina}/${story.state.effectiveStaminaMax()}`],
+  ]);
 }
 
 // The last six lines of the fight log (aria-live so screen readers hear each round, task 153).
@@ -191,12 +208,12 @@ function drawGroupFight(story, box, fights, dmgNode, group, fleeNode = null) {
   box.appendChild(title);
 
   fights.forEach((fight) => {
-    const stats = document.createElement('div');
-    stats.className = 'fight-stats' + (isDefeated(fight) ? ' defeated' : '');
-    stats.innerHTML =
-      `<span>${fight.name}</span><span>Combat ${fight.combat}</span><span>Defence ${fight.defence}</span>` +
-      `<span class="en-stam">${isDefeated(fight) ? 'defeated' : `Stamina ${fight.stamina}/${fight.maxStamina}`}</span>`;
-    box.appendChild(stats);
+    box.appendChild(statsRow('fight-stats' + (isDefeated(fight) ? ' defeated' : ''), [
+      [fight.name],
+      [`Combat ${fight.combat}`],
+      [`Defence ${fight.defence}`],
+      [isDefeated(fight) ? 'defeated' : `Stamina ${fight.stamina}/${fight.maxStamina}`, 'en-stam'],
+    ]));
   });
 
   box.appendChild(playerStatsRow(story, fights[0] ? fights[0].defenceBonus : 0)); // shared group Defence mark
@@ -300,12 +317,11 @@ function drawFight(story, box, fight, node, dmgNode, fleeNode, key, locked = fal
   title.textContent = `⚔ ${fight.name}`;
   box.appendChild(title);
 
-  const stats = document.createElement('div');
-  stats.className = 'fight-stats';
-  stats.innerHTML =
-    `<span>Combat ${fight.combat}</span><span>Defence ${fight.defence}</span>` +
-    `<span class="en-stam">Stamina ${fight.stamina}/${fight.maxStamina}</span>`;
-  box.appendChild(stats);
+  box.appendChild(statsRow('fight-stats', [
+    [`Combat ${fight.combat}`],
+    [`Defence ${fight.defence}`],
+    [`Stamina ${fight.stamina}/${fight.maxStamina}`, 'en-stam'],
+  ]));
 
   box.appendChild(playerStatsRow(story, fight.defenceBonus)); // fight.defenceBonus = this fight's Defence-through-Faith raise
   box.appendChild(logRow(fight.log));
