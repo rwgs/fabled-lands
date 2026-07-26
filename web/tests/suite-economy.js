@@ -232,6 +232,60 @@ export async function run(ctx) {
     payBtn().click();
     ok('priced rest second night heals again', gPay.data.stamina === 6 && gPay.data.shards === 46, `st=${gPay.data.stamina} sh=${gPay.data.shards}`);
 
+    // --- task 188: <rest hidden="t"/> is automatic, not an offer -----------------------
+    // §6.479 states "All your injuries are mysteriously healed"; renderRest never read
+    // hidden=, so it drew a Rest button and the player could decline it and leave wounded.
+    {
+      const s479 = await data.getSection(6, '479');
+      const mk188 = (stamina) => {
+        const g = GameState.create({ name:'H188', gender:'m', profession:'Warrior', book:6, adv });
+        g.ephemeral = true; g.data.staminaMax = 12; g.data.stamina = stamina;
+        const c = document.createElement('div');
+        const st = new Story(c, g, { navigate(){}, onDeath(){}, notify(){} });
+        g.setVisitProvider(() => st.serializeVisit());
+        g.goTo(6, '479'); // so the saved visit record matches the position (sanitizeVisit)
+        st.begin(s479, 6, '479');
+        return { g, c, st };
+      };
+      const h188 = mk188(3);
+      ok('§6.479 heals a wounded arrival to full on entry', h188.g.data.stamina === 12, `st=${h188.g.data.stamina}`);
+      ok('§6.479 renders no Rest control', !Array.from(h188.c.querySelectorAll('button')).some((b) => /Rest/.test(b.textContent)), Array.from(h188.c.querySelectorAll('button')).map((b) => b.textContent).join('|'));
+      // Wounded again inside the SAME visit: a rerender must not heal a second time.
+      h188.g.damageStamina(5);
+      h188.st.rerender();
+      ok('§6.479 a rerender in the same visit does not heal again', h188.g.data.stamina === 7, `st=${h188.g.data.stamina}`);
+      // Nor may a reload mid-visit: the memo travels in the visit record.
+      const rec188 = h188.st.serializeVisit();
+      const g188b = new GameState(sanitizeData(JSON.parse(JSON.stringify({ ...h188.g.data, visit: rec188 }))));
+      const c188b = document.createElement('div');
+      const st188b = new Story(c188b, g188b, { navigate(){}, onDeath(){}, notify(){} });
+      st188b.resume(s479, 6, '479', g188b.data.visit, null);
+      ok('§6.479 a resume in the same visit does not heal again', g188b.data.stamina === 7, `st=${g188b.data.stamina}`);
+      ok('§6.479 the resumed visit still renders no Rest control', !Array.from(c188b.querySelectorAll('button')).some((b) => /Rest/.test(b.textContent)));
+      // A FRESH visit heals again (the meditation can be re-entered).
+      h188.st.begin(s479, 6, '479');
+      ok('§6.479 a fresh visit heals again', h188.g.data.stamina === 12, `st=${h188.g.data.stamina}`);
+      // Arriving already whole changes nothing (and still shows no control).
+      const full188 = mk188(12);
+      ok('§6.479 entering at full Stamina is a no-op with no control', full188.g.data.stamina === 12 && !Array.from(full188.c.querySelectorAll('button')).some((b) => /Rest/.test(b.textContent)));
+      // A hidden rest inside an untaken branch must not fire, and a visible rest is untouched.
+      const gBr = GameState.create({ name:'HB188', gender:'m', profession:'Warrior', book:6, adv });
+      gBr.ephemeral = true; gBr.data.staminaMax = 12; gBr.data.stamina = 4;
+      const cBr = document.createElement('div');
+      new Story(cBr, gBr, { navigate(){}, onDeath(){}, notify(){} })
+        .begin(parse('<section name="H1"><if codeword="Nope"><rest hidden="t"/></if><else><p>no heal</p></else></section>'), 6, 'H1');
+      ok('§188 a hidden rest in an untaken branch does not heal', gBr.data.stamina === 4, `st=${gBr.data.stamina}`);
+      const gVis = GameState.create({ name:'HV188', gender:'m', profession:'Warrior', book:6, adv });
+      gVis.ephemeral = true; gVis.data.staminaMax = 12; gVis.data.stamina = 4;
+      const cVis = document.createElement('div');
+      new Story(cVis, gVis, { navigate(){}, onDeath(){}, notify(){} })
+        .begin(parse('<section name="H2"><rest>heal up</rest></section>'), 6, 'H2');
+      const visBtn = Array.from(cVis.querySelectorAll('button')).find((b) => /Rest/.test(b.textContent));
+      ok('§188 a visible rest is still an opt-in button', !!visBtn && gVis.data.stamina === 4);
+      visBtn.click();
+      ok('§188 clicking the visible rest still heals', gVis.data.stamina === 12, `st=${gVis.data.stamina}`);
+    }
+
     // --- narration (TTS): sentence wrapping preserves interactivity ---
     const narrator = new Narrator();
     ok('TTS supported in test browser', narrator.supported === true);

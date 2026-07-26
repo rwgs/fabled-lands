@@ -22,7 +22,7 @@ audit pass.
 - [x] 185. Wildcard affliction effects (`ability="*"`) are discarded
 - [x] 186. Automatic highest-bonus equipment can select a worse loadout
 - [x] 187. Named market sales ignore item kind and equipment stats
-- [ ] 188. `<rest hidden="t"/>` is optional instead of automatic
+- [x] 188. `<rest hidden="t"/>` is optional instead of automatic
 - [ ] 189. A failed initial adventure load strands a new save on a blank game screen
 - [ ] 190. Service-worker activation and lookup touch unrelated origin caches
 - [ ] 191. Speech-enabled narrow headers clip critical controls
@@ -992,6 +992,24 @@ maximum and preserve ordinary priced/fixed visible-rest behavior.
 
 Test wounded entry to §6.479 (full Stamina, no button), damage plus rerender/resume during the
 same visit (no re-heal), a fresh visit (heal again), and entry while already full.
+
+**Done.** `renderRest()` now takes an early branch for `hidden="t"`: it adds the `rest@<path>`
+memo, calls `applyRest` and returns no DOM. The memo is added **before** the mutation because
+`applyRest` → `changed()` → autosave can rerender this very node, and an unset memo would heal
+(and, for a hypothetical priced hidden rest, charge) twice. `applyRest` already heals to
+`effectiveStaminaMax()` (task 158), so aura headroom is included. The branch is skipped while
+`story.inactive`, so a hidden rest inside an untaken `<if>` cannot fire — the same rule the
+passive renderers follow. Visible rests keep every existing behaviour: the heal-to-full form,
+the task-129 once-per-visit lock on an unpriced fixed amount, and repeatable priced nights.
+§6.479 is the corpus's only hidden rest.
+
+10 new assertions against the real §6.479: a wounded arrival is restored to full with no Rest
+control rendered; taking damage and rerendering inside the same visit does not heal again;
+neither does a reload — `serializeVisit` → `sanitizeData` → `Story.resume` carries the memo, and
+the resumed render still draws no control; a fresh `begin()` of the section heals again;
+entering already whole is a no-op. Plus a hidden rest inside an untaken `<if>` branch that must
+not fire, and a visible `<rest>` that is still an opt-in button which heals on click. Full
+browser suite: RESULT ALL PASS pass=1913 fail=0, all 4,369 sections rendering.
 
 ## 189. A failed initial adventure load strands a new save on a blank game screen
 

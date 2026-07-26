@@ -384,6 +384,19 @@ export function renderRest(story, container, node, path) {
   // repeat, and the no-stamina= heal-to-full form already self-limits at full. (task 129)
   const onceOnly = hasAmt && cost === 0;
   const memo = 'rest@' + path;
+  // A HIDDEN rest is not an offer: §6.479's prose ("All your injuries are mysteriously
+  // healed") states the heal has already happened, so apply it once on entry and render no
+  // control — a Rest button turned that mandatory full heal into something the player could
+  // decline and walk away wounded. Memoise BEFORE the mutation: applyRest → changed() →
+  // autosave can rerender this very node, and an unset memo would heal (and charge) twice.
+  // Suppressed inside an untaken branch, like every other effect there. (task 188)
+  if (boolAttr(node.getAttribute('hidden'))) {
+    if (!story.inactive && !story.ctx.applied.has(memo)) {
+      story.ctx.applied.add(memo);
+      applyRest(story.state, perUse, cost);
+    }
+    return null;
+  }
   const used = onceOnly && story.ctx.applied.has(memo);
   const box = document.createElement('span');
   const btn = document.createElement('button');
