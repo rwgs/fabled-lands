@@ -3,7 +3,7 @@
 
 import { ABILITIES, canonShipType, CREW_LEVELS, SHIP_TYPES, canonCargo } from './rules.js';
 import { makeItem, normalize, globMatch, matchItems, matchItemQuery, isShardsCurrency, currencyAward, splitItemName, parseTags } from './state.js';
-import { availableBooks } from './data.js';
+import { bookAvailable } from './edition.js'; // the DOM-free registry, never data.js (task 195)
 
 // ---- dice / RNG ------------------------------------------------------------
 // All game-affecting randomness flows through rng() so play can be made
@@ -233,7 +233,7 @@ export function evaluateCondition(el, state) {
   add(get('gender'), () => (state.data.gender === 'm') === get('gender').toLowerCase().startsWith('m'));
   add(get('resurrection'), () => state.hasResurrection());
   add(get('dead'), () => state.isDead() === boolAttr(get('dead')));
-  add(get('book'), () => availableBooks().includes(Number(get('book'))));
+  add(get('book'), () => bookAvailable(get('book')));
   add(get('var'), () => { const v = state.getVar(get('var')); const cmp = compare(v); return cmp == null ? v !== 0 : cmp; });
   add(get('name'), () => { const v = state.codewordValue(get('name')); const cmp = compare(v); return cmp == null ? v !== 0 : cmp; });
   // ability= is a standalone stat test ONLY without an equipment selector; with a

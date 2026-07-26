@@ -893,6 +893,70 @@ export async function run(ctx) {
       pane.remove();
     }
 
+    // --- task 195: every book-availability navigation gate still answers correctly ----------
+    // The three gates (a book= choice, a book= goto, a cross-book extra choice) used to reach
+    // data.availableBooks(); they now read the DOM-free edition registry. Same list, same
+    // answers — a bundled target stays live and crossable, an unbundled one is refused with a
+    // message and NO navigation, so a save can never be moved into a book this build lacks.
+    {
+      const g195 = GameState.create({ name: 'B195', gender: 'm', profession: 'Warrior', book: 1, adv });
+      g195.ephemeral = true;
+      const avail195 = data.availableBooks();
+      ok('task195: the fixture edition bundles book 1 and not book 999',
+         avail195.includes(1) && !avail195.includes(999), JSON.stringify(avail195));
+
+      // (choice gate) a book= choice is disabled up front, with the reason spelled out.
+      const c195 = document.createElement('div');
+      let nav195 = null;
+      const stC = new Story(c195, g195, { navigate: (b, s) => { nav195 = { b, s }; }, onDeath() {}, notify() {} });
+      stC.begin(parse('<section name="C195"><choices><choice book="2" section="5">Cross to Book 2</choice><choice book="999" section="5">Cross to Book 999</choice></choices></section>'), 1, 'C195');
+      const cHere = Array.from(c195.querySelectorAll('.choice')).find((b) => /Book 2/.test(b.textContent));
+      const cGone = Array.from(c195.querySelectorAll('.choice')).find((b) => /Book 999/.test(b.textContent));
+      ok('task195: a choice into a bundled book stays live', !!cHere && cHere.disabled === false);
+      ok('task195: a choice into an unbundled book is gated as "book not in edition"',
+         !!cGone && cGone.disabled === true && /book not in edition/.test(cGone.title), cGone ? cGone.title : 'none');
+      cHere.click();
+      ok('task195: the bundled choice navigates', nav195 && Number(nav195.b) === 2 && String(nav195.s) === '5', JSON.stringify(nav195));
+      nav195 = null;
+      cGone.click();
+      ok('task195: the gated choice navigates nowhere', nav195 === null, JSON.stringify(nav195));
+
+      // (goto gate) a book= goto is checked ON CLICK — it refuses with a notice instead of
+      // crossing into a book whose data this build does not ship.
+      const c195g = document.createElement('div');
+      let navG = null; const warnsG = [];
+      const stG = new Story(c195g, g195, { navigate: (b, s) => { navG = { b, s }; }, onDeath() {}, notify: (m) => warnsG.push(m) });
+      stG.begin(parse('<section name="G195"><goto book="3" section="7">To Book 3</goto><goto book="999" section="7">To Book 999</goto></section>'), 1, 'G195');
+      const gHere = Array.from(c195g.querySelectorAll('.goto')).find((b) => /Book 3/.test(b.textContent));
+      const gGone = Array.from(c195g.querySelectorAll('.goto')).find((b) => /Book 999/.test(b.textContent));
+      gGone.click();
+      ok('task195: a goto into an unbundled book refuses and warns',
+         navG === null && warnsG.length === 1 && /isn.t included in this edition/.test(warnsG[0]), `nav=${JSON.stringify(navG)} warn=${warnsG[0]}`);
+      gHere.click();
+      ok('task195: a goto into a bundled book crosses normally',
+         navG && Number(navG.b) === 3 && String(navG.s) === '7' && warnsG.length === 1, JSON.stringify(navG));
+
+      // (extra-choice gate) a persistent <extrachoice> pointing at another book is surfaced at
+      // its target section and gets the same refusal.
+      const c195x = document.createElement('div');
+      let navX = null; const warnsX = [];
+      const gX = GameState.create({ name: 'X195', gender: 'm', profession: 'Warrior', book: 1, adv });
+      gX.ephemeral = true;
+      gX.addExtraChoice({ key: 'x195a', atBook: 1, atSection: 'X195', book: 4, section: '11', text: 'Sail to Book 4' });
+      gX.addExtraChoice({ key: 'x195b', atBook: 1, atSection: 'X195', book: 999, section: '11', text: 'Sail to Book 999' });
+      const stX = new Story(c195x, gX, { navigate: (b, s) => { navX = { b, s }; }, onDeath() {}, notify: (m) => warnsX.push(m) });
+      stX.begin(parse('<section name="X195"><p>A harbour.</p></section>'), 1, 'X195');
+      const xHere = Array.from(c195x.querySelectorAll('.extra-choice')).find((b) => /Book 4/.test(b.textContent));
+      const xGone = Array.from(c195x.querySelectorAll('.extra-choice')).find((b) => /Book 999/.test(b.textContent));
+      ok('task195: both extra choices surface at their target section', !!xHere && !!xGone);
+      xGone.click();
+      ok('task195: an extra choice into an unbundled book refuses and warns',
+         navX === null && warnsX.length === 1 && /isn.t included in this edition/.test(warnsX[0]), `nav=${JSON.stringify(navX)} warn=${warnsX[0]}`);
+      xHere.click();
+      ok('task195: an extra choice into a bundled book crosses normally',
+         navX && Number(navX.b) === 4 && String(navX.s) === '11', JSON.stringify(navX));
+    }
+
     // task 150: an if/elseif/else inside a choice label is dispatched per-node via
     // renderElement (appendChildrenList), with no cross-sibling chain state — a bare
     // <else>/<elseif> must be inert, not rendered (and its effects run) unconditionally.

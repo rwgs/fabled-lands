@@ -3,6 +3,7 @@
 import * as data from '../js/data.js';
 import { GameState, makeItem, sanitizeData } from '../js/state.js';
 import * as eng from '../js/engine.js';
+import * as edition from '../js/edition.js';
 import { goodsFrom, buyTrade } from '../js/market.js';
 import { Story, previewProse } from '../js/render.js';
 
@@ -719,6 +720,32 @@ export async function run(ctx) {
       g160b.addItem(makeItem('item', 'gem', 0, null, ['gem']));
       const planOk = eng.losePaymentPlan(parse('<lose item="gem" multiple="3" price="k"/>'), g160b);
       ok('task160.2: plan is eligible once multiple= items exist', planOk.eligible === true);
+    }
+
+    // --- task 195: `<if book="N">` reads the DOM-free edition registry ---------------------
+    // The condition used to call data.availableBooks(), which put a module-level DOMParser on
+    // the engine's import graph. It now asks edition.js — the same list, published by
+    // loadMeta() — so the answer must be unchanged for every bundled and unbundled book.
+    {
+      const gEd = GameState.create({ name: 'ED195', gender: 'm', profession: 'Warrior', book: 1, adv });
+      const bundled = data.availableBooks();
+      ok('task195: the registry is populated from meta.json', bundled.length === 6, JSON.stringify(bundled));
+      ok('task195: edition.availableBooks agrees with data.availableBooks',
+         JSON.stringify(edition.availableBooks()) === JSON.stringify(bundled));
+      for (const n of bundled) {
+        ok(`task195: <if book="${n}"> is true for a bundled book`, eng.evaluateCondition(parse(`<if book="${n}"/>`), gEd) === true);
+      }
+      for (const n of [0, 7, 999]) {
+        ok(`task195: <if book="${n}"> is false for an unbundled book`, eng.evaluateCondition(parse(`<if book="${n}"/>`), gEd) === false);
+      }
+      ok('task195: not="t" negates the book test',
+         eng.evaluateCondition(parse('<if not="t" book="999"/>'), gEd) === true
+         && eng.evaluateCondition(parse('<if not="t" book="1"/>'), gEd) === false);
+      // A non-numeric book= is not a bundled book (it used to become NaN, which .includes()
+      // also rejected — keep that answer explicit now the lookup is the registry's).
+      ok('task195: a non-numeric book= is not available', eng.evaluateCondition(parse('<if book="one"/>'), gEd) === false);
+      ok('task195: bookAvailable coerces a numeric string like the corpus writes it',
+         edition.bookAvailable('2') === true && edition.bookAvailable(2) === true && edition.bookAvailable('2x') === false);
     }
 
 }

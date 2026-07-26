@@ -9,7 +9,7 @@
 
 import { boolAttr, isDiceExpr, resolveValue, matchRange } from './engine.js';
 import { normalize, currencyAward, isShardsCurrency } from './state.js';
-import { availableBooks } from './data.js';
+import { bookAvailable } from './edition.js'; // the DOM-free registry, never data.js (task 195)
 import { isRollGate, isDeferredEscapeClear, isDeferredTagCleanup, aggregateFightOutcome } from './render-gates.js';
 
 // isRollGate moved to render-gates.js (one-way dependency: classifyPassive below composes
@@ -363,7 +363,7 @@ export function choiceGate(state, node, view) {
   const emptyvar = node.getAttribute('emptyvar');
   if (emptyvar && state.hasVar(emptyvar)) reasons.push('unavailable');
   const bookNum = node.getAttribute('book');
-  if (bookNum && !availableBooks().includes(Number(bookNum))) reasons.push('book not in edition');
+  if (bookNum && !bookAvailable(bookNum)) reasons.push('book not in edition');
   // dead="t" choices are only for a dead player (and dead="f" only while alive) — task 28.
   const deadAttr = node.getAttribute('dead');
   if (deadAttr != null && boolAttr(deadAttr) !== state.isDead()) reasons.push(boolAttr(deadAttr) ? 'only if you are dead' : 'only while you live');

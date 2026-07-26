@@ -61,7 +61,13 @@ Notes:
 - Use **Chrome, not Edge** (headless Edge occasionally dumps empty DOM).
 - Give it a virtual-time budget **≥ 60s** — the every-section scan is CPU-heavy.
 - Pure-logic modules (`engine.js`, `combat.js`, `market.js`, `state.js`) can also
-  be imported and unit-checked directly in Node for fast feedback.
+  be imported and unit-checked directly in Node for fast feedback. That seam is itself
+  tested — `node web/tests/node-import.mjs` (no dependencies, exit 0 = pass) walks each
+  rule module's import graph, fails on anything reaching a browser-touching module, then
+  really imports all seven and calls into them. Run it after changing a rule module's
+  imports; CI runs it as its own job. A rule module needing the bundled-book list reads
+  `edition.js` — the DOM-free registry `data.js` publishes into — and **never `data.js`**,
+  whose module top level constructs a `DOMParser`. (task 195)
 - **Never edit `web/data/*.json` to make a test pass — fix the XML or the engine.**
 - `web/_test.html` is only the harness + reporter; the assertions live in focused ES-module
   suites under `web/tests/` (`suite-engine`, `suite-render`, `suite-inventory`, `suite-combat`,

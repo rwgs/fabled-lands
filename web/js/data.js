@@ -1,6 +1,7 @@
 // data.js — loads the bundled book data and parses section XML into DOM trees.
 
 import { parseTags } from './state.js';
+import { setAvailableBooks, availableBooks } from './edition.js';
 
 const DATA_BASE = 'data/';
 
@@ -14,15 +15,18 @@ export async function loadMeta() {
   const res = await fetch(DATA_BASE + 'meta.json');
   if (!res.ok) throw new Error('Could not load meta.json');
   _meta = await res.json();
+  // Publish the bundled-book list to the DOM-free registry the rule modules read, so
+  // `<if book="N">` and a book-gated choice can be answered without importing this loader
+  // (and its DOMParser) into the engine chain. (task 195)
+  setAvailableBooks((_meta?.books || []).map((b) => b.number));
   return _meta;
 }
 
 export function getMeta() { return _meta; }
 
-/** Which books actually have section data bundled. */
-export function availableBooks() {
-  return (_meta?.books || []).map((b) => b.number);
-}
+/** Which books actually have section data bundled. The registry (edition.js) owns the list;
+ *  re-exported here so the app and view keep asking the data layer as before. */
+export { availableBooks };
 
 export function bookTitle(n) {
   return _meta?.titles?.[String(n)] || `Book ${n}`;

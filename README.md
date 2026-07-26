@@ -173,7 +173,8 @@ structure of the books is preserved exactly.
 
 | Module | Responsibility |
 |---|---|
-| `data.js` | Loads the bundled JSON, parses section XML, exposes `getSection(book, n)`. |
+| `data.js` | Loads the bundled JSON, parses section XML, exposes `getSection(book, n)`; publishes the bundled-book list into `edition.js`. |
+| `edition.js` | Which books this build bundles — a tiny, import-free registry `data.js` writes and the rule modules read, so a `book=` gate needs no XML loader (and therefore no `DOMParser`) on the engine's import graph. No DOM. |
 | `state.js` | The **Adventure Sheet** model + derived stats (affected abilities, Defence) + `localStorage` save slots. |
 | `rules.js` | Static constants: abilities, professions, rank titles, limits. |
 | `engine.js` | The headless rules core: dice, `<if>` condition evaluation, passive effects (`lose`/`tick`/`gain`/`set`/`curse`), die-roll modifiers (`<adjust>`, conditional on crew/ship/god/item/codeword/rank), and roll resolution (ability/difficulty, rank check, training), rest, and resurrection deals. No DOM. |
@@ -299,6 +300,20 @@ subset in the same harness — handy for iterating on one area.
 > Use a **fresh `--user-data-dir`** (as above) so the service worker can't serve a stale
 > cached copy of the app — otherwise an old bundle can mask your changes and report a
 > false pass. Chrome is used here because headless Edge occasionally emitted empty dumps.
+
+### The DOM-free seam, checked in Node
+
+The rule modules are supposed to be importable and unit-checkable straight from Node, with no
+DOM and no shims. One extra import is all it takes to break that silently, so the promise is
+tested rather than trusted:
+
+```bash
+node web/tests/node-import.mjs      # exit 0 = pass; no dependencies
+```
+
+It walks each rule module's import graph and fails if it reaches anything that touches the
+browser, then really imports all seven (`engine`, `combat`, `market`, `state`, `render-rules`,
+`render-gates`, `visit-state`) and calls into them. CI runs it as its own job.
 
 ---
 
