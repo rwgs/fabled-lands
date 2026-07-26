@@ -1435,6 +1435,43 @@ export async function run(ctx) {
       ok('§184 a named removal is case-insensitive and spares other curses', gmix184.removeCurse('avenger\'s bite') === true && gmix184.data.curses.length === 1 && gmix184.hasCurse('Skunk-juice') && gmix184.ability('charisma') === chMix, `n=${gmix184.data.curses.length}`);
     }
 
+    // --- task 185: a wildcard affliction effect (ability="*") hits all six abilities ---
+    // afflictionAbility() returned null for "*", so readEffects() dropped Leprosy's SOLE
+    // effect and §2.136 recorded the disease with no penalty at all. It now parses, persists
+    // and applies to each core ability — never to Rank or the Stamina total.
+    {
+      const ABIL185 = ['charisma', 'combat', 'magic', 'sanctity', 'scouting', 'thievery'];
+      const lep = (await data.getSection(2, '136')).querySelector('disease');
+      ok('§2.136 Leprosy carries a single ability="*" effect', !!lep && lep.querySelectorAll('effect').length === 1 && lep.querySelector('effect').getAttribute('ability') === '*');
+      const g185 = GameState.create({ name:'T185', gender:'m', profession:'Warrior', book:2, adv });
+      g185.ephemeral = true;
+      g185.data.blessings = []; g185.data.permanentBlessings = [];   // no immunity blessing (task 183)
+      g185.data.abilities.magic = 1;                                 // prove the floor at 1
+      const before185 = {}; ABIL185.forEach((a) => { before185[a] = g185.ability(a); });
+      const rank185 = g185.rankValue(), max185 = g185.effectiveStaminaMax();
+      eng.applyEffect(lep, g185, {});
+      ok('§185 the wildcard effect is stored on the disease record', g185.data.diseases.length === 1 && g185.data.diseases[0].effects.length === 1 && g185.data.diseases[0].effects[0].ability === '*' && g185.data.diseases[0].effects[0].bonus === -1, JSON.stringify(g185.data.diseases));
+      ok('§185 Leprosy costs 1 point from every ability', ABIL185.every((a) => g185.ability(a) === Math.max(1, before185[a] - 1)), ABIL185.map((a) => `${a}:${before185[a]}→${g185.ability(a)}`).join(' '));
+      ok('§185 an ability already at 1 floors at 1', g185.ability('magic') === 1, String(g185.ability('magic')));
+      ok('§185 the wildcard touches neither Rank nor the Stamina total', g185.rankValue() === rank185 && g185.effectiveStaminaMax() === max185, `rank=${g185.rankValue()} max=${g185.effectiveStaminaMax()}`);
+      // Save/load keeps the wildcard; a duplicate infection adds nothing; a cure restores all six.
+      const g185b = new GameState(sanitizeData(JSON.parse(JSON.stringify(g185.data))));
+      ok('§185 the wildcard survives a save round-trip', g185b.data.diseases[0].effects[0].ability === '*' && ABIL185.every((a) => g185b.ability(a) === g185.ability(a)), JSON.stringify(g185b.data.diseases));
+      eng.applyEffect(lep, g185b, {});
+      ok('§185 a duplicate infection has no further effect', g185b.data.diseases.length === 1 && ABIL185.every((a) => g185b.ability(a) === g185.ability(a)), ABIL185.map((a) => `${a}:${g185b.ability(a)}`).join(' '));
+      ok('§185 curing Leprosy restores every ability', g185b.removeDisease('Leprosy') === true && ABIL185.every((a) => g185b.ability(a) === before185[a]), ABIL185.map((a) => `${a}:${g185b.ability(a)}/${before185[a]}`).join(' '));
+      // Live §2.136: the seeded 1-3 outcome infects and every score drops by one.
+      const g136 = GameState.create({ name:'L136', gender:'m', profession:'Warrior', book:2, adv });
+      g136.ephemeral = true; g136.data.blessings = []; g136.data.permanentBlessings = [];
+      const b136 = {}; ABIL185.forEach((a) => { b136[a] = g136.ability(a); });
+      const c136 = document.createElement('div');
+      const st136 = new Story(c136, g136, { navigate(){}, onDeath(){}, notify(){} });
+      g136.setVisitProvider(() => st136.serializeVisit());
+      st136.begin(await data.getSection(2, '136'), 2, '136');
+      eng.seedRng(7); Array.from(c136.querySelectorAll('.btn-roll')).find((b) => !b.disabled).click(); await settle42(); eng.seedRng(null);
+      ok('§2.136 live: contracting Leprosy costs a point from all six abilities', g136.hasDisease('Leprosy') && ABIL185.every((a) => g136.ability(a) === Math.max(1, b136[a] - 1)), ABIL185.map((a) => `${a}:${b136[a]}→${g136.ability(a)}`).join(' '));
+    }
+
     // --- task 74: standalone force="f" effects are opt-in, not auto-applied ----------
     // book1/25: an optional mission codeword is a button; NOT recorded on entry.
     const g25 = GameState.create({ name:'M25', gender:'m', profession:'Warrior', book:1, adv });

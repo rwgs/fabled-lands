@@ -19,7 +19,7 @@ audit pass.
 
 **MEDIUM**
 
-- [ ] 185. Wildcard affliction effects (`ability="*"`) are discarded
+- [x] 185. Wildcard affliction effects (`ability="*"`) are discarded
 - [ ] 186. Automatic highest-bonus equipment can select a worse loadout
 - [ ] 187. Named market sales ignore item kind and equipment stats
 - [ ] 188. `<rest hidden="t"/>` is optional instead of automatic
@@ -843,6 +843,26 @@ minimum-one rule and natural/affected semantics.
 
 Test all six scores before/after Leprosy, the floor at 1, save/load, duplicate infection
 semantics and full restoration on cure.
+
+**Done.** Three small changes on one rule: `afflictionAbility()` now returns `*` alongside
+`stamina` and the six named abilities, so `readEffects()` keeps the wildcard; a new
+`afflictionHits(e, ability)` helper in `state.js` states the match rule once (exact key, or
+`*` against any of the six core abilities) and both `afflictionBonus()` and `afflictionMod()`
+use it, so a wildcard `divide`/`target` cannot become a new silent drop now that `*` parses.
+`sumAfflictionStamina()` deliberately still requires the explicit `ability="stamina"` key, so
+the wildcard reaches neither the Stamina total nor Rank — the same boundary as the item-aura
+wildcard (`sumAuraBonus`). `sanitizeAffliction` already accepted any non-empty ability string,
+so the wildcard persists without a schema change, and the "minimum score of 1" is the existing
+`clampAbility` floor in `ability()`/`abilityNoWeapon()`. §2.136's Leprosy is the corpus's only
+wildcard affliction effect; §5.564's `type="aura"` wildcard was already handled.
+
+9 new assertions taken from the real §2.136 `<disease>` node: the wildcard effect is stored on
+the record as `{ability:'*', bonus:-1}`, all six affected scores drop by exactly one, an ability
+seeded at 1 floors at 1, Rank and `effectiveStaminaMax()` are untouched, the wildcard survives a
+`sanitizeData` round trip with the same six scores, a duplicate infection adds nothing further,
+and `removeDisease('Leprosy')` restores all six. Live, §2.136 driven on a seeded die into the
+1–3 branch contracts Leprosy and drops every score by one. Full browser suite: RESULT ALL PASS
+pass=1859 fail=0, all 4,369 sections rendering.
 
 ## 186. Automatic highest-bonus equipment can select a worse loadout
 

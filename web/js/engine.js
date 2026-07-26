@@ -1323,12 +1323,15 @@ function applyAffliction(el, state, type) {
   return type;
 }
 
-/** Ability key for an affliction/god effect — the six core abilities plus
- *  `stamina` (an affliction may cut the Stamina total, held until cured). */
+/** Ability key for an affliction/god effect — the six core abilities, `stamina`
+ *  (an affliction may cut the Stamina total, held until cured), or `*` for every
+ *  core ability at once (§2.136 Leprosy's single `<effect ability="*" bonus="-1"/>`
+ *  is its whole stated penalty — "lose 1 point from each of your abilities"). The
+ *  wildcard covers the six abilities only, never Rank or Stamina. (task 185) */
 function afflictionAbility(attr) {
   if (!attr) return null;
   const a = attr.split('|')[0].trim().toLowerCase();
-  if (a === 'stamina') return 'stamina';
+  if (a === 'stamina' || a === '*') return a;
   return ABILITIES.includes(a) ? a : null;
 }
 

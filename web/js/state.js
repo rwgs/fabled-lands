@@ -59,6 +59,16 @@ function sumAuraBonus(items, key) {
 }
 // Summed Stamina-total modifier (≤0) from affliction lists (pure). Shared by
 // GameState.afflictionStaminaMod and the load-time Stamina reconcile. (task 60/124)
+// Does one affliction effect apply to `ability`? An exact key match, or `ability="*"`
+// against any of the six core abilities — §2.136's Leprosy carries its whole stated
+// penalty ("lose 1 point from each of your abilities") as a single wildcard effect. The
+// wildcard never reaches Rank or Stamina (sumAfflictionStamina still needs the explicit
+// `ability="stamina"` key), matching the item-aura wildcard rule. (task 185)
+function afflictionHits(e, ability) {
+  const ea = String(e.ability || '').toLowerCase();
+  return ea === ability || (ea === '*' && ABILITIES.includes(ability));
+}
+
 function sumAfflictionStamina(lists) {
   let sum = 0;
   for (const list of lists) for (const a of (list || [])) for (const e of (a.effects || [])) if (e.ability === 'stamina') sum += (e.bonus || 0);
@@ -286,11 +296,13 @@ export class GameState {
   /** Total additive ability penalty/bonus from active afflictions
    *  (curses/diseases/poisons). Removed automatically when the affliction is
    *  cured, restoring the score. Divide/target/stamina effects are applied
-   *  separately (afflictionMod / afflictionStaminaMod). */
+   *  separately (afflictionMod / afflictionStaminaMod). An `ability="*"` effect
+   *  (§2.136 Leprosy) hits every core ability, like an item aura's wildcard —
+   *  and only those, never Rank or Stamina. (task 185) */
   afflictionBonus(ability) {
     let sum = 0;
     for (const list of [this.data.curses, this.data.diseases, this.data.poisons]) {
-      for (const a of (list || [])) for (const e of (a.effects || [])) if (e.ability === ability) sum += (e.bonus || 0);
+      for (const a of (list || [])) for (const e of (a.effects || [])) if (afflictionHits(e, ability)) sum += (e.bonus || 0);
     }
     return sum;
   }
@@ -304,7 +316,7 @@ export class GameState {
     let v = value, target = null;
     for (const list of [this.data.curses, this.data.diseases, this.data.poisons]) {
       for (const a of (list || [])) for (const e of (a.effects || [])) {
-        if (e.ability !== ability) continue;
+        if (!afflictionHits(e, ability)) continue;
         if (e.divide) v = Math.ceil(v / e.divide);
         if (e.target != null) target = e.target;
       }
