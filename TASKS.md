@@ -14,7 +14,7 @@ audit pass.
 - [x] 180. Imported visit/combat memos can execute HTML/JavaScript on resume
 - [x] 181. Finish task 175: a blessing-reroll result is still observable before Keep
 - [x] 182. Delayed rolls and attacks can mutate a save after Save & quit
-- [ ] 183. Disease/poison immunity blessings do not prevent infection
+- [x] 183. Disease/poison immunity blessings do not prevent infection
 - [ ] 184. Named removal leaves stacked cumulative curses behind
 
 **MEDIUM**
@@ -764,6 +764,29 @@ Curses remain unaffected.
 Test grant/check under both aliases and both affliction types, ordinary consumption,
 permanent retention, absence of every penalty/record, and unchanged unprotected infection.
 Exercise the three live sections and persistence, then run all sections.
+
+**Done.** Immunity now lives in one place — `GameState.addAffliction()`, the single admission
+point every disease/poison passes through (`applyAffliction` for `<disease>`/`<poison>`, and
+any direct caller). A `disease`/`poison` admission spends the blessing via the existing
+`useBlessing('disease')` and returns *before* the record is pushed, so no record, no ability
+effect and no Stamina-total cut/clamp land. Because task 123 canonicalises `poison` → `disease`,
+either spelling of the grant protects against either affliction type. `useBlessing` already
+retains a permanent blessing, so a permanent immunity protects indefinitely; curses never
+consult it. The "already afflicted" no-op check was hoisted above the immunity check so a
+re-infection with an affliction already held cannot burn the blessing, and a `cumulative="t"`
+re-application still stacks without spending it — the same ordering as the reference
+`CurseList.addCurse`, where immunity is only tested inside the not-already-held branch.
+
+32 new assertions: all four alias × type combinations (no record, no penalty, blessing spent),
+the §5.306-style `ability="stamina"` cut leaving `effectiveStaminaMax()` and current Stamina
+untouched, permanent retention across two infections and a save round-trip, the unprotected
+infection still landing its penalty, a curse still landing with the blessing intact, and the
+re-infection-keeps-the-blessing case. The three live sections run through a real `Story`:
+§5.306 (immune → no poison, blessing crossed off, total unchanged and persisted through
+`sanitizeData`; unprotected → −6 from the total), §5.620 (immune → no Red Ague and no
+COMBAT/CHARISMA loss; unprotected → both penalties), and §2.136 driven on a seeded die into
+the 1–3 branch (immune → Leprosy negated and the blessing used up; unprotected → contracted).
+Full browser suite: RESULT ALL PASS pass=1838 fail=0, all 4,369 sections rendering.
 
 ## 184. Named removal leaves stacked cumulative curses behind
 

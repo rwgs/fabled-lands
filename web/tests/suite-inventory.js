@@ -1289,6 +1289,101 @@ export async function run(ctx) {
     gch.addBlessing('storm'); gch.addBlessing('disease'); gch.addBlessing('injury');
     ok('§5.365 storm/disease/injury remain three distinct blessings', gch.data.blessings.length === 3);
 
+    // --- task 183: an Immunity to Disease/Poison blessing prevents the infection ------
+    // addAffliction() used to add every disease/poison regardless of blessings, so a
+    // blessing bought expressly for immunity never stopped the permanent penalty. §2.136
+    // (Maka's blessing negates Leprosy), §5.306 and §5.620 state the rule in prose only —
+    // no enclosing XML guard — so affliction admission is the only place that can honour it.
+    {
+      const mkImm = (blessing = null, permanent = false) => {
+        const g = GameState.create({ name:'IM', gender:'m', profession:'Warrior', book:5, adv });
+        g.ephemeral = true;
+        g.data.blessings = []; g.data.permanentBlessings = [];
+        if (blessing) g.addBlessing(blessing, permanent);
+        return g;
+      };
+      // Either spelling of the one blessing protects against either affliction type.
+      for (const spell of ['disease', 'poison']) {
+        for (const type of ['disease', 'poison']) {
+          const gi = mkImm(spell);
+          const cb = gi.ability('combat');
+          gi.addAffliction(type, { name:'Red Ague', effects:[{ ability:'combat', bonus:-1 }] });
+          const list = type === 'disease' ? gi.data.diseases : gi.data.poisons;
+          ok(`§183 a "${spell}" blessing blocks a ${type} (no record)`, list.length === 0 && !gi.hasDisease('Red Ague') && !gi.hasPoison('Red Ague'), JSON.stringify(list));
+          ok(`§183 the blocked ${type} applies no penalty ("${spell}")`, gi.ability('combat') === cb, `combat=${gi.ability('combat')} base=${cb}`);
+          ok(`§183 blocking a ${type} uses up the "${spell}" blessing`, gi.data.blessings.length === 0 && !gi.hasBlessing('disease') && !gi.hasBlessing('poison'), JSON.stringify(gi.data.blessings));
+        }
+      }
+      // A Stamina-cutting poison (§5.306's -6) neither lowers the total nor clamps current.
+      const gst183 = mkImm('poison');
+      const maxSt183 = gst183.effectiveStaminaMax(); const curSt183 = gst183.data.stamina;
+      gst183.addAffliction('poison', { name:'Poison', effects:[{ ability:'stamina', bonus:-6 }] });
+      ok('§183 a blocked poison does not cut the Stamina total', gst183.effectiveStaminaMax() === maxSt183 && gst183.data.stamina === curSt183, `max=${gst183.effectiveStaminaMax()} cur=${gst183.data.stamina}`);
+      // A PERMANENT immunity protects without being used up — and keeps doing so.
+      const gpm183 = mkImm('disease', true);
+      gpm183.addAffliction('disease', { name:'Red Ague', effects:[{ ability:'combat', bonus:-1 }] });
+      ok('§183 a permanent immunity protects without being spent', gpm183.data.diseases.length === 0 && gpm183.hasBlessing('poison') && gpm183.isBlessingPermanent('disease'));
+      gpm183.addAffliction('poison', { name:'Poison', effects:[{ ability:'stamina', bonus:-6 }] });
+      ok('§183 a permanent immunity protects a second time', gpm183.data.poisons.length === 0 && gpm183.hasBlessing('disease'));
+      const gpm183b = new GameState(sanitizeData(JSON.parse(JSON.stringify(gpm183.data))));
+      gpm183b.addAffliction('disease', { name:'Ghoulbite' });
+      ok('§183 a permanent immunity still protects after a save round-trip', gpm183b.data.diseases.length === 0 && gpm183b.isBlessingPermanent('disease'));
+      // Unprotected infection is unchanged, and a curse is never covered.
+      const gun183 = mkImm();
+      const cbUn183 = gun183.ability('combat');
+      gun183.addAffliction('disease', { name:'Red Ague', effects:[{ ability:'combat', bonus:-1 }] });
+      ok('§183 without the blessing the disease lands with its penalty', gun183.hasDisease('Red Ague') && gun183.ability('combat') === cbUn183 - 1, `combat=${gun183.ability('combat')} base=${cbUn183}`);
+      const gcu183 = mkImm('disease');
+      gcu183.addCurse({ name:'Curse of Ill Fortune', effects:[{ ability:'combat', bonus:-1 }] });
+      ok('§183 immunity does not cover a curse', gcu183.data.curses.length === 1 && gcu183.hasBlessing('disease'));
+      // Re-infection with an affliction already held is a no-op, so it must not burn the
+      // blessing (the reference model checks immunity only for a NEW affliction).
+      const gre183 = mkImm();
+      gre183.addAffliction('disease', { name:'Red Ague', effects:[] });   // lands: no blessing yet
+      gre183.addBlessing('poison');
+      gre183.addAffliction('disease', { name:'Red Ague', effects:[] });   // re-infection: no further effects
+      ok('§183 re-infection with a disease already held keeps the blessing', gre183.data.diseases.length === 1 && gre183.hasBlessing('disease'), JSON.stringify(gre183.data.diseases));
+
+      // --- the three live sections ---
+      const mk183 = async (book, sec, blessing) => {
+        const g = GameState.create({ name:'T183', gender:'m', profession:'Warrior', book, adv });
+        g.ephemeral = true; g.data.blessings = []; g.data.permanentBlessings = [];
+        if (blessing) g.addBlessing(blessing);
+        const c = document.createElement('div');
+        const st = new Story(c, g, { navigate(){}, onDeath(){}, notify(){} });
+        g.setVisitProvider(() => st.serializeVisit());
+        st.begin(await data.getSection(book, sec), book, sec);
+        return { g, c, st };
+      };
+      const base5 = GameState.create({ name:'T183', gender:'m', profession:'Warrior', book:5, adv });
+      // §5.306: the blue potion's poison costs 6 Stamina permanently unless the blessing is used up.
+      const s306 = await mk183(5, '306', 'poison');
+      ok('§5.306 immunity avoids the permanent Stamina poison', s306.g.data.poisons.length === 0 && s306.g.effectiveStaminaMax() === base5.effectiveStaminaMax(), `max=${s306.g.effectiveStaminaMax()} base=${base5.effectiveStaminaMax()}`);
+      ok('§5.306 using the immunity crosses the blessing off', !s306.g.hasBlessing('disease') && !s306.g.hasBlessing('poison'));
+      const s306b = await mk183(5, '306', null);
+      ok('§5.306 without the blessing the poison cuts 6 from the total', s306b.g.data.poisons.length === 1 && s306b.g.effectiveStaminaMax() === base5.effectiveStaminaMax() - 6, `max=${s306b.g.effectiveStaminaMax()}`);
+      const s306p = new GameState(sanitizeData(JSON.parse(JSON.stringify(s306.g.data))));
+      ok('§5.306 the protected outcome survives a save round-trip', s306p.data.poisons.length === 0 && !s306p.hasBlessing('disease') && s306p.effectiveStaminaMax() === base5.effectiveStaminaMax());
+      // §5.620: the Red Ague costs 1 COMBAT and 1 CHARISMA unless the blessing is crossed off.
+      const s620 = await mk183(5, '620', 'disease');
+      ok('§5.620 immunity avoids the Red Ague', !s620.g.hasDisease('Red Ague') && s620.g.data.diseases.length === 0);
+      ok('§5.620 the COMBAT/CHARISMA penalties do not land', s620.g.ability('combat') === base5.ability('combat') && s620.g.ability('charisma') === base5.ability('charisma'), `combat=${s620.g.ability('combat')} charisma=${s620.g.ability('charisma')}`);
+      ok('§5.620 using the immunity crosses the blessing off', !s620.g.hasBlessing('poison'));
+      const s620b = await mk183(5, '620', null);
+      ok('§5.620 without the blessing the Red Ague lands with both penalties', s620b.g.hasDisease('Red Ague') && s620b.g.ability('combat') === base5.ability('combat') - 1 && s620b.g.ability('charisma') === base5.ability('charisma') - 1, `combat=${s620b.g.ability('combat')} charisma=${s620b.g.ability('charisma')}`);
+      // §2.136: the leper hamlet infects on a 1-3; Maka's blessing negates it.
+      const roll183 = (c) => Array.from(c.querySelectorAll('.btn-roll')).find((b) => !b.disabled);
+      const s136 = await mk183(2, '136', 'disease');
+      ok('§2.136 offers the leper-hamlet die roll', !!roll183(s136.c));
+      eng.seedRng(7); roll183(s136.c).click(); await settle42(); eng.seedRng(null); // one die → 1
+      ok('§2.136 the seeded roll takes the infecting 1-3 outcome', /contract the disease/i.test(s136.c.textContent), s136.c.textContent.slice(0, 300));
+      ok('§2.136 Maka\'s blessing negates Leprosy', !s136.g.hasDisease('Leprosy') && s136.g.data.diseases.length === 0);
+      ok('§2.136 negating Leprosy uses up the blessing', !s136.g.hasBlessing('disease'));
+      const s136b = await mk183(2, '136', null);
+      eng.seedRng(7); roll183(s136b.c).click(); await settle42(); eng.seedRng(null);
+      ok('§2.136 without the blessing Leprosy is contracted', s136b.g.hasDisease('Leprosy'), JSON.stringify(s136b.g.data.diseases));
+    }
+
     // --- task 74: standalone force="f" effects are opt-in, not auto-applied ----------
     // book1/25: an optional mission codeword is a button; NOT recorded on entry.
     const g25 = GameState.create({ name:'M25', gender:'m', profession:'Warrior', book:1, adv });

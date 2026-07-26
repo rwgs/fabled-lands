@@ -814,7 +814,18 @@ export class GameState {
   addAffliction(type, obj = {}) {
     const list = this._afflictionList(type);
     const rec = { name: obj.name || type, type, effects: obj.effects || [], cumulative: !!obj.cumulative, lift: obj.lift || null };
-    if (!rec.cumulative && list.some((a) => normalize(a.name || a.type || '') === normalize(rec.name))) return; // already afflicted
+    const already = list.some((a) => normalize(a.name || a.type || '') === normalize(rec.name));
+    if (already && !rec.cumulative) return; // already afflicted — "no further effects"
+    // The Immunity to Disease and Poison blessing (granted as blessing="disease" or
+    // "poison" — both canonicalise to 'disease') is spent instead of taking the
+    // affliction: §2.136 Maka's blessing negates Leprosy, §5.306/§5.620 say to cross
+    // the blessing off and ignore the poison/disease. Those sections state the rule in
+    // prose only, so admission is the one place that can honour it. A permanent
+    // blessing protects without being used up (useBlessing). Like the reference model,
+    // immunity only cancels a NEW infection: a cumulative re-application of an
+    // affliction already held stacks without spending the blessing. Curses are never
+    // covered. (task 183)
+    if (!already && (type === 'disease' || type === 'poison') && this.useBlessing('disease')) return;
     list.push(rec);
     // A Stamina-cutting affliction (book5/306 poison) lowers the total now; cap
     // current Stamina to the new maximum. Cure restores the max automatically.
