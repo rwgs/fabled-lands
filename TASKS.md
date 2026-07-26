@@ -13,7 +13,7 @@ audit pass.
 
 - [x] 180. Imported visit/combat memos can execute HTML/JavaScript on resume
 - [x] 181. Finish task 175: a blessing-reroll result is still observable before Keep
-- [ ] 182. Delayed rolls and attacks can mutate a save after Save & quit
+- [x] 182. Delayed rolls and attacks can mutate a save after Save & quit
 - [ ] 183. Disease/poison immunity blessings do not prevent infection
 - [ ] 184. Named removal leaves stacked cumulative curses behind
 
@@ -721,6 +721,29 @@ With a controllable dice promise, start a roll and a single/group attack, invoke
 or replace the game screen, then resolve the promise. Assert no variable, fight, Stamina,
 death UI or persisted slot changes after the quit save. Also prove a normal action resolves
 once and navigation to a new ctx still drops the stale callback.
+
+**Done.** The Story now carries a screen-lifetime token beside its visit identity: `dispose()`
+sets `disposed` (and releases both transition locks, which gate app.js's shell guard and would
+otherwise stay latched over the title screen), and `app.js`'s new `releaseGameScreen()` calls it
+from every shell teardown — `showTitle`, `showCreate`, `showSaves` and `buildGameScreen`'s
+rebuild. Both delayed actions were funnelled through one arming point, `Story.beginAction()`,
+which freezes the pane, takes the `_actionInFlight` lock and returns `live()` — false once the
+ctx has been swapped (task 146's navigation case, unchanged) **or** the Story disposed —
+plus `end()`, released in each handler's `finally`. `animatedStrike` resolves to the armed
+action or `null`, so `drawFight`/`drawGroupFight` wrap their whole round in that `try/finally`.
+The lock is also honoured by app.js's capture guard, so "Save & quit" can no longer even be
+clicked between a strike and the round it is about to resolve; being a counter and not DOM
+state, releasing it cannot re-enable a control the render deliberately disabled.
+
+Tests use deliberately lethal fixtures so the silence is not vacuous — §6.700 at Stamina 1
+(its die is always ≥ 1, so a landed roll always kills through `<lose stamina="x">`) and a
+Combat-30 foe with 99 Stamina against Stamina 1 — with a real save slot byte-compared across
+the quit. Each control proves the action still lands (and kills) with the screen live, resolves
+exactly once and releases the lock; the quit/teardown cases then assert no roll memo, no var,
+no fight-log or foe-Stamina movement, no player Stamina change, no `onDeath`, and an unchanged
+persisted slot. Task 146's navigation drops still pass through the new guard, now also
+asserting the lock is released on the dropped path. Full browser suite: RESULT ALL PASS
+pass=1806 fail=0, all 4,369 sections rendering.
 
 ## 183. Disease/poison immunity blessings do not prevent infection
 

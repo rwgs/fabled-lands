@@ -17,7 +17,7 @@ import {
 import { GameState } from './state.js';
 import { ABILITY_LABEL } from './rules.js';
 import { bookTitle, availableBooks, loadBook, getSection } from './data.js';
-import { modal, mountDialog } from './ui.js';
+import { modal, mountDialog, freezeButtons } from './ui.js';
 import {
   computeOutcomeBlessings, pendingRerollBlessings, provisionalVarClosure,
   unsettledRollVars, conditionPending, viewPendingVars,
@@ -283,8 +283,22 @@ export class Story {
     // that STARTS a move (the flag is still false then). app.js installs the matching guard
     // for the Adventure Sheet, header and menu (the rest of the shell).
     this.root.addEventListener('click', (e) => {
-      if (this._navInFlight) { e.stopImmediatePropagation(); e.preventDefault(); }
+      if (this._navInFlight || this._actionInFlight) { e.stopImmediatePropagation(); e.preventDefault(); }
     }, true);
+    // Screen-lifetime token (task 182). The visit identity (ctx, swapped by begin()) cancels a
+    // delayed roll/attack that resolves after a NAVIGATION (task 146), but "Save & quit" and a
+    // game-screen rebuild discard the story DOM WITHOUT a new begin() — the ctx check still
+    // passes, so the stale action would mutate state, rerender this detached Story and commit
+    // over the save the quit just made. app.js calls dispose() whenever the game shell is left,
+    // replaced or rebound; a disposed Story fails the action guard the way a swapped ctx does.
+    this.disposed = false;
+    // Delayed-action lock (task 182), the same shape as _navInFlight: a roll/attack awaits its
+    // dice animation before mutating anything, so for that whole lifetime the capture guards
+    // (here, and app.js's for the shell) swallow every click — no concurrent quit, sheet detour
+    // or second roll can interleave with a half-finished action. Held as a counter released in
+    // the handler's finally, and never DOM state, so releasing it cannot re-enable a control the
+    // render deliberately disabled.
+    this._actionInFlight = 0;
     // Retry target for a durable-consequence move whose destination failed to load (task 169).
     // The effect (a flee wound, a resolved combat round, a revival price) has already applied,
     // so rather than a spent dead-end source we present a retry that re-reaches this SAME
@@ -341,6 +355,37 @@ export class Story {
       if (this._sailExempt == null) this.state.data.sailingShipId = null;
     }
     this._sailExempt = null;
+  }
+
+  /**
+   * Retire this Story: its pane is being discarded (Save & quit, or a game-screen rebuild),
+   * so nothing it still has in flight may touch the game again (task 182). Any delayed action
+   * resolving from here on is dropped by beginAction's guard. The two transition locks are
+   * released as well — they gate app.js's shell guard, which would otherwise stay latched over
+   * the title screen if a move or roll was in flight when the player quit. One-way: a fresh
+   * screen builds a fresh Story.
+   */
+  dispose() {
+    this.disposed = true;
+    this._navInFlight = false;
+    this._actionInFlight = 0;
+  }
+
+  /**
+   * Arm a delayed (dice-animated) action — a roll or a combat strike (tasks 146 + 182).
+   * Locks the pane for the action's lifetime (the DOM freeze plus the click-swallowing
+   * counter) and returns the identity its result must still match to be allowed to land:
+   * the visit's ctx (navigation swapped it) AND this Story's screen-lifetime token (the
+   * shell was torn down under it). Callers must release with end() in a `finally`.
+   */
+  beginAction() {
+    const ctxAtClick = this.ctx;
+    this._actionInFlight++;
+    freezeButtons(this.root);
+    return {
+      live: () => !this.disposed && this.ctx === ctxAtClick,
+      end: () => { if (this._actionInFlight > 0) this._actionInFlight--; },
+    };
   }
 
   /** Begin a fresh visit of a section element. */

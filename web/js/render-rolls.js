@@ -12,30 +12,34 @@ import {
 import { branchPlan, blessingSpendForReroll, isRollGate, viewPendingVars } from './render-rules.js';
 // renderChoices (render-choices) is reached through story.dispatchChoices, not a direct
 // import, so render-rolls and render-choices no longer form an ES-module cycle. (task 163)
-import { animateDice, freezeButtons } from './ui.js';
+import { animateDice } from './ui.js';
 import { diceWord } from './render-util.js';
 
 // ---- shared widgets --------------------------------------------------------
 
 // Every interactive roll (difficulty/random/rankcheck/training) is armed here. The click
 // disables the button, plays the ~0.5s dice animation, then runs onRoll — which reads the
-// visit's ctx (rolls memo, vars). Two guards keep a slow animation from landing the result
-// on the wrong visit (task 146): the pane's controls are frozen so a still-live nav/choice
-// can't be clicked mid-animation (belt), and — should navigation happen anyway via a path
-// the freeze can't reach (a leave hook, app chrome, an Adventure-Sheet detour) — the ctx is
-// captured at click time and, if begin() has since swapped in a new one, onRoll is skipped
-// so the stale result is dropped instead of written into the new section's memo.
+// visit's ctx (rolls memo, vars). story.beginAction() supplies the guards that keep a slow
+// animation from landing the result where it no longer belongs (tasks 146 + 182): the pane's
+// controls are frozen and its clicks swallowed for the action's lifetime so a still-live
+// nav/choice can't be started mid-animation (belt), and — should the player leave anyway via
+// a path the freeze can't reach (a leave hook, app chrome, an Adventure-Sheet detour, "Save &
+// quit") — the visit ctx and the screen token captured at click time are re-checked, so a
+// stale result is dropped instead of written into the next section's memo or a quit game.
 export function rollButton(story, label, widget, onRoll) {
   const btn = document.createElement('button');
   btn.className = 'btn-roll';
   btn.textContent = label;
   btn.addEventListener('click', async () => {
-    const ctxAtClick = story.ctx;
+    const action = story.beginAction();
     btn.disabled = true;
-    freezeButtons(story.root);
-    await animateDice(widget);
-    if (story.ctx !== ctxAtClick) return; // navigated away mid-animation — drop the stale result
-    onRoll();
+    try {
+      await animateDice(widget);
+      if (!action.live()) return; // left the visit or the shell mid-animation — drop the result
+      onRoll();
+    } finally {
+      action.end();
+    }
   });
   return btn;
 }

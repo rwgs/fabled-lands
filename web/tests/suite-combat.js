@@ -1,7 +1,7 @@
 // FL test suite — combat: current-vessel, blessings, fightrounds, fights, roll branches
 // Extracted verbatim from web/_test.html run() lines 2037-3175 (task 120).
 import * as data from '../js/data.js';
-import { GameState, makeItem, sanitizeData } from '../js/state.js';
+import { GameState, makeItem, sanitizeData, readSlotData, deleteSlot } from '../js/state.js';
 import * as eng from '../js/engine.js';
 import { fightRound, makeFight, groupFightRound, isDefeated, useWrathBlessing, useDefenceBlessing, rerollAttack, restoreFight } from '../js/combat.js';
 import { buyTrade, sellTrade, applyInlineBuy, sellCargo } from '../js/market.js';
@@ -1540,6 +1540,86 @@ export async function run(ctx) {
       ok('task171: a continuing group round persists exactly once', pcg === 1, `commits=${pcg}`);
       window.__FL_INSTANT_DICE__ = false;
       Math.random = rnd171;
+    }
+
+    // --- task 182: a delayed strike must die with the game SCREEN, not just the visit -------
+    // The stale-strike guards above cancel on a NAVIGATION (a new ctx). "Save & quit" and a
+    // game-screen rebuild instead discard the story pane with no new begin() at all, so the ctx
+    // still matches when a held animation resolves: the round would land, kill the adventurer,
+    // rerender the detached widget and commit over the save the quit had just made — with the
+    // title screen on show. Story now also carries a screen-lifetime token that app.js
+    // invalidates (dispose()) on every shell teardown. The fixture is deliberately lethal — a
+    // Combat-30 foe against Stamina 1, with 99 foe Stamina so the player cannot fell it first —
+    // so the control proves a landed round really does kill, whatever the dice.
+    {
+      const settle182 = () => new Promise((r) => setTimeout(r, 20));
+      const atk182 = (c) => Array.from(c.querySelectorAll('.fight .btn-roll')).find((b) => /^Attack/.test(b.textContent));
+      const secS182 = '<section name="Q182S"><p><fight name="Ogre" combat="30" defence="1" stamina="99"/></p></section>';
+      const secG182 = '<section name="Q182G"><p><fight group="g" name="A" combat="30" defence="1" stamina="99"/><fight group="g" name="B" combat="30" defence="1" stamina="99"/></p></section>';
+      let release182 = null;
+      window.__FL_INSTANT_DICE__ = false;
+      window.__FL_DICE_GATE__ = () => new Promise((res) => { release182 = res; });
+      // A REAL (non-ephemeral) slot, so the quit write can be byte-compared afterwards.
+      const build182 = (secXml, slot) => {
+        const name = secXml.includes('group="g"') ? 'Q182G' : 'Q182S';
+        const g = GameState.create({ name:'T182', gender:'m', profession:'Warrior', book:1, adv });
+        g.slot = slot; g.data.stamina = 1; g.data.staminaMax = 40;
+        const c = document.createElement('div');
+        let deaths = 0;
+        const st = new Story(c, g, { navigate(){}, onDeath(){ deaths++; }, notify(){} });
+        g.setVisitProvider(() => st.serializeVisit());
+        g.goTo(1, name);
+        st.begin(parse(secXml), 1, name);
+        return { g, c, st, fights: Array.from(st.ctx.fights.values()), deaths: () => deaths };
+      };
+
+      // control: the screen stays live, so the strike lands — and this fixture kills.
+      const ctl182 = build182(secS182, 31);
+      atk182(ctl182.c).click();
+      release182(); await settle182();
+      ok('task182: with the screen live a strike still resolves (the fixture is lethal)',
+         ctl182.g.isDead() && ctl182.deaths() >= 1 && ctl182.fights[0].log.length >= 1,
+         `dead=${ctl182.g.isDead()} deaths=${ctl182.deaths()} log=${ctl182.fights[0].log.length}`);
+      ok('task182: a resolved strike releases the pane lock', ctl182.st._actionInFlight === 0, 'lock=' + ctl182.st._actionInFlight);
+      deleteSlot(31);
+
+      // single fight — Save & quit mid-animation: the explicit save, then app.js's teardown.
+      const q1 = build182(secS182, 31);
+      atk182(q1.c).click();                            // the handler suspends on the gate
+      const saved1 = q1.g.save(true);                  // "Save & quit" — the explicit write
+      const snap1 = JSON.stringify(readSlotData(31));
+      q1.st.dispose();                                 // …then showTitle() → releaseGameScreen()
+      release182(); await settle182();
+      ok('task182: a single strike resolved after Save & quit strikes nothing',
+         q1.fights[0].stamina === 99 && q1.fights[0].log.length === 0,
+         `en=${q1.fights[0].stamina} log=${q1.fights[0].log.length}`);
+      ok('task182: a single strike resolved after Save & quit leaves Stamina and the death prompt untouched',
+         q1.g.data.stamina === 1 && !q1.g.isDead() && q1.deaths() === 0,
+         `stam=${q1.g.data.stamina} dead=${q1.g.isDead()} deaths=${q1.deaths()}`);
+      ok('task182: a single strike resolved after Save & quit does not commit over the quit save',
+         saved1 === true && JSON.stringify(readSlotData(31)) === snap1,
+         `saved=${saved1} changed=${JSON.stringify(readSlotData(31)) !== snap1}`);
+      deleteSlot(31);
+
+      // group fight — same teardown, same silence (the group round has its own handler).
+      const q2 = build182(secG182, 31);
+      atk182(q2.c).click();
+      const saved2 = q2.g.save(true);
+      const snap2 = JSON.stringify(readSlotData(31));
+      q2.st.dispose();
+      release182(); await settle182();
+      ok('task182: a group strike resolved after Save & quit strikes nothing',
+         q2.fights.length === 2 && q2.fights.every((f) => f.stamina === 99 && f.log.length === 0),
+         `en=${q2.fights.map((f) => f.stamina)} log=${q2.fights.map((f) => f.log.length)}`);
+      ok('task182: a group strike resolved after Save & quit leaves Stamina and the death prompt untouched',
+         q2.g.data.stamina === 1 && !q2.g.isDead() && q2.deaths() === 0,
+         `stam=${q2.g.data.stamina} dead=${q2.g.isDead()} deaths=${q2.deaths()}`);
+      ok('task182: a group strike resolved after Save & quit does not commit over the quit save',
+         saved2 === true && JSON.stringify(readSlotData(31)) === snap2,
+         `saved=${saved2} changed=${JSON.stringify(readSlotData(31)) !== snap2}`);
+      deleteSlot(31);
+
+      delete window.__FL_DICE_GATE__;
     }
 
 }

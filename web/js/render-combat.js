@@ -9,7 +9,7 @@
 import { makeFight, fightRound, groupFightRound, isDefeated, useWrathBlessing, useDefenceBlessing, rerollAttack } from './combat.js';
 import { applyEffectBody } from './engine.js';
 import { aggregateFightOutcome } from './render-gates.js';
-import { animateDice, freezeButtons } from './ui.js';
+import { animateDice } from './ui.js';
 
 export function renderFight(story, container, node, path) {
   // group="G": all <fight> in the section sharing the id are one simultaneous
@@ -146,14 +146,17 @@ function logRow(lines) {
   return logEl;
 }
 
-// The animated-strike guard (task 146): freeze the pane, roll the dice, and report whether the
-// visit is still current. Returns false if the player navigated away mid-animation, so the
-// caller drops the strike rather than landing it on the next visit's ctx.
+// The animated-strike guard (tasks 146 + 182): lock the pane, roll the dice, and report whether
+// the strike may still land. Resolves to the armed action while the visit AND the game screen
+// are both the ones clicked, else null — so the caller drops the strike rather than landing it
+// on the next visit's ctx, or on an adventure the player has already quit to the title. A
+// returned action must be released with end() in the caller's `finally`.
 async function animatedStrike(story, box) {
-  const ctxAtClick = story.ctx;
-  freezeButtons(story.root);
+  const action = story.beginAction();
   await animateDice(box, true);
-  return story.ctx === ctxAtClick;
+  if (action.live()) return action;
+  action.end();
+  return null;
 }
 
 // Route a resolved flee to its escape section (tasks 21, 169): the <flee>'s own <goto>, else a
@@ -235,17 +238,22 @@ function drawGroupFight(story, box, fights, dmgNode, group, fleeNode = null) {
     attack.className = 'btn-roll';
     attack.textContent = living.length > 1 ? `Attack ${target.name}` : 'Attack';
     attack.addEventListener('click', async () => {
-      if (!(await animatedStrike(story, box))) return; // navigated away mid-animation — drop the strike
-      groupFightRound(story.state, fights, dmgNode, target);
-      // A <fightdamage> body's <goto> (a wound redirect) ends the combat by
-      // navigation, exactly as in a single fight. (tasks 99, 169)
-      const redirected = fights.find((f) => f.roundGoto);
-      if (redirected && !story.state.isDead()) {
-        const g = redirected.roundGoto; fights.forEach((f) => { f.roundGoto = null; });
-        story.navigate(g.book != null ? g.book : story.book, g.section, { durable: true });
-        return;
+      const action = await animatedStrike(story, box);
+      if (!action) return; // left the visit or the shell mid-animation — drop the strike
+      try {
+        groupFightRound(story.state, fights, dmgNode, target);
+        // A <fightdamage> body's <goto> (a wound redirect) ends the combat by
+        // navigation, exactly as in a single fight. (tasks 99, 169)
+        const redirected = fights.find((f) => f.roundGoto);
+        if (redirected && !story.state.isDead()) {
+          const g = redirected.roundGoto; fights.forEach((f) => { f.roundGoto = null; });
+          story.navigate(g.book != null ? g.book : story.book, g.section, { durable: true });
+          return;
+        }
+        afterAction(story, groupResolved(), redraw);
+      } finally {
+        action.end();
       }
-      afterAction(story, groupResolved(), redraw);
     });
     controls.appendChild(attack);
   });
@@ -351,20 +359,25 @@ function drawFight(story, box, fight, node, dmgNode, fleeNode, key, locked = fal
   attack.className = 'btn-roll';
   attack.textContent = 'Attack';
   attack.addEventListener('click', async () => {
-    if (!(await animatedStrike(story, box))) return; // navigated away mid-animation — drop the strike
-    fightRound(story.state, fight, dmgNode, roundNode);
-    // A <fightround>/<fightdamage> body can end the fight by navigation — §5.689
-    // "dragged you under" (→7), §4.238 "if you get wounded" (→184). The round is durable, so a
-    // failed target arms a retry rather than dropping the redirect and re-showing Attack. (tasks 99, 169)
-    if (fight.roundGoto && !story.state.isDead()) {
-      const g = fight.roundGoto; fight.roundGoto = null;
-      story.navigate(g.book != null ? g.book : story.book, g.section, { durable: true });
-      return;
+    const action = await animatedStrike(story, box);
+    if (!action) return; // left the visit or the shell mid-animation — drop the strike
+    try {
+      fightRound(story.state, fight, dmgNode, roundNode);
+      // A <fightround>/<fightdamage> body can end the fight by navigation — §5.689
+      // "dragged you under" (→7), §4.238 "if you get wounded" (→184). The round is durable, so a
+      // failed target arms a retry rather than dropping the redirect and re-showing Attack. (tasks 99, 169)
+      if (fight.roundGoto && !story.state.isDead()) {
+        const g = fight.roundGoto; fight.roundGoto = null;
+        story.navigate(g.book != null ? g.book : story.book, g.section, { durable: true });
+        return;
+      }
+      // Reduced to 0 Stamina: if the section has an "if you lose…" branch, that's
+      // a (non-death) loss — route to it; otherwise it's death.
+      if (story.state.isDead() && story.fightGate && story.fightGate.hasLosePath) fight.outcome = 'lose';
+      afterAction(story, fight.outcome, redraw);
+    } finally {
+      action.end();
     }
-    // Reduced to 0 Stamina: if the section has an "if you lose…" branch, that's
-    // a (non-death) loss — route to it; otherwise it's death.
-    if (story.state.isDead() && story.fightGate && story.fightGate.hasLosePath) fight.outcome = 'lose';
-    afterAction(story, fight.outcome, redraw);
   });
   controls.appendChild(attack);
 

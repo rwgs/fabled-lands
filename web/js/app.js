@@ -177,8 +177,19 @@ function creditsHtml() {
   );
 }
 
+// Leaving the game shell (task 182). The story pane is about to be discarded — by a quit, a
+// screen change or a rebuild for another adventurer — so retire the live Story first. A roll or
+// attack still awaiting its dice animation only checks the visit identity (task 146), which a
+// teardown does NOT change (no new begin() runs), so without this the late result would mutate
+// the adventurer, rerender the detached pane and commit over the save "Save & quit" just made,
+// while the title screen or a different game is on screen. Idempotent; safe before the first game.
+function releaseGameScreen() {
+  if (story) story.dispose();
+}
+
 // ---- Title screen ----------------------------------------------------------
 function showTitle() {
+  releaseGameScreen();
   narrator.stop(); // [TTS]
   // Reconcile so an adventurer whose meta entry was lost (a quota error mid-save) still
   // shows and still counts as a save — otherwise it would silently vanish here. (task 137)
@@ -226,6 +237,7 @@ function showTitle() {
 
 // ---- Character creation ----------------------------------------------------
 async function showCreate() {
+  releaseGameScreen();
   const app = $('#app');
   app.className = 'screen-create';
   app.innerHTML = '';
@@ -404,6 +416,7 @@ function importSaveFile(after) {
 
 // ---- Saves screen ----------------------------------------------------------
 function showSaves() {
+  releaseGameScreen();
   const app = $('#app');
   app.className = 'screen-saves';
   app.innerHTML = '';
@@ -446,6 +459,7 @@ function showSaves() {
 
 // ---- Game screen -----------------------------------------------------------
 function buildGameScreen() {
+  releaseGameScreen(); // retire the outgoing Story before its pane is replaced (task 182)
   const app = $('#app');
   app.className = 'screen-game';
   app.innerHTML = '';
@@ -455,11 +469,13 @@ function buildGameScreen() {
   // buy/drop/use/rest or "Save & quit" cannot mutate or misreport state that a rollback would
   // discard or a commit would misroute. The Story installs the matching guard for its own
   // pane. Installed once (buildGameScreen reuses the same #app element); it never blocks the
-  // click that STARTS a move (story._navInFlight is still false then).
+  // click that STARTS a move (story._navInFlight is still false then). A delayed roll/attack
+  // holds the same lock for its dice animation (_actionInFlight, task 182), so "Save & quit"
+  // can't land between the click and the round it is about to resolve.
   if (!app._txnGuardInstalled) {
     app._txnGuardInstalled = true;
     app.addEventListener('click', (e) => {
-      if (story && story._navInFlight) { e.stopImmediatePropagation(); e.preventDefault(); }
+      if (story && (story._navInFlight || story._actionInFlight)) { e.stopImmediatePropagation(); e.preventDefault(); }
     }, true);
   }
 

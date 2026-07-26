@@ -1,7 +1,7 @@
 // FL test suite — render & interaction: rolls, choices, fights, pays, blessings, choose-one
 // Extracted verbatim from web/_test.html run() lines 514-913 (task 120).
 import * as data from '../js/data.js';
-import { GameState, makeItem } from '../js/state.js';
+import { GameState, makeItem, readSlotData, deleteSlot } from '../js/state.js';
 import * as eng from '../js/engine.js';
 import { fightRound } from '../js/combat.js';
 import { buyOptions, payChoiceCost } from '../js/market.js';
@@ -373,6 +373,68 @@ export async function run(ctx) {
       await settle();
       ok('an attack resolved after navigating away strikes nothing (no log line)',
          fibFight.log.length === logBefore, `log=${fibFight.log.length} was=${logBefore}`);
+
+      ok('task182: a roll dropped by navigation still releases the pane lock',
+         storyRoll._actionInFlight === 0, 'lock=' + storyRoll._actionInFlight);
+
+      delete window.__FL_DICE_GATE__;
+    }
+
+    // --- task 182: a delayed roll must die with the game SCREEN, not just the visit ---------
+    // "Save & quit" (and a game-screen rebuild for another adventurer) discards the story pane
+    // WITHOUT a new begin(), so the ctx check above still matches when a held animation resolves:
+    // the roll would land, drain Stamina through §6.700's <lose stamina="x">, raise the death
+    // prompt over the title screen and commit over the save the quit had just made. Story now
+    // also carries a screen-lifetime token that app.js invalidates (dispose()) on every shell
+    // teardown. §6.700 at Stamina 1 is deliberately fatal — its die is always ≥ 1 — so the
+    // control proves a landed roll really does kill and the dropped roll is not passing vacuously.
+    {
+      window.__FL_INSTANT_DICE__ = false;
+      let release182 = null;
+      window.__FL_DICE_GATE__ = () => new Promise((res) => { release182 = res; });
+      const settle182 = () => new Promise(r => setTimeout(r, 20));
+      // A REAL (non-ephemeral) slot, so the quit write can be byte-compared afterwards.
+      const build182 = async (slot) => {
+        const g = GameState.create({ name:'T182', gender:'m', profession:'Warrior', book:6, adv });
+        g.slot = slot; g.data.stamina = 1; g.data.staminaMax = 40;
+        const c = document.createElement('div');
+        let deaths = 0;
+        const st = new Story(c, g, { navigate(){}, onDeath(){ deaths++; }, notify(){} });
+        g.setVisitProvider(() => st.serializeVisit());
+        g.goTo(6, '700');
+        st.begin(await data.getSection(6, '700'), 6, '700');
+        return { g, c, st, deaths: () => deaths };
+      };
+
+      // control: the screen stays live, so the roll lands — exactly one result, and it kills.
+      const ctl182 = await build182(30);
+      ok('task182: §6.700 has not drained Stamina before its roll settles (task 181 baseline)',
+         ctl182.g.data.stamina === 1 && !ctl182.g.hasVar('x'), 'stam=' + ctl182.g.data.stamina);
+      ctl182.c.querySelector('.btn-roll').click();
+      release182(); await settle182();
+      ok('task182: with the screen live the roll resolves exactly once and the fixture kills',
+         ctl182.st.ctx.rolls.size === 1 && ctl182.g.hasVar('x') && ctl182.g.isDead() && ctl182.deaths() >= 1,
+         `rolls=${ctl182.st.ctx.rolls.size} x=${ctl182.g.getVar('x')} dead=${ctl182.g.isDead()} deaths=${ctl182.deaths()}`);
+      ok('task182: a resolved roll releases the pane lock', ctl182.st._actionInFlight === 0, 'lock=' + ctl182.st._actionInFlight);
+      deleteSlot(30);
+
+      // Save & quit mid-animation: the explicit save, then the shell teardown app.js performs.
+      const q182 = await build182(30);
+      q182.c.querySelector('.btn-roll').click();          // the handler suspends on the gate
+      const saved182 = q182.g.save(true);                 // "Save & quit" — the explicit write
+      const snap182 = JSON.stringify(readSlotData(30));
+      q182.st.dispose();                                  // …then showTitle() → releaseGameScreen()
+      release182(); await settle182();
+      ok('task182: a roll resolved after Save & quit records no result and writes no var',
+         q182.st.ctx.rolls.size === 0 && !q182.g.hasVar('x'),
+         `rolls=${q182.st.ctx.rolls.size} x=${JSON.stringify(q182.g.data.vars)}`);
+      ok('task182: a roll resolved after Save & quit leaves Stamina and the death prompt untouched',
+         q182.g.data.stamina === 1 && !q182.g.isDead() && q182.deaths() === 0,
+         `stam=${q182.g.data.stamina} dead=${q182.g.isDead()} deaths=${q182.deaths()}`);
+      ok('task182: a roll resolved after Save & quit does not commit over the quit save',
+         saved182 === true && JSON.stringify(readSlotData(30)) === snap182,
+         `saved=${saved182} changed=${JSON.stringify(readSlotData(30)) !== snap182}`);
+      deleteSlot(30);
 
       delete window.__FL_DICE_GATE__;
     }
