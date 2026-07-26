@@ -1384,6 +1384,57 @@ export async function run(ctx) {
       ok('§2.136 without the blessing Leprosy is contracted', s136b.g.hasDisease('Leprosy'), JSON.stringify(s136b.g.data.diseases));
     }
 
+    // --- task 184: a named removal clears the whole cumulative stack ------------------
+    // §5.489's Avenger's Bite is cumulative="t" and stacks once per wound, each application
+    // stored as its own record; the hidden <lose curse="Avenger's Bite"> on entering §5.565
+    // is meant to end that fight's entire temporary COMBAT drain, but splicing only the
+    // first match left the rest behind as a permanent penalty.
+    {
+      const mk184 = () => {
+        const g = GameState.create({ name:'T184', gender:'m', profession:'Warrior', book:5, adv });
+        g.ephemeral = true;
+        return g;
+      };
+      const bite = (await data.getSection(5, '489')).querySelector('curse');
+      ok('§5.489 carries the cumulative Avenger\'s Bite curse', !!bite && bite.getAttribute('cumulative') === 't');
+      const g184 = mk184();
+      const cb184 = g184.ability('combat');
+      eng.applyEffect(bite, g184, {}); eng.applyEffect(bite, g184, {}); eng.applyEffect(bite, g184, {});
+      ok('§184 three wounds stack three COMBAT drains', g184.data.curses.length === 3 && g184.ability('combat') === cb184 - 3, `combat=${g184.ability('combat')} base=${cb184} n=${g184.data.curses.length}`);
+      // The whole stack survives a save/load round trip, and ONE named removal clears it all.
+      const g184b = new GameState(sanitizeData(JSON.parse(JSON.stringify(g184.data))));
+      ok('§184 the stack survives a save round-trip', g184b.data.curses.length === 3 && g184b.ability('combat') === cb184 - 3, `combat=${g184b.ability('combat')}`);
+      ok('§184 a named removal reports the lift', g184b.removeCurse('Avenger\'s Bite') === true);
+      ok('§184 a named removal clears the WHOLE stack', g184b.data.curses.length === 0 && g184b.ability('combat') === cb184, `combat=${g184b.ability('combat')} n=${g184b.data.curses.length}`);
+      ok('§184 a second named removal reports nothing to lift', g184b.removeCurse('Avenger\'s Bite') === false);
+      // Live: two wounds in the first fight, then §5.565 restores the lot — and the second
+      // fight's own drains still land afterwards.
+      const g565 = mk184();
+      const cb565 = g565.ability('combat');
+      eng.applyEffect(bite, g565, {}); eng.applyEffect(bite, g565, {});
+      ok('§184 two wounds drain 2 COMBAT before §5.565', g565.ability('combat') === cb565 - 2, `combat=${g565.ability('combat')}`);
+      const c565 = document.createElement('div');
+      const st565 = new Story(c565, g565, { navigate(){}, onDeath(){}, notify(){} });
+      g565.setVisitProvider(() => st565.serializeVisit());
+      st565.begin(await data.getSection(5, '565'), 5, '565');
+      ok('§5.565 restores the whole first-fight COMBAT loss', g565.data.curses.length === 0 && g565.ability('combat') === cb565, `combat=${g565.ability('combat')} n=${g565.data.curses.length}`);
+      eng.applyEffect((await data.getSection(5, '565')).querySelector('curse'), g565, {});
+      ok('§5.565 a new drain in the second fight still lands', g565.data.curses.length === 1 && g565.ability('combat') === cb565 - 1, `combat=${g565.ability('combat')}`);
+      // `?` and `*` keep their own meanings, and a named removal spares other curses.
+      const gsem184 = mk184();
+      gsem184.addCurse({ name:'Avenger\'s Bite', effects:[{ ability:'combat', bonus:-1 }], cumulative:true });
+      gsem184.addCurse({ name:'Avenger\'s Bite', effects:[{ ability:'combat', bonus:-1 }], cumulative:true });
+      gsem184.addCurse({ name:'Skunk-juice', effects:[{ ability:'charisma', bonus:-2 }] });
+      ok('§184 `?` removes exactly one arbitrary curse', gsem184.removeCurse('?') === true && gsem184.data.curses.length === 2, `n=${gsem184.data.curses.length}`);
+      ok('§184 `*` clears every curse', gsem184.removeCurse('*') === true && gsem184.data.curses.length === 0);
+      const gmix184 = mk184();
+      gmix184.addCurse({ name:'Avenger\'s Bite', effects:[{ ability:'combat', bonus:-1 }], cumulative:true });
+      gmix184.addCurse({ name:'Avenger\'s Bite', effects:[{ ability:'combat', bonus:-1 }], cumulative:true });
+      gmix184.addCurse({ name:'Skunk-juice', effects:[{ ability:'charisma', bonus:-2 }] });
+      const chMix = gmix184.ability('charisma');
+      ok('§184 a named removal is case-insensitive and spares other curses', gmix184.removeCurse('avenger\'s bite') === true && gmix184.data.curses.length === 1 && gmix184.hasCurse('Skunk-juice') && gmix184.ability('charisma') === chMix, `n=${gmix184.data.curses.length}`);
+    }
+
     // --- task 74: standalone force="f" effects are opt-in, not auto-applied ----------
     // book1/25: an optional mission codeword is a button; NOT recorded on entry.
     const g25 = GameState.create({ name:'M25', gender:'m', profession:'Warrior', book:1, adv });

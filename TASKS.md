@@ -15,7 +15,7 @@ audit pass.
 - [x] 181. Finish task 175: a blessing-reroll result is still observable before Keep
 - [x] 182. Delayed rolls and attacks can mutate a save after Save & quit
 - [x] 183. Disease/poison immunity blessings do not prevent infection
-- [ ] 184. Named removal leaves stacked cumulative curses behind
+- [x] 184. Named removal leaves stacked cumulative curses behind
 
 **MEDIUM**
 
@@ -806,6 +806,26 @@ without defining their merge.
 
 Test two or more Avenger wounds stacking, §5.565 restoring the whole prior COMBAT loss, new
 drains in the second fight, named/`?`/`*` semantics and a save/load round trip.
+
+**Done.** Took the second option — `removeAffliction(type, name)` now filters out every
+same-name record instead of splicing the first, so a named removal clears the complete
+aggregate. This needs no merge rules and no save migration (a legacy save already holding N
+stacked records is cured correctly on load), and it cannot collapse unrelated records: only a
+`cumulative="t"` stack can ever hold two records under one name, because a repeat application
+of a non-cumulative affliction is already a no-op in `addAffliction`. `?` still drops one
+arbitrary affliction and `*` still clears the list; matching stays case-insensitive via
+`normalize`, so the sheet's "Lift…" action and `<lose curse|disease|poison>` all inherit the
+fix. All four cumulative afflictions in the corpus (§5.203 Vampire's Kiss, §5.489/§5.565/§5.631
+Avenger's Bite) carry only additive `bonus` effects, so no divide/target aggregate arises.
+
+12 new assertions, driving the real §5.489 `<curse>` node as a wound: three wounds stack three
+records and −3 COMBAT, the stack survives a `sanitizeData` round trip, one named removal
+reports true and restores the full score, a second reports false. Live, two wounds then
+`Story.begin(§5.565)` — whose hidden `<lose curse="Avenger's Bite">` fires on entry — clears
+every record and restores COMBAT, after which the second fight's own drain still lands. `?`
+removes exactly one of three curses, `*` clears all, and a case-insensitive named removal
+leaves an unrelated Skunk-juice curse and its CHARISMA penalty untouched. Full browser suite:
+RESULT ALL PASS pass=1850 fail=0, all 4,369 sections rendering.
 
 ## 185. Wildcard affliction effects (`ability="*"`) are discarded
 

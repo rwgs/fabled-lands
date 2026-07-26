@@ -833,13 +833,24 @@ export class GameState {
     if (this.data.stamina > cap) this.data.stamina = cap;
     this.changed();
   }
+  // A named removal clears the WHOLE same-name aggregate, not just its first record.
+  // A cumulative="t" affliction is stored as one record per application (§5.489 stacks
+  // Avenger's Bite once per wound), and the paired `<lose curse="Avenger's Bite">` on
+  // §5.565/§5.631/§5.697 is meant to end that fight's entire temporary COMBAT drain —
+  // splicing one copy left the rest as a permanent penalty. Only cumulative stacks ever
+  // share a name (a repeat application of a non-cumulative affliction is a no-op), so
+  // this can never collapse two unrelated records. `?` still drops one arbitrary
+  // affliction and `*` still clears the list. (task 184)
   removeAffliction(type, name) {
     const list = this._afflictionList(type);
     if (name === '*') { const had = list.length; if (had) { list.length = 0; this.changed(); } return had > 0; }
     if (name === '?') { if (list.length) { list.shift(); this.changed(); return true; } return false; }
-    const i = list.findIndex((a) => normalize(a.name || a.type || '') === normalize(name));
-    if (i >= 0) { list.splice(i, 1); this.changed(); return true; }
-    return false;
+    const k = normalize(name);
+    const kept = list.filter((a) => normalize(a.name || a.type || '') !== k);
+    if (kept.length === list.length) return false;
+    list.length = 0; list.push(...kept);
+    this.changed();
+    return true;
   }
 
   hasCurse(name) { return matchAffliction(this.data.curses, name); }
