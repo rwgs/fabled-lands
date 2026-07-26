@@ -24,7 +24,7 @@ audit pass.
 - [x] 187. Named market sales ignore item kind and equipment stats
 - [x] 188. `<rest hidden="t"/>` is optional instead of automatic
 - [x] 189. A failed initial adventure load strands a new save on a blank game screen
-- [ ] 190. Service-worker activation and lookup touch unrelated origin caches
+- [x] 190. Service-worker activation and lookup touch unrelated origin caches
 - [ ] 191. Speech-enabled narrow headers clip critical controls
 - [ ] 192. The mobile Adventure Sheet is visually hidden but remains keyboard-exposed
 - [ ] 193. Stale speech callbacks can advance or cancel a newer narration
@@ -1070,6 +1070,33 @@ fallback, task 138's query navigation behavior and task 179's event-owned lazy w
 In a service-worker contract test, seed `other-app-v1`, the current cache and an obsolete
 `fl-*` cache. Prove the unrelated cache survives and is never read, obsolete FL cache is
 removed only after a complete install, and all required/optional/offline paths remain green.
+
+**Done.** The namespace policy now lives in `web/js/sw-cache.js`, a dependency-free file that
+publishes `self.FLCache` and is loaded two ways: `importScripts('./js/sw-cache.js')` from
+`sw.js` (classic worker) and `await import('../js/sw-cache.js')` from the suite (it has no
+import/export, so the same source is a valid bare module). It exposes `obsolete(keys,
+current)` — older `fl-*` keys only, newest first; `match(cacheStorage, req, current, opts)` —
+current cache then older `fl-*` caches, never the origin-global lookup; and `prune(cacheStorage,
+current, required)` — deletes obsolete `fl-*` keys only once the current cache verifiably
+holds every required asset, else returns `null` and keeps them. `sw.js` activate delegates to
+`prune()` (was: delete every key that isn't `VERSION`) and the fetch handler to `FLCache.match`
+(was: origin-global `caches.match(req)`), keeping task 8's incomplete-upgrade fallback, task
+138's `ignoreSearch` navigation retry and task 179's `waitUntil`-owned lazy write byte-for-byte.
+`./js/sw-cache.js` joined `REQUIRED`, so task 64's "every precached URL is fetchable" check
+covers it, and the file is under `web/js/` so the build stamp hashes it.
+
+Because live CacheStorage I/O hangs under headless Chrome (task 138), the policy is driven
+against an in-memory `CacheStorage` double that logs every `open`/`match`/`delete` — which is
+also the only way to prove the foreign cache is never *opened*, not merely never returned.
+Thirteen new assertions in `suite-economy`: `other-app-v1` (holding the same URLs, including
+`./?seed=42`), `fl-cur` and `fl-old` are seeded; the current cache wins, a URL only `fl-old`
+has still resolves, a URL only the stranger has is a miss, the `ignoreSearch` retry serves our
+shell rather than theirs, `other-app-v1` is never opened/read and `CacheStorage.match()` is
+never called; an incomplete `fl-cur` prunes nothing, a complete one deletes exactly `fl-old`
+and leaves `other-app-v1` standing. Task 179's now-obsolete `caches.match(req)` assertion was
+retargeted at the scoped lookup. The app page was also loaded headlessly to confirm the title
+screen renders with no `importScripts`/service-worker load error. Full browser suite:
+RESULT ALL PASS pass=1937 fail=0, all 4,369 sections rendering.
 
 ## 191. Speech-enabled narrow headers clip critical controls
 

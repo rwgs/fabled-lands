@@ -992,7 +992,132 @@ export async function run(ctx) {
       ok('task179: only a successful basic response is cached (policy unchanged)',
          /if \(res\.ok && \(res\.type === 'basic'\)\)/.test(swSrc179));
       ok('task179: cache-first lookup and cross-origin exclusion are unchanged',
-         /caches\.match\(req\)/.test(swSrc179) && /url\.origin !== location\.origin\) return;/.test(swSrc179));
+         /FLCache\.match\(caches, req, VERSION\)/.test(swSrc179) && /url\.origin !== location\.origin\) return;/.test(swSrc179),
+         'lookup is cache-first but now namespace-scoped (task 190)');
+    }
+
+    // --- task 190: every cache operation must stay inside the 'fl-' namespace ---
+    // CacheStorage is shared per *origin*, not per service-worker scope. Activate used to
+    // delete every key that wasn't the current one, and the fetch handler used the
+    // origin-global caches.match(req) — so a co-hosted app on this origin could have its
+    // offline data deleted, or its response for a shared URL returned to our pages. The
+    // policy now lives in js/sw-cache.js (self.FLCache) and is driven here against an
+    // in-memory CacheStorage double: live CacheStorage I/O hangs under headless Chrome
+    // (task 138), and a double is also the only way to prove the foreign cache is never
+    // even opened, let alone read.
+    { // block-scoped
+      await import('../js/sw-cache.js'); // bare module — publishes self.FLCache
+      const FLCache = self.FLCache;
+      const abs = (u) => new URL(typeof u === 'string' ? u : u.url, location.href).href;
+      const bare = (u) => { const x = new URL(abs(u)); x.search = ''; return x.href; };
+
+      // Minimal faithful CacheStorage: creation-ordered keys(), open() creates on demand,
+      // per-cache match() honouring ignoreSearch, and a log of what was opened/read/deleted.
+      const fakeStorage = (seed) => {
+        const store = new Map();
+        for (const [name, entries] of Object.entries(seed)) {
+          store.set(name, new Map(Object.entries(entries).map(([u, body]) => [abs(u), body])));
+        }
+        const log = { opens: [], reads: [], deletes: [], globalMatches: 0 };
+        return {
+          log,
+          names: () => [...store.keys()],
+          async open(name) {
+            log.opens.push(name);
+            if (!store.has(name)) store.set(name, new Map());
+            const entries = store.get(name);
+            return {
+              async match(req, opts) {
+                log.reads.push(name);
+                const key = abs(req);
+                if (entries.has(key)) return new Response(entries.get(key));
+                if (opts && opts.ignoreSearch) {
+                  for (const [k, body] of entries) if (bare(k) === bare(key)) return new Response(body);
+                }
+                return undefined;
+              },
+              async put(req, res) { entries.set(abs(req), await res.text()); },
+            };
+          },
+          async keys() { return [...store.keys()]; },
+          async delete(name) { log.deletes.push(name); return store.delete(name); },
+          // The origin-global lookup: reachable, but the policy must never call it.
+          async match() { log.globalMatches++; return undefined; },
+        };
+      };
+      const body = async (res) => (res ? await res.text() : null);
+
+      // obsolete(): only our own older caches, newest first (keys() is creation-ordered).
+      // 'x-fl-b' is a foreign name that merely contains the prefix — it must not be picked up.
+      ok('task190: obsolete() lists only older fl-* caches, newest first',
+         JSON.stringify(FLCache.obsolete(['other-app-v1', 'fl-a', 'fl-cur', 'x-fl-b', 'fl-b'], 'fl-cur')) === '["fl-b","fl-a"]',
+         JSON.stringify(FLCache.obsolete(['other-app-v1', 'fl-a', 'fl-cur', 'x-fl-b', 'fl-b'], 'fl-cur')));
+
+      // Seed the three caches the task prescribes: an unrelated app, the current build and
+      // one obsolete Fabled Lands build. The foreign cache deliberately holds the SAME urls.
+      const lookup = fakeStorage({
+        'other-app-v1': { './index.html': 'FOREIGN', './only-theirs.html': 'THEIRS', './?seed=42': 'FOREIGN-NAV' },
+        'fl-cur': { './index.html': 'CURRENT', './': 'SHELL' },
+        'fl-old': { './index.html': 'OLD', './assets/illus/x.jpg': 'OLD-ILLUS' },
+      });
+      ok('task190: lookup prefers the current fl- cache',
+         await body(await FLCache.match(lookup, './index.html', 'fl-cur')) === 'CURRENT');
+      ok('task190: an asset missing from the current cache still falls back to an older fl- cache (task 8)',
+         await body(await FLCache.match(lookup, './assets/illus/x.jpg', 'fl-cur')) === 'OLD-ILLUS');
+      ok('task190: a url only the unrelated app has cached is a miss, not a hit',
+         (await FLCache.match(lookup, './only-theirs.html', 'fl-cur')) === undefined);
+      // task 138's deep-link navigation retry still resolves to OUR shell, not the stranger's.
+      ok('task190: an exact ./?seed=42 lookup misses; the ignoreSearch retry serves our shell',
+         (await FLCache.match(lookup, './?seed=42', 'fl-cur')) === undefined
+         && await body(await FLCache.match(lookup, './?seed=42', 'fl-cur', { ignoreSearch: true })) === 'SHELL');
+      ok('task190: the unrelated cache was never opened or read',
+         !lookup.log.opens.includes('other-app-v1') && !lookup.log.reads.includes('other-app-v1'),
+         'opens=' + lookup.log.opens.join(',') + ' reads=' + lookup.log.reads.join(','));
+      ok('task190: the origin-global caches.match() is never used',
+         lookup.log.globalMatches === 0);
+
+      // Cleanup gate: an incomplete current cache must delete nothing at all (task 8), so the
+      // last complete offline cache survives a partial upgrade.
+      const required190 = ['./index.html', './data/meta.json'];
+      const partial = fakeStorage({
+        'other-app-v1': { './index.html': 'FOREIGN' },
+        'fl-old': { './index.html': 'OLD', './data/meta.json': 'OLD-META' },
+        'fl-cur': { './index.html': 'CURRENT' }, // meta.json missing → install incomplete
+      });
+      const prunedPartial = await FLCache.prune(partial, 'fl-cur', required190);
+      ok('task190: an incomplete install prunes nothing',
+         prunedPartial === null && partial.log.deletes.length === 0
+         && JSON.stringify(partial.names()) === '["other-app-v1","fl-old","fl-cur"]',
+         JSON.stringify(partial.names()) + ' deletes=' + partial.log.deletes.join(','));
+
+      // Complete install: the obsolete fl- cache goes, the stranger's stays.
+      const full = fakeStorage({
+        'other-app-v1': { './index.html': 'FOREIGN' },
+        'fl-old': { './index.html': 'OLD', './data/meta.json': 'OLD-META' },
+        'fl-cur': { './index.html': 'CURRENT', './data/meta.json': 'META' },
+      });
+      const prunedFull = await FLCache.prune(full, 'fl-cur', required190);
+      ok('task190: a complete install prunes only the obsolete fl- cache',
+         JSON.stringify(prunedFull) === '["fl-old"]' && JSON.stringify(full.log.deletes) === '["fl-old"]',
+         JSON.stringify(prunedFull) + ' deletes=' + JSON.stringify(full.log.deletes));
+      ok('task190: the unrelated cache survives activation',
+         JSON.stringify(full.names()) === '["other-app-v1","fl-cur"]', JSON.stringify(full.names()));
+
+      // Source contract: the worker delegates both operations and no longer reaches for the
+      // origin-global lookup or a blanket key sweep. The required/optional install paths are
+      // re-asserted unchanged (task 64's HEAD check covers every listed url, sw-cache.js included).
+      const swSrc190 = await (await fetch('./sw.js')).text();
+      ok('task190: sw.js loads the namespace policy and delegates cleanup + lookup to it',
+         /importScripts\('\.\/js\/sw-cache\.js'\)/.test(swSrc190)
+         && /FLCache\.prune\(caches, VERSION, REQUIRED\)/.test(swSrc190)
+         && /FLCache\.match\(caches, req, VERSION\)/.test(swSrc190));
+      ok('task190: sw.js no longer calls the origin-global caches.match() or deletes non-fl- keys',
+         !/caches\.match\(/.test(swSrc190) && !/caches\.delete\(/.test(swSrc190),
+         (swSrc190.match(/caches\.(match|delete)\([^\n]*/) || ['(none)'])[0]);
+      ok('task190: sw-cache.js is precached and the required/optional install policy is unchanged',
+         /'\.\/js\/sw-cache\.js',/.test(swSrc190)
+         && /await cache\.addAll\(REQUIRED\);/.test(swSrc190)
+         && /OPTIONAL\.map\(\(url\) => cache\.add\(url\)\.catch\(/.test(swSrc190));
     }
 
     // --- task 33: narrate sections whose prose is bare text (no <p> wrapper) ---

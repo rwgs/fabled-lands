@@ -55,7 +55,7 @@ fabled-lands/
     │                  combat.js, market.js, render.js, render-rules.js, render-gates.js,
     │                  visit-state.js, render-util.js, render-rolls.js, render-rewards.js,
     │                  render-choices.js, render-combat.js, render-market.js, ui.js, tts.js,
-    │                  version.js
+    │                  sw-cache.js, version.js
     ├── assets/        icon.svg, world-map.jpg
     └── data/          meta.json, book1.json … book6.json   (generated)
 ```
@@ -191,6 +191,7 @@ structure of the books is preserved exactly.
 | `render-market.js` | The economy **view** — markets, inline buy/sell, rest, money/item caches, transfers, resurrection deals — plain functions taking the story first. Economy rules stay in `market.js`/`engine.js`. |
 | `ui.js` | Adventure-Sheet panel, dice animation, modals, toasts. |
 | `app.js` | Bootstrap, screens, routing, character creation, death/resurrection, saves. |
+| `sw-cache.js` | The service worker's cache-namespace policy — which `fl-*` caches are obsolete, the current-then-older lookup, and the "prune only after a complete install" gate. CacheStorage is shared per origin, so nothing here ever touches a co-hosted app's cache. Loaded by `sw.js` via `importScripts`; no DOM. |
 
 The rules were deliberately split **out of the renderer**: `render.js` builds DOM and
 handles clicks, while all game logic lives in DOM-free modules (`engine.js`, `combat.js`,

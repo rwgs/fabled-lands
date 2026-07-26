@@ -3,7 +3,12 @@
 // once loaded/installed. Progress lives in localStorage (per-origin), so it
 // survives offline and reloads.
 
-const VERSION = 'fl-26.07.26.901c75b';
+// CacheStorage is per-origin, not per-scope: cleanup and lookup must stay inside
+// our own 'fl-' namespace or they can delete/serve another app's data. That policy
+// lives in one dependency-free file so the tests can drive it directly. (task 190)
+importScripts('./js/sw-cache.js');
+
+const VERSION = 'fl-26.07.26.faf997e';
 
 // REQUIRED = the app shell + all book data. Without every one of these the game
 // can't run offline, so the install must FAIL (and the previous complete cache
@@ -29,6 +34,7 @@ const REQUIRED = [
   './js/render-choices.js',
   './js/render-combat.js',
   './js/render-market.js',
+  './js/sw-cache.js',
   './js/combat.js',
   './js/market.js',
   './js/ui.js',
@@ -84,15 +90,11 @@ self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
     // Only discard older caches once the new one verifiably holds every required
     // asset — otherwise a partial install could delete the last complete offline
-    // cache. If it's somehow incomplete, keep the old caches as a fallback.
-    const cache = await caches.open(VERSION);
-    const present = await Promise.all(REQUIRED.map((url) => cache.match(url).then((r) => !!r)));
-    if (present.every(Boolean)) {
-      const keys = await caches.keys();
-      await Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k)));
-    } else {
-      console.warn('new cache incomplete; keeping older caches as offline fallback');
-    }
+    // cache. If it's somehow incomplete, keep the old caches as a fallback. Only
+    // obsolete fl-* caches are ever deleted: a co-hosted app's cache on this same
+    // origin is not ours to remove. (task 190)
+    const pruned = await FLCache.prune(caches, VERSION, REQUIRED);
+    if (!pruned) console.warn('new cache incomplete; keeping older caches as offline fallback');
     await self.clients.claim();
   })());
 });
@@ -103,15 +105,18 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(req.url);
   if (url.origin !== location.origin) return;
 
-  // Cache-first, falling back to network then caching the result.
+  // Cache-first, falling back to network then caching the result. The lookup is
+  // scoped to our own fl-* caches (current first, then older ones): the
+  // origin-global CacheStorage lookup searches every cache on the origin and could
+  // return a co-hosted app's response for the same URL. (task 190)
   event.respondWith(
-    caches.match(req).then(async (cached) => {
+    FLCache.match(caches, req, VERSION).then(async (cached) => {
       // A navigation carrying a query string (./?seed=42, ./?demo=1.10 — README's deep-link
       // hooks) won't key-match the query-less precached shell ('./', './index.html'), so an
       // exact match misses and, offline, the network fetch below rejects — leaving a
       // network-error page. Retry ignoring the search string so such deep links resolve to
       // the cached shell offline. Installed launches (start_url "./") already match. (task 138)
-      if (!cached && req.mode === 'navigate') cached = await caches.match(req, { ignoreSearch: true });
+      if (!cached && req.mode === 'navigate') cached = await FLCache.match(caches, req, VERSION, { ignoreSearch: true });
       if (cached) return cached;
       return fetch(req).then((res) => {
         // Cache a successful same-origin (basic) response for later offline reuse. Tie the
