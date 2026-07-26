@@ -566,13 +566,15 @@ function buildGameScreen() {
   const storyEl = el('article', 'story'); storyEl.id = 'story';
   storyPane.appendChild(storyEl);
   const sheetPane = el('aside', 'sheet-pane'); sheetPane.id = 'sheet-pane';
+  sheetPane.setAttribute('aria-label', 'Adventure Sheet');
+  sheetPane.tabIndex = -1; // focus fallback when the drawer opens (task 192)
   main.appendChild(storyPane);
   main.appendChild(sheetPane);
   app.appendChild(main);
 
   const backdrop = el('div', 'sheet-backdrop'); backdrop.id = 'sheet-backdrop';
-  backdrop.addEventListener('click', () => toggleSheet(false));
   app.appendChild(backdrop);
+  installSheetDrawer(app); // backdrop tap, Escape, breakpoint watch + initial state (task 192)
 
   story = new Story(storyEl, state, {
     navigate: (book, section) => navigate(book, section),
@@ -591,6 +593,7 @@ function buildGameScreen() {
   state.onChange(() => refreshSheet());
   state.onSaveStatus(() => surfaceSaveError());
   refreshSheet();
+  syncSheetDrawer(); // the pane now holds its Close button; re-reconcile the drawer state
 }
 
 // Warn the player when persistence has failed so they don't play on believing
@@ -613,9 +616,14 @@ function iconBtn(glyph, title, fn, cls) { const b = el('button', cls ? 'icon-btn
 
 function refreshSheet() {
   const pane = $('#sheet-pane');
+  if (!pane || !state) return;
   // onSheetChange rerenders the story after a drop/move/curse-lift so an item-/curse-gated
   // choice re-evaluates its eligibility instead of staying live on screen (task 133).
-  if (pane && state) renderSheet(state, pane, { onUse: onUseItem, onSheetChange: () => { if (story) story.rerender(); } });
+  keepSheetFocus(pane, () => renderSheet(state, pane, {
+    onUse: onUseItem,
+    onSheetChange: () => { if (story) story.rerender(); },
+    onClose: () => toggleSheet(false),
+  }));
 }
 
 // Use/Drink/Consult a usable item effect from the Adventure Sheet (task 41). Applies
@@ -645,9 +653,116 @@ function showIllustration(file, title) {
   modal({ title: title || 'Illustration', body: fig, buttons: [{ label: 'Close', value: null }] });
 }
 
-function toggleSheet(force) {
-  const open = force == null ? !document.body.classList.contains('sheet-open') : force;
+// ---- Adventure Sheet drawer (mobile) ---------------------------------------
+// Below 900px the aside is an off-canvas drawer; at or above it, a permanent column. The
+// drawer used to be nothing but a body class: the closed pane was translated off-screen yet
+// stayed in the tab order and the accessibility tree, the toggle announced no state, and there
+// was no Escape, explicit Close or focus restoration. syncSheetDrawer() is the single place
+// that reconciles the three things that must agree — the pane's inert/aria-hidden, the
+// toggle's expanded state and control relationship, and which side of the shell is isolated —
+// and it clears all of it on the desktop breakpoint so the permanent aside stays usable.
+// (task 192; task 177 gave modals the same treatment, but this drawer is not a modal overlay.)
+const SHEET_MOBILE = '(max-width: 899px)';
+let sheetRoot = null;      // the game shell the drawer lives in
+let sheetOpener = null;    // the control that opened the drawer, to hand focus back to
+let sheetGlobalsBound = false;
+// Injectable so the suite can drive both sides of the breakpoint (a headless page cannot
+// resize its own window); production installs leave the real media query in place.
+let sheetIsMobile = () => window.matchMedia(SHEET_MOBILE).matches;
+
+const sheetQ = (sel) => (sheetRoot || document).querySelector(sel);
+const sheetIsOpen = () => document.body.classList.contains('sheet-open');
+
+function setIsolated(node, on) {
+  if (!node) return;
+  if (on) { node.setAttribute('inert', ''); node.setAttribute('aria-hidden', 'true'); }
+  else { node.removeAttribute('inert'); node.removeAttribute('aria-hidden'); }
+}
+
+function syncSheetDrawer() {
+  const pane = sheetQ('#sheet-pane');
+  if (!pane) return;
+  const mobile = sheetIsMobile();
+  if (!mobile) document.body.classList.remove('sheet-open'); // no drawer state on desktop
+  const open = mobile && sheetIsOpen();
+  setIsolated(pane, mobile && !open);                        // closed drawer: off-screen AND unreachable
+  setIsolated(sheetQ('.game-header'), open);                 // open drawer: freeze the shell behind it
+  setIsolated(sheetQ('.story-pane'), open);
+  const toggle = sheetQ('.icon-btn.sheet-toggle');
+  if (!toggle) return;
+  if (mobile) {
+    toggle.setAttribute('aria-controls', 'sheet-pane');
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  } else {
+    toggle.removeAttribute('aria-controls');
+    toggle.removeAttribute('aria-expanded');
+  }
+}
+
+// Hand focus back to whatever opened the drawer. A display:none element cannot take focus —
+// the toggle itself is hidden at the desktop breakpoint — so only restore a rendered target.
+function restoreSheetOpener() {
+  const back = sheetOpener || sheetQ('.icon-btn.sheet-toggle');
+  sheetOpener = null;
+  if (back && document.contains(back) && back.offsetParent !== null) back.focus();
+}
+
+function focusSheetDrawer() {
+  const pane = sheetQ('#sheet-pane');
+  if (pane) (pane.querySelector('.sheet-close') || pane).focus();
+}
+
+// Rebuilding the pane (every state change does) destroys whatever control was focused inside
+// it. When that happens in the open drawer a keyboard user is dumped on <body>, so put focus
+// back in the drawer afterwards. Exported so the suite can drive a real rerender. (task 192)
+export function keepSheetFocus(pane, rerender) {
+  const had = sheetIsMobile() && sheetIsOpen() && pane.contains(document.activeElement);
+  rerender();
+  if (had) focusSheetDrawer();
+}
+
+export function toggleSheet(force) {
+  if (!sheetIsMobile()) { syncSheetDrawer(); return; } // permanent aside — nothing to toggle
+  const open = force == null ? !sheetIsOpen() : !!force;
+  if (open === sheetIsOpen()) { syncSheetDrawer(); return; }
+  if (open) sheetOpener = (document.activeElement && document.activeElement !== document.body)
+    ? document.activeElement : sheetQ('.icon-btn.sheet-toggle');
   document.body.classList.toggle('sheet-open', open);
+  syncSheetDrawer();
+  if (open) focusSheetDrawer(); else restoreSheetOpener();
+}
+
+// Crossing the breakpoint turns the drawer into the permanent column and back, so the
+// mobile-only state must be dropped rather than left stranding inert on a visible aside.
+export function syncSheetBreakpoint() {
+  const leftOpen = sheetIsOpen() && !sheetIsMobile();
+  syncSheetDrawer();
+  if (leftOpen) restoreSheetOpener(); // the drawer's Close button went with the drawer
+}
+
+// Wire the drawer into a game shell — backdrop tap, Escape, the breakpoint watch — and bring
+// it to a consistent state. Exported (with the injectable breakpoint probe) so the suite can
+// drive the whole lifecycle against the same markup buildGameScreen produces. (task 192)
+export function installSheetDrawer(root, opts = {}) {
+  sheetRoot = root;
+  if (typeof opts.isMobile === 'function') sheetIsMobile = opts.isMobile;
+  const backdrop = sheetQ('.sheet-backdrop');
+  if (backdrop && !backdrop._sheetWired) {
+    backdrop._sheetWired = true;
+    backdrop.addEventListener('click', () => toggleSheet(false));
+  }
+  if (!sheetGlobalsBound) {
+    sheetGlobalsBound = true;
+    // Escape closes the drawer. Bubble phase and defaultPrevented-aware: a modal opened over it
+    // handles Escape in the capture phase and marks the event, so dismissing that dialog never
+    // also collapses the drawer underneath it.
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      if (sheetIsMobile() && sheetIsOpen()) { e.preventDefault(); toggleSheet(false); }
+    });
+    window.matchMedia(SHEET_MOBILE).addEventListener('change', syncSheetBreakpoint);
+  }
+  syncSheetDrawer();
 }
 
 async function navigate(book, section) {

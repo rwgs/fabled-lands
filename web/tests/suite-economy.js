@@ -11,9 +11,9 @@ import { renderGoto } from '../js/render-choices.js';
 import { renderMarket, renderRest } from '../js/render-market.js';
 // app.js only auto-boots when a #app element exists (task 65), so importing its exported
 // new-adventure recovery contract here is side-effect free. (task 189)
-import { openNewAdventure } from '../js/app.js';
+import { openNewAdventure, installSheetDrawer, toggleSheet, syncSheetBreakpoint, keepSheetFocus } from '../js/app.js';
 import { Narrator } from '../js/tts.js';
-import { renderSheet, renderStatic } from '../js/ui.js';
+import { renderSheet, renderStatic, modal } from '../js/ui.js';
 
 export async function run(ctx) {
   const { ok, parse } = ctx;
@@ -1244,6 +1244,168 @@ export async function run(ctx) {
          && /'Narration settings'/.test(menuSrc));
       ok('task191: narration settings still offer auto-narrate and speed',
          /Auto-narrate each new section/.test(menuSrc) && /el\('label', null, 'Speed'\)/.test(menuSrc));
+    }
+
+    // --- task 192: the mobile Adventure Sheet needs a real drawer lifecycle ---
+    // toggleSheet() only flipped body.sheet-open: the closed aside was translated off-screen
+    // but stayed in the tab order and the accessibility tree, the toggle announced no state,
+    // and there was no Escape / explicit Close / focus restoration. The lifecycle is driven
+    // here against the same markup buildGameScreen builds, with the breakpoint probe injected
+    // (a headless page cannot resize its own window).
+    { // block-scoped
+      const mk = (tag, cls, id) => { const n = document.createElement(tag); if (cls) n.className = cls; if (id) n.id = id; return n; };
+      const shell = mk('div', 'screen-game');
+      const hdr = mk('header', 'game-header');
+      const menuBtn192 = mk('button', 'icon-btn'); menuBtn192.textContent = '☰';
+      const toggle192 = mk('button', 'icon-btn sheet-toggle'); toggle192.textContent = '📜';
+      hdr.appendChild(menuBtn192); hdr.appendChild(toggle192);
+      const main192 = mk('div', 'game-main');
+      const storyPane192 = mk('main', 'story-pane');
+      const storyBtn = mk('button', 'choice'); storyBtn.textContent = 'Go north';
+      storyPane192.appendChild(storyBtn);
+      const pane192 = mk('aside', 'sheet-pane', 'sheet-pane');
+      pane192.setAttribute('aria-label', 'Adventure Sheet');
+      pane192.tabIndex = -1;
+      main192.appendChild(storyPane192); main192.appendChild(pane192);
+      const backdrop192 = mk('div', 'sheet-backdrop', 'sheet-backdrop');
+      shell.appendChild(hdr); shell.appendChild(main192); shell.appendChild(backdrop192);
+      document.body.appendChild(shell);
+
+      const g192 = GameState.create({ name: 'Drawer', gender: 'f', profession: 'Warrior', book: 1, adv });
+      const paint192 = () => renderSheet(g192, pane192, { onClose: () => toggleSheet(false) });
+      paint192();
+      // Mirrors buildGameScreen: the toggle button owns the toggle click, install owns the rest.
+      toggle192.addEventListener('click', () => toggleSheet());
+      let mobile192 = true;
+      installSheetDrawer(shell, { isMobile: () => mobile192 });
+
+      // What a keyboard user can actually reach: focusables not sealed inside an inert subtree.
+      const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+      const tabbable = () => [...shell.querySelectorAll(FOCUSABLE)].filter((n) => !n.closest('[inert]'));
+      const closeBtn = () => pane192.querySelector('.sheet-close');
+      // Chrome really refuses focus on an inert subtree, so this proves the mechanism works
+      // rather than only that the attribute is set.
+      // Always hands focus back, so probing never disturbs a later focus assertion.
+      const canFocus = (node) => {
+        const before = document.activeElement;
+        node.focus();
+        const got = document.activeElement === node;
+        if (before && before !== document.body) before.focus();
+        return got;
+      };
+
+      // Closed on mobile: the pane is sealed off and the toggle says so.
+      ok('task192: the closed drawer is inert and hidden from assistive tech',
+         pane192.hasAttribute('inert') && pane192.getAttribute('aria-hidden') === 'true');
+      ok('task192: the closed drawer contributes nothing to the tab order',
+         !tabbable().includes(closeBtn()) && tabbable().includes(toggle192) && tabbable().includes(storyBtn),
+         'tabbable=' + tabbable().length);
+      ok('task192: a control inside the closed drawer cannot even be focused directly',
+         !canFocus(closeBtn()));
+      ok('task192: the toggle advertises the collapsed drawer it controls',
+         toggle192.getAttribute('aria-expanded') === 'false' && toggle192.getAttribute('aria-controls') === 'sheet-pane');
+      ok('task192: the shell behind a closed drawer is not isolated',
+         !hdr.hasAttribute('inert') && !storyPane192.hasAttribute('inert'));
+
+      // Opening from the toggle: focus moves in, the shell behind is frozen, state is announced.
+      toggle192.focus();
+      toggle192.click();
+      ok('task192: the toggle opens the drawer and announces it',
+         document.body.classList.contains('sheet-open') && toggle192.getAttribute('aria-expanded') === 'true');
+      ok('task192: opening moves focus into the drawer', document.activeElement === closeBtn(),
+         document.activeElement && document.activeElement.className);
+      ok('task192: the open drawer is reachable and the shell behind it is isolated',
+         !pane192.hasAttribute('inert') && !pane192.hasAttribute('aria-hidden')
+         && hdr.hasAttribute('inert') && hdr.getAttribute('aria-hidden') === 'true'
+         && storyPane192.hasAttribute('inert') && storyPane192.getAttribute('aria-hidden') === 'true');
+      ok('task192: with the drawer open the story and header leave the tab order',
+         !tabbable().includes(storyBtn) && !tabbable().includes(toggle192) && tabbable().includes(closeBtn()));
+      ok('task192: a story control behind the open drawer cannot be focused',
+         !canFocus(storyBtn));
+
+      // A sheet mutation rerenders the pane; focus must land back inside the drawer, not <body>.
+      keepSheetFocus(pane192, paint192);
+      ok('task192: a rerender from inside the open drawer keeps focus in the drawer',
+         document.activeElement === closeBtn());
+
+      // Escape closes and hands focus back to the invoker.
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      ok('task192: Escape closes the drawer and restores the invoker',
+         !document.body.classList.contains('sheet-open') && document.activeElement === toggle192
+         && pane192.hasAttribute('inert') && !hdr.hasAttribute('inert'),
+         document.activeElement && document.activeElement.className);
+
+      // A backdrop tap closes it too (the drawer's touch dismissal).
+      toggle192.click();
+      backdrop192.click();
+      ok('task192: a backdrop tap closes the drawer and restores the invoker',
+         !document.body.classList.contains('sheet-open') && document.activeElement === toggle192
+         && toggle192.getAttribute('aria-expanded') === 'false');
+
+      // So does the explicit Close button inside the drawer.
+      toggle192.click();
+      closeBtn().click();
+      ok('task192: the drawer Close button closes it and restores the invoker',
+         !document.body.classList.contains('sheet-open') && document.activeElement === toggle192);
+
+      // A dialog opened over the drawer owns Escape: dismissing it must not also collapse the
+      // drawer underneath (mountDialog marks the event in the capture phase).
+      toggle192.click();
+      const overDrawer = modal({ title: 'Over the drawer', body: 'x', buttons: [{ label: 'Close', value: null }] });
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      await overDrawer;
+      ok('task192: Escape dismissing a dialog above the drawer leaves the drawer open',
+         document.body.classList.contains('sheet-open') && !pane192.hasAttribute('inert')
+         && hdr.hasAttribute('inert'));
+
+      // Crossing to the desktop breakpoint with the drawer open: all mobile-only state goes and
+      // the aside is left as a plain, usable, reachable column.
+      mobile192 = false;
+      syncSheetBreakpoint();
+      ok('task192: the desktop breakpoint drops the drawer state entirely',
+         !document.body.classList.contains('sheet-open')
+         && !pane192.hasAttribute('inert') && !pane192.hasAttribute('aria-hidden')
+         && !hdr.hasAttribute('inert') && !storyPane192.hasAttribute('inert')
+         && !toggle192.hasAttribute('aria-expanded') && !toggle192.hasAttribute('aria-controls'));
+      ok('task192: leaving mobile with the drawer open hands focus back, not to <body>',
+         document.activeElement === toggle192, document.activeElement && document.activeElement.className);
+      ok('task192: the permanent aside is fully tabbable and the shell is live again',
+         tabbable().includes(closeBtn()) && tabbable().includes(storyBtn) && canFocus(closeBtn()));
+      toggleSheet(true);
+      ok('task192: there is no drawer to open at the desktop breakpoint',
+         !document.body.classList.contains('sheet-open') && !pane192.hasAttribute('inert'));
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      ok('task192: Escape is inert at the desktop breakpoint', !pane192.hasAttribute('inert'));
+
+      // …and back to mobile: the drawer re-forms, closed and sealed.
+      mobile192 = true;
+      syncSheetBreakpoint();
+      ok('task192: returning to mobile re-forms a closed, sealed drawer',
+         !document.body.classList.contains('sheet-open')
+         && pane192.hasAttribute('inert') && pane192.getAttribute('aria-hidden') === 'true'
+         && toggle192.getAttribute('aria-expanded') === 'false'
+         && toggle192.getAttribute('aria-controls') === 'sheet-pane');
+
+      // Source contracts: the game screen wires the same lifecycle, and the drawer-only Close
+      // control is hidden exactly where the aside becomes permanent.
+      const appSrc192 = await (await fetch('./js/app.js')).text();
+      ok('task192: buildGameScreen installs the drawer and the toggle drives toggleSheet()',
+         /installSheetDrawer\(app\);/.test(appSrc192)
+         && /iconBtn\('📜', 'Adventure Sheet', \(\) => toggleSheet\(\), 'sheet-toggle'\)/.test(appSrc192));
+      ok('task192: the sheet pane is labelled and focusable as a drawer fallback',
+         /sheetPane\.setAttribute\('aria-label', 'Adventure Sheet'\)/.test(appSrc192)
+         && /sheetPane\.tabIndex = -1/.test(appSrc192));
+      ok('task192: the live sheet is rendered with the drawer Close control',
+         /onClose: \(\) => toggleSheet\(false\),/.test(appSrc192));
+      const cssSrc192 = await (await fetch('./css/style.css')).text();
+      ok('task192: the backdrop only exists while the drawer is open',
+         /\.sheet-backdrop \{ display: none;/.test(cssSrc192)
+         && /body\.sheet-open \.sheet-backdrop \{ display: block; \}/.test(cssSrc192));
+      ok('task192: the Close control is hidden where the aside is permanent',
+         /\.sheet-close \{ display: none; \}/.test(cssSrc192));
+
+      shell.remove();
+      document.body.classList.remove('sheet-open');
     }
 
     // --- task 33: narrate sections whose prose is bare text (no <p> wrapper) ---

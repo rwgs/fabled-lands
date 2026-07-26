@@ -26,7 +26,7 @@ audit pass.
 - [x] 189. A failed initial adventure load strands a new save on a blank game screen
 - [x] 190. Service-worker activation and lookup touch unrelated origin caches
 - [x] 191. Speech-enabled narrow headers clip critical controls
-- [ ] 192. The mobile Adventure Sheet is visually hidden but remains keyboard-exposed
+- [x] 192. The mobile Adventure Sheet is visually hidden but remains keyboard-exposed
 - [ ] 193. Stale speech callbacks can advance or cancel a newer narration
 - [ ] 194. SPA section transitions provide no focus target or announcement
 - [ ] 195. DOM-free rule modules are not directly importable in Node
@@ -1174,6 +1174,40 @@ desktop breakpoint so the permanent aside remains usable.
 
 Add keyboard tests for closed/open Tab order, Escape/backdrop/button close, focus restoration
 and mobile↔desktop transitions, plus touch behavior and the existing sheet mutation tests.
+
+**Done.** `syncSheetDrawer()` is now the single place that reconciles everything that must
+agree, so no caller can set half the state: the pane's `inert` + `aria-hidden` (set while the
+drawer is closed on mobile, cleared while open), the header's and story pane's `inert` +
+`aria-hidden` (the mirror image — the shell behind an open drawer is frozen), and the toggle's
+`aria-expanded` / `aria-controls`. At the desktop breakpoint every one of those attributes is
+removed and `body.sheet-open` dropped, so the permanent aside is an ordinary tabbable column
+again. `toggleSheet()` records the invoker, moves focus to a new drawer-only `.sheet-close`
+button on open, and restores the invoker on close — skipping a target that is no longer
+rendered, since the toggle itself is `display: none` at the desktop breakpoint.
+
+Three ways out, all restoring focus: the ✕ button (rendered by `renderSheet` via a new
+`onClose` option so it survives every pane rerender, and hidden by CSS at ≥900px), a backdrop
+tap, and Escape. The Escape listener is bubble-phase and `defaultPrevented`-aware, so a dialog
+opened over the drawer — which handles Escape in the capture phase (task 177) — is dismissed
+without also collapsing the drawer under it. `keepSheetFocus()` wraps the pane rerender: a
+drop/use from inside the open drawer destroys the focused control, and focus is put back in the
+drawer instead of falling to `<body>`. `installSheetDrawer(root, { isMobile })` owns the
+backdrop, Escape and `matchMedia` wiring and takes an injectable breakpoint probe, since a
+headless page cannot resize its own window; `syncSheetBreakpoint()` is the exported transition.
+
+26 assertions in `suite-economy` drive the real lifecycle against the same markup
+`buildGameScreen()` builds: closed/open tab-order membership (computed by excluding anything
+sealed in an `[inert]` subtree) and, as a live check that `inert` is doing the work rather than
+just being present, that Chrome actually *refuses* `.focus()` on a control inside the closed
+drawer and on a story control behind an open one; open via the toggle; close via Escape,
+backdrop tap and the ✕ button, each asserting focus lands back on the invoker; a real `modal()`
+over the drawer surviving its own Escape; a rerender from inside the open drawer keeping focus;
+and both breakpoint crossings, including that `toggleSheet(true)` and Escape are no-ops on
+desktop. Source contracts cover the game-screen wiring and the CSS visibility rules. The live
+app was loaded headlessly at 360px — `aside#sheet-pane … inert aria-hidden="true"` with the
+toggle carrying `aria-controls="sheet-pane" aria-expanded="false"` — and at 1200px, where the
+aside carries none of it. Full browser suite: RESULT ALL PASS pass=1979 fail=0, all 4,369
+sections rendering.
 
 ## 193. Stale speech callbacks can advance or cancel a newer narration
 

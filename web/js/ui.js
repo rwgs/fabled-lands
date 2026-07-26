@@ -185,6 +185,16 @@ export function renderSheet(state, container, opts = {}) {
   container.innerHTML = '';
 
   const head = el('div', 'sheet-head');
+  // The mobile drawer needs an explicit way out (task 192). Rendered here rather than appended
+  // by the caller so it survives every state-change rerender of the pane; CSS hides it at the
+  // breakpoint where the aside is a permanent column instead of a drawer.
+  if (typeof opts.onClose === 'function') {
+    const x = el('button', 'sheet-close', '✕');
+    x.title = 'Close Adventure Sheet';
+    x.setAttribute('aria-label', 'Close Adventure Sheet');
+    x.addEventListener('click', opts.onClose);
+    head.appendChild(x);
+  }
   head.appendChild(el('div', 'sheet-name', d.name));
   const rankVal = state.rankValue(); // effective Rank, incl. the ring of ultimate power's +2 (task 44)
   head.appendChild(el('div', 'sheet-sub', `${d.profession} · ${ordinal(rankVal)} Rank ${rankTitle(rankVal, d.gender === 'm')}`));

@@ -376,6 +376,14 @@ img { max-width: 100%; }
   padding: 1rem 1rem 3rem; border-left: 2px solid var(--gold);
 }
 .sheet-head { text-align: center; border-bottom: 1px solid rgba(200,150,42,0.35); padding-bottom: 0.7rem; margin-bottom: 0.8rem; }
+/* Drawer-only "way out" (task 192). Its own right-aligned row, so it never crowds the centred
+   name; hidden at the breakpoint where the aside is a permanent column, not a drawer. */
+.sheet-close {
+  display: block; margin: 0 0 0.4rem auto; width: 2.75rem; height: 2.75rem;
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(200,150,42,0.4);
+  color: var(--gold-bright); border-radius: 8px; font-size: 1.1rem; line-height: 1;
+}
+.sheet-close:hover { background: rgba(200,150,42,0.18); }
 .sheet-name { font-family: var(--display); font-size: 1.4rem; color: var(--gold-bright); }
 .sheet-sub { font-size: 0.85rem; color: #d8c49a; }
 .stat-block { margin-bottom: 0.9rem; }
@@ -431,6 +439,7 @@ img { max-width: 100%; }
 }
 @media (min-width: 900px) {
   .icon-btn.sheet-toggle { display: none; }
+  .sheet-close { display: none; } /* the aside is permanent here — nothing to close (task 192) */
 }
 /* Narrow chrome (task 191). Dropping the decorative title was not enough: the ten header
    controls a speech-capable browser shows need ~393px of fixed widths, gaps and padding, so
