@@ -38,7 +38,7 @@ audit pass.
 **LOW**
 
 - [x] 198. A failed save deletion can leave an unrecoverable ghost slot
-- [ ] 199. Build validation misses source-schema typos and bundled-book dangling targets
+- [x] 199. Build validation misses source-schema typos and bundled-book dangling targets
 - [ ] 200. AGENTS.md overstates test-suite parse-error isolation
 - [ ] 201. A service-worker update can erase an unsaved character-creation draft
 - [ ] 202. Complete remaining form, selection and progress semantics

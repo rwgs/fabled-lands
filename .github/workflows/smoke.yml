@@ -14,8 +14,9 @@ jobs:
   # Guards the build scripts against the encoding trap that made build-data.ps1
   # unusable under Windows PowerShell 5.1 (task 121): a non-ASCII byte in the .ps1
   # source (an em dash in a double-quoted string) is misread through 5.1's legacy
-  # code page and breaks parsing. This is a pure source check on the .ps1 files; the build is
-  # really executed, and its output verified, by the `smoke` job below (task 197).
+  # code page and breaks parsing. That part is a pure source check over every build/*.ps1; the
+  # job then runs the source-XML gate's own self-test (task 199). The build itself is executed,
+  # and its output verified, by the `smoke` job below (task 197).
   build-scripts:
     runs-on: ubuntu-latest
     steps:
@@ -24,7 +25,7 @@ jobs:
         run: |
           set -euo pipefail
           fail=0
-          for f in build/build-data.ps1 build/stamp-version.ps1; do
+          for f in build/*.ps1; do
             if grep -nP '[^\x00-\x7F]' "$f"; then
               echo "✗ $f contains non-ASCII bytes (breaks Windows PowerShell 5.1 parsing)."
               fail=1
@@ -36,6 +37,13 @@ jobs:
           done
           if [ "$fail" -ne 0 ]; then exit 1; fi
           echo "✓ Build scripts are ASCII-only and require pwsh 7."
+
+      # The source-XML gate, driven over mutation fixtures in a temp dir (task 199). The real
+      # corpus is clean, so a gate that quietly stopped catching typos would look identical to
+      # a passing build; this proves each class of mistake still fails. Touches no repo file.
+      - name: The source-XML gate catches each class of mistake
+        shell: pwsh
+        run: ./build/validate-selftest.ps1
 
   # The DOM-free seam (task 195). AGENTS.md promises the rule modules import and run in plain
   # Node; a single stray import of a browser-touching module breaks that without failing the

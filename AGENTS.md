@@ -20,8 +20,11 @@ combat, markets, ships, live adventure sheet). Plain HTML/CSS/ES modules —
 - **`java-engine/`** — the original Java engine (JaFL). **Reference only — never
   edit it and never copy its code.** The JS rules are a clean-room
   reimplementation (licensing: see `NOTICE`).
-- **`build/*.ps1`** — data build + version stamp. **`TASKS.md`** — the backlog
-  (see workflow below).
+- **`build/*.ps1`** — data build + version stamp, plus the source-XML gate
+  (`validate-source.ps1`) the build runs before writing anything and its fixture
+  self-test (`validate-selftest.ps1`, run by CI). Adding a new tag/attribute/value
+  to `books/` means adding it to that allowlist in the same change (task 199).
+  **`TASKS.md`** — the backlog (see workflow below).
 
 ## Architecture invariant — keep the rules out of the view
 Game logic lives in **DOM-free rule modules**: the core `engine.js`, `combat.js`,

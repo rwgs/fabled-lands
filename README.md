@@ -46,6 +46,8 @@ fabled-lands/
 ├── java-engine/      The original Java engine (JaFL) — kept for reference, UNTOUCHED
 ├── build/            Build scripts (PowerShell 7 / pwsh)
 │   ├── build-data.ps1  Bundles books/ + rules/ + maps → web/data & web/assets
+│   ├── validate-source.ps1  The source-XML gate the build runs before writing anything
+│   ├── validate-selftest.ps1  Drives that gate over mutation fixtures (CI runs it)
 │   └── stamp-version.ps1  Writes the in-game version stamp
 └── web/              ← the web app (this is what you deploy)
     ├── index.html
@@ -124,14 +126,31 @@ This reads every numeric `books/book<n>/<section>.xml`, each book's `Adventurers
 skipped. Book text is left untouched; the JSON simply bundles it so the app can load a
 whole book in a single request and cache it for offline play.
 
-Before bundling, the build **validates the source XML**: every section is parsed as
-strict XML (well-formed and rooted at `<section>`), along with each `Adventurers.xml`
-and the rules files. It also checks that each section's `<section name>` **matches its
-filename** — a purely numeric file must match exactly, while a lettered continuation
-(e.g. `448a`, `609a`) may use either its full name or its printed parent number. Any
-malformed file or filename/name mismatch **aborts the build** — naming the file —
-instead of shipping broken JSON that would only throw when the browser renders that
-section.
+Before bundling, the build **validates the source XML** (`build/validate-source.ps1`), and
+any problem **aborts the build** — naming the file — instead of shipping data that would
+only misbehave when the browser renders that section:
+
+- **Well-formed** and rooted at the element its kind requires: `<section>` for a section
+  file, the rules files and a pregen biography; `<adventurers>` for `Adventurers.xml`.
+- Each section's `<section name>` **matches its filename** — a purely numeric file must
+  match exactly, while a lettered continuation (e.g. `448a`, `609a`) may use either its
+  full name or its printed parent number.
+- A **closed tag/attribute/value vocabulary**: an unknown tag, an unknown attribute for
+  that tag, a truth flag that isn't `t`/`f`, or an invalid enumerated value (ability,
+  blessing, cargo, crew, gender, profession, ship, `tick special=`, per-tag `type=`) fails
+  the build. Historically these shipped as silent no-ops (`safeAddGodd`, `tag=` for
+  `tags=`). A genuinely new name must be added to the allowlist in the same change that
+  teaches the engine to read it.
+- Every **explicit jump target resolves**: a `section=` (or `<extrachoice atsection=`) in a
+  bundled book 1–6 must name a section that book actually contains. Links into the
+  unbundled books 7–12 are intentional and left alone, as are non-literal ids.
+- Each pregen's **biography is readable** — inline prose, or the `<FirstName>.xml` whose
+  first `<p>` the build folds in.
+
+The gate is itself tested: `pwsh -File build/validate-selftest.ps1` runs it over a fixture
+tree, once clean and then once per class of mistake (CI runs this on every push). The real
+corpus is clean, so a gate that quietly stopped catching typos would otherwise look exactly
+like a passing build.
 
 The bundled text is **LF-normalised**, so the JSON is a pure function of the source
 *content* rather than of the builder's checkout: a `core.autocrlf=true` working tree

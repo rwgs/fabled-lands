@@ -39,47 +39,10 @@ $assets = Join-Path $root 'web/assets'
 New-Item -ItemType Directory -Force -Path $out    | Out-Null
 New-Item -ItemType Directory -Force -Path $assets | Out-Null
 
-# The bundled text is LF-normalised so the JSON is a pure function of the source CONTENT.
-# Without this a core.autocrlf=true checkout (CRLF working tree) bundles "\r\n" where an LF
-# checkout bundles "\n" - ~8,500 differing escapes per book - so the committed data could not
-# be checked against a rebuild in CI, and the same content produced two different version
-# stamps. Nothing is lost: both XmlDocument here and the browser's DOMParser normalise CRLF
-# to LF while parsing, so this only strips the builder's platform out of the output. (task 197)
-function Read-Xml([string]$path) {
-    $raw = (Get-Content -Raw -Encoding UTF8 $path) -replace "`r`n", "`n"
-    return ($raw -replace '(?s)^\s*<\?xml.*?\?>\s*', '').Trim()
-}
-
-# ---- XML validation (task 13) ----------------------------------------------
-# Parse a bundled fragment as strict XML so a malformed file is caught at build
-# time rather than throwing at render time in the browser. Returns $null when
-# valid, or an error string. `$expectRoot` (e.g. 'section') also checks the root
-# element. NOTE: use .get_Name() - PowerShell's XML type adapter overrides plain
-# .Name to return the `name` ATTRIBUTE, not the element's tag name.
-function Test-XmlDoc([string]$xml, [string]$label, [string]$expectRoot, [string[]]$expectNames) {
-    if (-not $xml) { return $null }   # an absent optional file is not an error
-    try {
-        $doc = New-Object System.Xml.XmlDocument
-        $doc.LoadXml($xml)
-    } catch {
-        return "$label : not well-formed XML - $($_.Exception.Message)"
-    }
-    if ($expectRoot -and $doc.DocumentElement.get_Name() -ne $expectRoot) {
-        return "$label : root is <$($doc.DocumentElement.get_Name())>, expected <$expectRoot>"
-    }
-    # A section file's <section name> must match its filename key (task 78). A purely
-    # numeric file must match exactly; a lettered continuation may use either its full
-    # name (448a -> "448a") or its printed parent number (609a -> "609"), so both are
-    # passed in $expectNames. `.GetAttribute` is used deliberately - the plain .Name
-    # property is overridden by PowerShell's XML adapter to return the `name` attribute.
-    if ($expectNames -and $expectNames.Count -gt 0) {
-        $actual = $doc.DocumentElement.GetAttribute('name')
-        if ($expectNames -notcontains $actual) {
-            return "$label : section name=`"$actual`", expected `"$($expectNames -join '" or "')`" (does not match filename)"
-        }
-    }
-    return $null
-}
+# Read-Xml (the LF-normalising reader both phases use) and the whole source-XML gate live in
+# validate-source.ps1, so the self-test can drive the same validation over mutation fixtures
+# instead of a real build. (tasks 13, 78, 197, 199)
+. (Join-Path $PSScriptRoot 'validate-source.ps1')
 
 # ---- Pregen starting characters --------------------------------------------
 # Each book's Adventurers.xml <starting> block lists the six pre-made characters
@@ -136,51 +99,22 @@ if (Test-Path $iniPath) {
     }
 }
 
-# ---- Validate the source XML before bundling (task 13) ----------------------
-# Every section is parsed as strict XML (well-formed + rooted at <section>), plus
-# each book's Adventurers.xml and the rules files, BEFORE anything is written. A
-# malformed file aborts the build here - with the file named - instead of shipping
-# broken JSON that only throws when the browser renders that section. The runtime
-# DOMParser is more lenient, so this is a deliberately stricter gate; the corpus
-# is clean, so it never fires spuriously.
+# ---- Validate the source XML before bundling (tasks 13, 199) ----------------
+# Every file the build is about to bundle is checked BEFORE anything is written: well-formed,
+# rooted at the element its kind requires, a <section name> matching its filename, a known
+# tag/attribute/value vocabulary, an explicit link that resolves inside its bundled book, and
+# a readable biography for each pregen. A failure aborts here - naming the file - instead of
+# shipping data that only misbehaves when the browser renders that section. The runtime
+# DOMParser is more lenient, so this is a deliberately stricter gate; the corpus is clean, so
+# it never fires spuriously.
 Write-Host 'Validating source XML...'
-$xmlErrors = @()
-$xmlChecked = 0
-for ($b = 1; $b -le 6; $b++) {
-    $dir = Join-Path $books ("book{0}" -f $b)
-    if (-not (Test-Path $dir)) { continue }
-    Get-ChildItem -Path $dir -Filter '*.xml' |
-        Where-Object { $_.BaseName -match '^\d+[a-z]?$' } |
-        ForEach-Object {
-            $xmlChecked++
-            # Accepted names: the full filename, and its numeric prefix for a lettered
-            # continuation (609a -> "609" or "609a"). For a purely numeric file both are
-            # the same, so the match is exact. (task 78)
-            $expectNames = @($_.BaseName, ($_.BaseName -replace '[a-z]+$', '')) | Select-Object -Unique
-            $e = Test-XmlDoc (Read-Xml $_.FullName) ("book{0}/{1}" -f $b, $_.Name) 'section' $expectNames
-            if ($e) { $xmlErrors += $e }
-        }
-    $advPath = Join-Path $dir 'Adventurers.xml'
-    if (Test-Path $advPath) {
-        $xmlChecked++
-        $e = Test-XmlDoc (Read-Xml $advPath) ("book{0}/Adventurers.xml" -f $b) $null
-        if ($e) { $xmlErrors += $e }
-    }
-}
-foreach ($rf in @('Rules.xml', 'QuickRules.xml')) {
-    $rp = Join-Path $rules $rf
-    if (Test-Path $rp) {
-        $xmlChecked++
-        $e = Test-XmlDoc (Read-Xml $rp) "rules/$rf" $null
-        if ($e) { $xmlErrors += $e }
-    }
-}
-if ($xmlErrors.Count -gt 0) {
-    Write-Host ("XML validation FAILED - {0} of {1} file(s) malformed:" -f $xmlErrors.Count, $xmlChecked)
-    $xmlErrors | ForEach-Object { Write-Host "  $_" }
+$v = Test-SourceTree $books $rules (1..6)
+if ($v.Errors.Count -gt 0) {
+    Write-Host ("XML validation FAILED - {0} problem(s) in {1} file(s) checked:" -f $v.Errors.Count, $v.Checked)
+    $v.Errors | ForEach-Object { Write-Host "  $_" }
     throw "Build aborted: fix the source XML above and re-run."
 }
-Write-Host ("XML OK: {0} files well-formed." -f $xmlChecked)
+Write-Host ("XML OK: {0} files validated." -f $v.Checked)
 
 # ---- Bundle each book -------------------------------------------------------
 $bookMeta = @()
