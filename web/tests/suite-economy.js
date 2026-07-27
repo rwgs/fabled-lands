@@ -1120,6 +1120,64 @@ export async function run(ctx) {
          && /OPTIONAL\.map\(\(url\) => cache\.add\(url\)\.catch\(/.test(swSrc190));
     }
 
+    // --- task 206: REQUIRED must list every module the app actually loads ---
+    // The precache list is hand-maintained, and edition.js (added by task 195) was missing from
+    // it. That is not a missed nicety: install's addAll(REQUIRED) succeeds, then activate judges
+    // the new cache complete against the SAME short list and deletes the previous cache — the
+    // only place the module was held (the fetch handler had cached it opportunistically under
+    // the old version key). A player who took the update and went offline before the next page
+    // load had no copy of a module the rule modules import, so the app could not boot offline —
+    // the partial-cache hazard tasks 179/190 closed elsewhere.
+    //
+    // Close the class rather than the instance: walk the app's REAL import graph from its two
+    // entry points and require every module it reaches to be listed, so the next added module
+    // fails here instead of shipping. Source text only, no CacheStorage I/O (task 138).
+    { // block-scoped
+      const swSrc206 = await (await fetch('./sw.js')).text();
+      const indexSrc = await (await fetch('./index.html')).text();
+      // Seed the walk from the entry points the shipped app really names, not a hard-coded pair
+      // that could rot: index.html's module script and sw.js's own importScripts.
+      const entryScript = (indexSrc.match(/<script type="module" src="([^"]+)">/) || [])[1];
+      const swImport = (swSrc206.match(/importScripts\('([^']+)'\)/) || [])[1];
+      ok('task206: the entry points are index.html\'s module script and sw.js\'s importScripts',
+         entryScript === 'js/app.js' && swImport === './js/sw-cache.js', `${entryScript} | ${swImport}`);
+
+      // REQUIRED only, never OPTIONAL: addAll is all-or-nothing over that array and prune()
+      // judges completeness against it.
+      const reqBlock = (swSrc206.match(/const REQUIRED = \[([\s\S]*?)\];/) || [])[1] || '';
+      const required = [...reqBlock.matchAll(/'([^']+)'/g)].map((m) => m[1]);
+      const requiredJs = new Set(required.filter((u) => u.startsWith('./js/')));
+      ok('task206: the REQUIRED module entries parse out of the sw.js source', requiredJs.size >= 20, 'n=' + requiredJs.size);
+
+      // Follow each module's own specifiers (static and dynamic), resolved against the importer,
+      // so a module added in a subdirectory is followed like any other.
+      const webRoot = new URL('./', location.href).href;
+      const reached = new Set();
+      const badFetch = [];
+      const queue = [new URL(entryScript, location.href).href, new URL(swImport, location.href).href];
+      while (queue.length) {
+        const href = queue.pop();
+        if (reached.has(href)) continue;
+        reached.add(href);
+        const res = await fetch(href);
+        if (!res.ok) { badFetch.push(href); continue; }
+        const src = await res.text();
+        for (const m of src.matchAll(/(?:from|import)\s*\(?\s*'(\.\.?\/[\w./-]+\.js)'/g)) {
+          queue.push(new URL(m[1], href).href);
+        }
+      }
+      const keys = [...reached].map((h) => './' + h.slice(webRoot.length));
+      ok('task206: every module in the import graph was fetchable', badFetch.length === 0, badFetch.join(', '));
+      const unlisted = keys.filter((k) => !requiredJs.has(k)).sort();
+      ok('task206: every module the app loads is in the service worker\'s REQUIRED precache list',
+         unlisted.length === 0, 'unlisted: ' + unlisted.join(', '));
+      // The other direction — a listed module the walk never reached would mean the graph is not
+      // really being covered (a vacuous pass), or that REQUIRED still names a retired module.
+      const unreached = [...requiredJs].filter((k) => !keys.includes(k)).sort();
+      ok('task206: every precached module is one the walk actually reached',
+         unreached.length === 0, 'unreached: ' + unreached.join(', '));
+    }
+
     // --- task 191: a narrow header must not clip its critical controls ---
     // A speech-capable browser builds ten header controls. Their fixed widths, gaps and header
     // padding needed ~393px, so at 320/360 CSS px the trailing ones — Save & quit and the

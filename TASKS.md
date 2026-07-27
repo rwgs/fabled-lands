@@ -33,7 +33,7 @@ audit pass.
 - [x] 196. The build stamp is date/EOL dependent and omits service-worker code
 - [x] 197. CI tests committed bundles without rebuilding their XML source
 - [x] 203. An imported return frame restores unvalidated vars, ticks and location
-- [ ] 206. The service worker's precache list has drifted from `web/js` and nothing checks it
+- [x] 206. The service worker's precache list has drifted from `web/js` and nothing checks it
 
 **LOW**
 

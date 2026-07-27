@@ -8,7 +8,7 @@
 // lives in one dependency-free file so the tests can drive it directly. (task 190)
 importScripts('./js/sw-cache.js');
 
-const VERSION = 'fl-26.07.27.eb12391';
+const VERSION = 'fl-26.07.27.4e03377';
 
 // REQUIRED = the app shell + all book data. Without every one of these the game
 // can't run offline, so the install must FAIL (and the previous complete cache
@@ -21,6 +21,7 @@ const REQUIRED = [
   './css/style.css',
   './js/app.js',
   './js/data.js',
+  './js/edition.js',
   './js/state.js',
   './js/rules.js',
   './js/engine.js',

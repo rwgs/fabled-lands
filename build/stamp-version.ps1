@@ -72,13 +72,15 @@ function Get-CanonicalBytes {
 # ---- Content hash of the shipped app ---------------------------------------
 # Every source file that makes up the deployed app. version.js is excluded because it is
 # nothing but this script's output; _test.html and web/tests/ are a dev-only harness and are
-# left out on purpose (the js sweep is deliberately non-recursive). web/assets is recursed so
-# replacing only an icon, map or illustration still moves the stamp -- and therefore the
-# service-worker cache key -- instead of leaving installed players on a stale asset (task 64).
+# left out because nothing here sweeps them. web/js and web/assets are BOTH recursed: replacing
+# only an icon, map or illustration must still move the stamp -- and therefore the service-worker
+# cache key -- instead of leaving installed players on a stale asset (task 64), and a module
+# added in a new web/js subdirectory must do the same rather than shipping under the previous
+# version identity (task 206; web/js is flat today, so recursing it changes no current digest).
 # sw.js IS included (task 196): a service-worker-only release is a real release and must not
 # keep the previous version identity.
 $files = @()
-$files += Get-ChildItem -Path (Join-Path $web 'js')   -Filter '*.js'   -File | Where-Object { $_.Name -ne 'version.js' }
+$files += Get-ChildItem -Path (Join-Path $web 'js')   -Filter '*.js'   -File -Recurse | Where-Object { $_.Name -ne 'version.js' }
 $files += Get-ChildItem -Path (Join-Path $web 'css')  -Filter '*.css'  -File
 $files += Get-ChildItem -Path (Join-Path $web 'data') -Filter '*.json' -File
 foreach ($f in 'index.html', 'manifest.webmanifest', 'sw.js') {
