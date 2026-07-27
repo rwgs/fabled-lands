@@ -86,10 +86,17 @@ Notes:
   `suite-economy`, `suite-actions`, `suite-corpus`), each exporting one `async run(ctx)` and
   rebuilding its own fixtures. Add new assertions to the suite that owns the area; append
   `?suite=<name>` (comma list ok) to run a focused subset. Each suite is its **own module
-  scope**, so a **duplicate top-level `const`/`let`** now only aborts *that* suite (not the
-  whole run), and the harness reports it as **`RESULT FATAL … Identifier 'x' has already been
-  declared`** (title `TESTS_FAIL`) via the bootstrap error handler instead of hanging at
-  `running…`. A "no RESULT line" therefore means the page never loaded (server down, or a 404
+  scope**, so the same identifier can be declared at top level in two different suites without
+  colliding — but that is the *only* isolation it buys. `_test.html` **statically imports all
+  seven suites**, so a **parse error in any one of them** (most often a duplicate top-level
+  `const`/`let` *within* one suite) stops the harness module from evaluating at all: nothing
+  runs, and `?suite=` does **not** exclude the broken file. The classic bootstrap then reports
+  one global **`RESULT FATAL pass=0 fail=1`** with `FATAL uncaught error: Uncaught SyntaxError:
+  Identifier 'x' has already been declared (suite-<name>.js:<line>)` (title `TESTS_FAIL`)
+  instead of hanging at `running…` — so fix the named file, whichever suite you were running.
+  A **runtime** throw is isolated by contrast: `main()` catches it per suite, reporting
+  `FATAL [<name>] …` while the other suites still run (aggregate `RESULT FAILURES`). A "no
+  RESULT line" therefore means the page never loaded (server down, or a 404
   from the wrong path — serve the repo root and request `/web/_test.html`). The reporter is
   **sticky-fatal**: an uncaught async error or unhandled promise rejection captured mid-run
   fails the aggregate and can never be overwritten by a later "ALL PASS".
