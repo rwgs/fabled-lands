@@ -1537,11 +1537,38 @@ export function reconcileSlotMeta() {
   return meta;
 }
 
+// Shown when storage refuses a deletion. Deliberately NOT describeSaveError's wording: nothing
+// was being saved, and the honest news is that the adventure survived. (task 198)
+const DELETE_FAILED = 'This adventure could not be deleted — your browser refused the change, so it is still saved. Please try again.';
+
+/** Delete a save slot: its `fl_meta` entry FIRST, then the `fl_save_<slot>` blob.
+ *
+ *  The order is the whole point. Removing the blob first and then failing the meta write left a
+ *  ghost card — visible in "Your Adventurers" with no save behind it, which reconcileSlotMeta
+ *  cannot repair (it only rebuilds meta FROM a blob) while nextFreeSlot still counts the entry
+ *  as occupied, so the slot was reserved forever and the save was gone. Meta-first fails the
+ *  other way: an interrupted delete leaves the blob-without-meta form task 137 already
+ *  recovers, so nothing is lost and nothing is stranded.
+ *
+ *  Returns null on success, or a player-facing message when storage refused (both operations
+ *  are guarded, so this never throws). A caller that gets a message must not report success:
+ *  the record is still there, in one form or the other. (tasks 137, 198) */
 export function deleteSlot(slot) {
-  localStorage.removeItem(SAVE_PREFIX + slot);
-  const meta = loadSlotMeta();
-  delete meta[slot];
-  localStorage.setItem(META_KEY, JSON.stringify(meta));
+  try {
+    const meta = loadSlotMeta();
+    delete meta[slot];
+    localStorage.setItem(META_KEY, JSON.stringify(meta));
+  } catch (e) {
+    console.error('deleteSlot: meta write failed', e);
+    return DELETE_FAILED; // nothing removed yet — the save and its card both stand
+  }
+  try {
+    localStorage.removeItem(SAVE_PREFIX + slot);
+  } catch (e) {
+    console.error('deleteSlot: blob removal failed', e);
+    return DELETE_FAILED; // blob-only: reconcileSlotMeta re-lists it (task 137)
+  }
+  return null;
 }
 
 /** Raw saved data for a slot (for export). Returns null for an absent OR unreadable blob
@@ -1584,7 +1611,7 @@ export function importSave(data, availableBooks = null) {
     // The write failed (storage full/blocked). Don't claim the slot or report
     // success: roll back any partial write and raise the storage error so the
     // UI shows it instead of toasting `Imported "undefined"`.
-    try { deleteSlot(slot); } catch (_) {}
+    deleteSlot(slot); // best-effort rollback; reports rather than throws (task 198)
     throw new Error(gs.lastSaveError || 'Could not save the imported adventure.');
   }
   const meta = loadSlotMeta()[slot];

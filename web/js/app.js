@@ -455,7 +455,13 @@ function showSaves() {
     const del = el('button', 'btn btn-danger', 'Delete');
     del.addEventListener('click', async () => {
       const ok = await modal({ title: 'Delete save?', body: `Delete <b>${escapeHtml(m.name)}</b>? This cannot be undone.`, buttons: [{ label: 'Cancel', value: false }, { label: 'Delete', value: true, primary: true }] });
-      if (ok) { deleteSlot(slot); showSaves(); }
+      if (!ok) return;
+      // deleteSlot reports a storage refusal instead of throwing (task 198): tell the player the
+      // adventure is still there rather than letting the rejection escape this async handler,
+      // then redraw either way so the list shows what storage actually holds.
+      const err = deleteSlot(slot);
+      if (err) await modal({ title: 'Not deleted', body: `<p>${escapeHtml(err)}</p>`, buttons: [{ label: 'OK', value: null, primary: true }] });
+      showSaves();
     });
     btns.appendChild(play); btns.appendChild(exp); btns.appendChild(del);
     card.appendChild(btns);

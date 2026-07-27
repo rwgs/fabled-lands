@@ -776,6 +776,54 @@ export async function run(ctx) {
       restore();
     }
 
+    // --- task 198: a failed deletion must never leave a ghost slot ---------------------
+    // deleteSlot used to remove the blob first: if the fl_meta write then threw, the save was
+    // already gone while its card remained — a ghost reconcileSlotMeta cannot repair (it only
+    // rebuilds meta FROM a blob) and nextFreeSlot counts as occupied forever. Meta goes first
+    // now, so an interruption leaves the task-137 recoverable blob-only form, and the refusal
+    // is reported instead of escaping the async Delete handler as a rejection.
+    {
+      const S = 'fl_save_', M = 'fl_meta';
+      const savedMeta = localStorage.getItem(M);
+      const savedBlob = localStorage.getItem(S + 18);
+      const g198 = GameState.create({ name: 'Ghost198', gender: 'f', profession: 'Rogue', book: 1, adv });
+      g198.slot = 18; g198.save();
+      ok('task198: the doomed slot starts with both a blob and a meta entry',
+         !!readSlotData(18) && !!loadSlotMeta()[18]);
+
+      // 1) The meta write refuses. Nothing may be removed, and nothing may throw.
+      localStorage.setItem = () => { const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e; };
+      let threw198 = null, err198;
+      try { err198 = deleteSlot(18); } catch (e) { threw198 = e; }
+      delete localStorage.setItem; // revert to Storage.prototype.setItem
+      ok('task198: a refused deletion reports a message instead of throwing',
+         threw198 === null && typeof err198 === 'string' && err198.length > 0, threw198 ? String(threw198) : String(err198));
+      ok('task198: the save blob survives the failed deletion', !!readSlotData(18) && readSlotData(18).name === 'Ghost198');
+      // Listed AND backed by a readable save: a ghost card would satisfy the first half alone.
+      ok('task198: the adventurer is still listed, with its save behind it (no ghost card)',
+         !!loadSlotMeta()[18] && !!reconcileSlotMeta()[18] && !!readSlotData(18));
+
+      // 2) The retry succeeds: both records go, and the slot is free for reuse.
+      const err198b = deleteSlot(18);
+      ok('task198: a successful deletion reports no error', err198b === null, String(err198b));
+      ok('task198: both the blob and the meta entry are gone',
+         readSlotData(18) === null && !loadSlotMeta()[18] && !reconcileSlotMeta()[18]);
+      // Both keys nextFreeSlot reads are clear, so the slot is genuinely reusable — the ghost
+      // reserved it by leaving the meta entry behind after the blob had already gone.
+      ok('task198: nothing is left for nextFreeSlot to count as occupied',
+         !loadSlotMeta()[18] && localStorage.getItem(S + 18) == null);
+
+      // 3) The inverse order is what made the ghost: prove the surviving form is the
+      // recoverable one. A blob with no meta entry is re-listed; the reverse is not.
+      localStorage.setItem(S + 18, JSON.stringify({ name: 'BlobOnly198', profession: 'Sage', rank: 1, book: 1, section: '1', updated: 1, abilities: {}, stamina: 9 }));
+      ok('task198: the blob-only form deleteSlot can now leave behind is recoverable',
+         !!reconcileSlotMeta()[18] && reconcileSlotMeta()[18].name === 'BlobOnly198');
+      localStorage.removeItem(S + 18);
+
+      if (savedMeta == null) localStorage.removeItem(M); else localStorage.setItem(M, savedMeta);
+      if (savedBlob == null) localStorage.removeItem(S + 18); else localStorage.setItem(S + 18, savedBlob);
+    }
+
     // --- task 189: a failed first navigation must not strand a new adventurer ----------
     // The Begin Adventure handler called startGame(1) without awaiting it, so a rejected book
     // fetch escaped as an unhandled rejection and a missing §1 (navigate → false) left the
