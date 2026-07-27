@@ -51,6 +51,12 @@ itself* still has no runtime dependencies; only the offline build step needs pws
    edit — and only on an edit: paths sort ordinally, text is LF-normalised, and the date is
    reused while the digest holds, so a rebuild with no source change is a byte-for-byte
    no-op and leaves the tree clean. Never hand-edit `version.js`/`sw.js`'s `VERSION`. (task 196)
+   The bundled section text is **LF-normalised**, so the JSON depends on the source *content*
+   and not on your checkout's line endings. **CI runs `build-data.ps1` on Linux and fails on
+   any generated diff** (`web/data`, `web/assets`, `version.js`, `sw.js`) before it runs the
+   browser suite — so if you touch `books/` or `rules/`, commit the rebuilt output or the
+   build fails. Keep both `.ps1` scripts OS-neutral: forward slashes in path literals (a
+   `'web\data'` literal becomes a *file* named `web\data` on Linux). (task 197)
 2. Run the headless smoke test (serves `web/`, exercises the engine, and renders
    **every section of all six books** to confirm none throw):
    - Serve from the repo root: `python -m http.server 8848`

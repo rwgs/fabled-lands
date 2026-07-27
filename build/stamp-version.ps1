@@ -36,7 +36,7 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $web  = Join-Path $root 'web'
-$verFile = Join-Path $web 'js\version.js'
+$verFile = Join-Path $web 'js/version.js'
 $swFile  = Join-Path $web 'sw.js'
 
 # Extensions whose bytes are line-ending sensitive. Git's autocrlf only rewrites text, so

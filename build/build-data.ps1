@@ -21,6 +21,11 @@
 
   Run from the repository root (requires PowerShell 7 - see #Requires below):
       pwsh -ExecutionPolicy Bypass -File build/build-data.ps1
+
+  CI runs this same script on Linux to check the committed output against a clean rebuild
+  (task 197), so keep it OS-neutral: forward slashes in path literals (a 'web\data' literal
+  becomes a file called "web\data" on Linux, not a directory) and no reliance on the checkout's
+  line endings. It is deliberately dependency-free - stock pwsh 7, no modules.
 #>
 
 $ErrorActionPreference = 'Stop'
@@ -28,14 +33,20 @@ $root   = Split-Path -Parent $PSScriptRoot   # repo root (parent of build/)
 $books  = Join-Path $root 'books'
 $rules  = Join-Path $root 'rules'
 $images = Join-Path $root 'images'
-$out    = Join-Path $root 'web\data'
-$assets = Join-Path $root 'web\assets'
+$out    = Join-Path $root 'web/data'
+$assets = Join-Path $root 'web/assets'
 
 New-Item -ItemType Directory -Force -Path $out    | Out-Null
 New-Item -ItemType Directory -Force -Path $assets | Out-Null
 
+# The bundled text is LF-normalised so the JSON is a pure function of the source CONTENT.
+# Without this a core.autocrlf=true checkout (CRLF working tree) bundles "\r\n" where an LF
+# checkout bundles "\n" - ~8,500 differing escapes per book - so the committed data could not
+# be checked against a rebuild in CI, and the same content produced two different version
+# stamps. Nothing is lost: both XmlDocument here and the browser's DOMParser normalise CRLF
+# to LF while parsing, so this only strips the builder's platform out of the output. (task 197)
 function Read-Xml([string]$path) {
-    $raw = Get-Content -Raw -Encoding UTF8 $path
+    $raw = (Get-Content -Raw -Encoding UTF8 $path) -replace "`r`n", "`n"
     return ($raw -replace '(?s)^\s*<\?xml.*?\?>\s*', '').Trim()
 }
 

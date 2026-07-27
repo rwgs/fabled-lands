@@ -14,8 +14,8 @@ jobs:
   # Guards the build scripts against the encoding trap that made build-data.ps1
   # unusable under Windows PowerShell 5.1 (task 121): a non-ASCII byte in the .ps1
   # source (an em dash in a double-quoted string) is misread through 5.1's legacy
-  # code page and breaks parsing. This is a pure source check — it never runs the
-  # engine-dependent build, so it can't "verify" engine-specific JSON/stamp output.
+  # code page and breaks parsing. This is a pure source check on the .ps1 files; the build is
+  # really executed, and its output verified, by the `smoke` job below (task 197).
   build-scripts:
     runs-on: ubuntu-latest
     steps:
@@ -51,10 +51,46 @@ jobs:
       - name: Rule modules import cleanly in Node (no DOM)
         run: node web/tests/node-import.mjs
 
+  # Rebuilds the bundled data from books/ + rules/, checks the committed output still matches,
+  # and only then serves what the build just produced. Before task 197 this job served
+  # web/data straight from the checkout, which left two holes: build-data.ps1's 4,377-file XML
+  # validation never ran (a malformed section could merge and first throw in a player's
+  # browser), and nothing caught source/generated drift (an XML edit committed without a
+  # rebuild left a stale bundle that CI then happily green-lit by testing the OLD sections).
+  # pwsh 7 is preinstalled on the GitHub ubuntu images, so this adds no toolchain to the app
+  # itself — the shipped web/ is still dependency-free.
   smoke:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # Also stamps web/js/version.js and web/sw.js's cache key (it calls stamp-version.ps1).
+      # Aborts here, naming the file, if any source XML is malformed or its <section name>
+      # disagrees with its filename.
+      - name: Rebuild the bundled data (pwsh 7)
+        shell: pwsh
+        run: ./build/build-data.ps1
+
+      - name: Generated output matches its committed source
+        run: |
+          set -euo pipefail
+          # Exactly what build-data.ps1 writes -- NOT all of web/assets, whose icons are
+          # hand-committed source this build never touches (reporting one of those here would
+          # tell the author to "rebuild and commit" for a change no rebuild can produce).
+          # --untracked-files=all so a *new* generated file (a freshly added illustration, say)
+          # counts as drift too, not just a modified one.
+          GEN=(web/data web/assets/world-map.jpg web/assets/maps web/assets/illus
+               web/js/version.js web/sw.js)
+          DRIFT="$(git status --porcelain --untracked-files=all -- "${GEN[@]}")"
+          if [ -n "$DRIFT" ]; then
+            echo "✗ A clean rebuild changed generated files, so the committed output is stale."
+            echo "  Fix: pwsh -ExecutionPolicy Bypass -File build/build-data.ps1 — then commit the result."
+            echo "  (Never hand-edit web/data or version.js; change the XML and rebuild.)"
+            echo "$DRIFT"
+            git --no-pager diff --stat -- "${GEN[@]}"
+            exit 1
+          fi
+          echo "✓ Bundled data, copied assets and build stamp match a clean rebuild."
 
       - name: Render every section headlessly
         run: |

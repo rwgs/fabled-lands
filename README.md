@@ -133,6 +133,16 @@ malformed file or filename/name mismatch **aborts the build** — naming the fil
 instead of shipping broken JSON that would only throw when the browser renders that
 section.
 
+The bundled text is **LF-normalised**, so the JSON is a pure function of the source
+*content* rather than of the builder's checkout: a `core.autocrlf=true` working tree
+(CRLF) bundles byte-for-byte identically to an LF one. Nothing is lost — XML parsers,
+both the build's and the browser's `DOMParser`, normalise CRLF to LF while parsing
+anyway. This is what lets CI check the committed data against a clean rebuild (task 197):
+the smoke workflow runs `build-data.ps1` on Linux and **fails on any generated diff** in
+`web/data`, `web/assets`, `version.js` or `sw.js` before testing, so an XML edit committed
+without a rebuild can no longer pass by exercising the stale bundle. Keep both build
+scripts OS-neutral (forward slashes in path literals) so that job keeps working.
+
 ### Build stamp / version
 
 A build version in the form `yy.MM.dd.<hash>` (date + a short SHA-1 digest of the app

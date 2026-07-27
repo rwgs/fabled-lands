@@ -31,8 +31,9 @@ audit pass.
 - [x] 194. SPA section transitions provide no focus target or announcement
 - [x] 195. DOM-free rule modules are not directly importable in Node
 - [x] 196. The build stamp is date/EOL dependent and omits service-worker code
-- [ ] 197. CI tests committed bundles without rebuilding their XML source
+- [x] 197. CI tests committed bundles without rebuilding their XML source
 - [ ] 203. An imported return frame restores unvalidated vars, ticks and location
+- [ ] 206. The service worker's precache list has drifted from `web/js` and nothing checks it
 
 **LOW**
 
@@ -1487,6 +1488,39 @@ Add a fixture with a rerollable roll beside a `<choice flee="t">`: the ordinary 
 while the result is provisional, the flee choice stays live, and taking it still routes through
 the task-178 durable consequence contract. Run the focused actions/combat suites and the full
 browser suite.
+
+## 206. The service worker's precache list has drifted from `web/js` and nothing checks it
+
+**Priority: MEDIUM — `edition.js` is already missing, so an update-then-go-offline sequence
+can leave an installed player with a broken app.**
+
+Found while doing task 197. `sw.js`'s `REQUIRED` array names 21 of the 22 modules in `web/js`:
+`edition.js` (added by task 195) was never added to it. The list is hand-maintained and
+unverified, so the omission is invisible — the browser suite loads over HTTP, and task 138
+deliberately keeps live CacheStorage I/O out of the suites.
+
+It is not merely a missed nicety. `install` calls `addAll(REQUIRED)`, which succeeds, and
+`activate` calls `FLCache.prune(caches, VERSION, REQUIRED)`, which judges the new cache
+complete against that same short list and therefore deletes the previous cache — the only
+place `edition.js` was held (the fetch handler had cached it opportunistically under the old
+version key). A player who takes an update and goes offline before the next page load fetches
+`edition.js` again has no copy of a module the rule modules import, so the app fails to boot
+offline. This is exactly the partial-cache hazard tasks 179/190 closed elsewhere.
+
+Add `./js/edition.js` to `REQUIRED`, then close the class of bug rather than the instance:
+assert against the `sw.js` **source text** (the task-138 pattern — fetch and parse it, no
+CacheStorage I/O) that every `web/js/*.js` file appears in `REQUIRED` or is explicitly
+exempted, so the next added module fails the suite instead of shipping. The module list has to
+come from somewhere the test can see; deriving it from the same `web/js` sweep the build
+already does is one option, an explicit exemption list in the test is another.
+
+Note the same hand-maintained-coverage shape in `stamp-version.ps1`: its digest sweep is a
+non-recursive `web/js/*.js` (plus fixed extension filters), so a module added in a new
+subdirectory would ship without moving the stamp or the cache key. `web/js` is flat today, so
+this is latent — decide whether to recurse it or leave it and document the constraint.
+
+Verify: the new assertion fails on the current `sw.js`, passes once `edition.js` is listed, and
+fails again if any other `web/js` module is removed from `REQUIRED`. Full browser suite green.
 
 ---
 
