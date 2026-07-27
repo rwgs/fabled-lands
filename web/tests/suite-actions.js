@@ -1949,6 +1949,79 @@ export async function run(ctx) {
          `${f180.name} ${f180.combat}/${f180.defence} ${f180.stamina}/${f180.maxStamina} out=${f180.outcome}`);
       ok('task180: a group member is rebuilt from its own node, in document order',
          g180.name === 'Spider B' && g180.maxStamina === 13 && g180.group === 's', `${g180.name} ${g180.maxStamina}`);
+
+      // task 203: deserializeFrame is the coercing inverse of serializeFrame — restoreReturn()
+      // writes a frame's payload straight into live state, so a crafted/imported frame must be
+      // coerced the way sanitizeData coerces the same live fields.
+      const round203 = visit.deserializeFrame(fflat, sec);
+      ok('task203: an ordinary frame round-trips its identity, vars, location, todock and source',
+         round203.book === 2 && round203.section === '5' && round203.sectionTodock === 'Dock'
+         && round203.location === 'Loc' && round203.entryTicks === 3 && round203.vars.x === 1
+         && round203.usedSource === pNode && round203.sectionEl === sec,
+         JSON.stringify({ b: round203.book, s: round203.section, d: round203.sectionTodock, l: round203.location, t: round203.entryTicks }));
+      const evil203 = visit.deserializeFrame({
+        book: '2.4', section: 5, sectionTodock: { d: 1 }, location: ['x'],
+        vars: { good: 4, numeric: '7', str: 'nope', obj: { v: 1 }, nan: NaN, nul: null, inf: Infinity },
+        entryTicks: -3.5, usedSourcePath: 'r.0', ctx: flat,
+      }, sec);
+      ok('task203: only finite numeric vars survive (a string/object/NaN var is dropped)',
+         Object.keys(evil203.vars).join(',') === 'good,numeric' && evil203.vars.numeric === 7,
+         JSON.stringify(evil203.vars));
+      ok('task203: entryTicks becomes a non-negative integer and book a positive integer',
+         evil203.entryTicks === 0 && evil203.book === 2, `ticks=${evil203.entryTicks} book=${evil203.book}`);
+      ok('task203: location/sectionTodock/section are coerced to a string (or null)',
+         typeof evil203.location === 'string' && typeof evil203.sectionTodock === 'string' && evil203.section === '5',
+         `loc=${typeof evil203.location} dock=${typeof evil203.sectionTodock} sec=${evil203.section}`);
+      ok('task203: a frame with no usable book or section drops entirely',
+         visit.deserializeFrame({ book: 'nope', section: '5', ctx: flat }, sec) === null
+         && visit.deserializeFrame({ book: 0, section: '5', ctx: flat }, sec) === null
+         && visit.deserializeFrame({ book: 1, ctx: flat }, sec) === null
+         && visit.deserializeFrame({ book: 1, section: '5', ctx: flat }, null) === null);
+    }
+
+    // --- task 203: a crafted return frame cannot push junk into live state on <return> ------
+    // The same scenario as task 116's mid-detour reload, but the persisted frame is hand-edited
+    // before it is rehydrated: a string/object/NaN var, a negative fractional entry-tick
+    // baseline and a non-string location. After the resume, taking the <return> must leave
+    // data.vars all-numeric, the <if ticks=> baseline sane, and the location a string.
+    {
+      const secA = parse('<section name="A203" boxes="2"><tick/><p>Source.</p></section>');
+      const secD = parse('<section name="D203"><p>Detour.</p><return>Turn back</return></section>');
+      const secs = { A203: secA, D203: secD };
+      const g = GameState.create({ name:'T203', gender:'m', profession:'Warrior', book:1, adv });
+      const cont = document.createElement('div');
+      let story;
+      const enter = (b, s) => { g.goTo(b, s); story.begin(secs[String(s)], b, s); };
+      story = new Story(cont, g, { navigate: enter, onDeath(){}, notify(){} });
+      enter(1, 'A203');
+      g.setVar('mark', 9);
+      g.data.location = 'Sokara';
+      const it = { item: makeItem('item', 'map'), effect: { uses: -1, body: '<goto section="D203"/>' }, body: parse('<effect><goto section="D203"/></effect>') };
+      story.useItem(it.item, it.effect, it.body); // A203 → D203, captures the return frame
+      const record = story.serializeVisit();
+      ok('task203: the mid-detour record carries a frame back to the source', !!record && !!record.frame && record.frame.section === 'A203');
+
+      // Hand-edit the persisted frame the way an imported save file could have: every value
+      // here survives a real JSON round-trip and sanitizeData (which keeps the frame verbatim).
+      record.frame.vars = { mark: 9, evil: '<img onerror=x>', obj: { v: 1 } };
+      record.frame.entryTicks = -4.5;
+      record.frame.location = { d: 1 };
+      const g2 = new GameState(sanitizeData(JSON.parse(JSON.stringify({ ...g.data, visit: record }))));
+      g2.data.visit.frame.vars.nan = NaN; // JSON can't carry NaN, an in-memory blob can
+      const cont2 = document.createElement('div');
+      let story2;
+      story2 = new Story(cont2, g2, { navigate: (b, s) => { g2.goTo(b, s); story2.begin(secs[String(s)], b, s); }, onDeath(){}, notify(){} });
+      const frame2 = story2.deserializeFrame(g2.data.visit.frame, secA);
+      story2.resume(secD, 1, 'D203', g2.data.visit, frame2);
+      cont2.querySelector('.goto').click(); // <return> — restoreReturn writes the frame into state
+      ok('task203: the return lands back in the source section', story2.section === 'A203', 'sec=' + story2.section);
+      ok('task203: no non-numeric var reaches data.vars',
+         Object.values(g2.data.vars).every((v) => typeof v === 'number' && Number.isFinite(v)) && g2.getVar('mark') === 9,
+         JSON.stringify(g2.data.vars));
+      ok('task203: the tick gate compares against a sane (non-negative integer) baseline',
+         Number.isInteger(g2.entryTickCount()) && g2.entryTickCount() >= 0, 'entryTicks=' + g2.entryTickCount());
+      ok('task203: the restored location is a string, not an object',
+         typeof g2.data.location === 'string', 'loc=' + JSON.stringify(g2.data.location));
     }
 
     // --- task 119 (phase 3): classifyPassive — the renderPassive decision cascade ----

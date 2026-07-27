@@ -161,3 +161,49 @@ export function serializeFrame(frame) {
     ctx: serializeCtx(frame.ctx),
   };
 }
+
+// sanitizeData's numeric/string coercions, inlined for the frame (its helpers are private to
+// state.js): a number or a numeric string, else the default; rounded when integral; floored
+// at `min`. Kept here so serializeFrame and its inverse stay in one place. (task 203)
+function frameNum(v, dflt, { min = -Infinity, int = false } = {}) {
+  let n = typeof v === 'number' ? v : (typeof v === 'string' && v.trim() !== '' ? parseFloat(v) : NaN);
+  if (!Number.isFinite(n)) return dflt;
+  if (int) n = Math.round(n);
+  return Math.max(min, n);
+}
+function frameStr(v) { return (v == null || v === '') ? null : String(v); }
+
+// Rebuild a return frame from its serialised form, given the frame's re-parsed section element
+// (the caller fetches it — getSection is async). Mirrors _captureReturnFrame's shape.
+//
+// An imported save is untrusted and restoreReturn() writes this frame's payload STRAIGHT into
+// live state (data.vars, data.location, the entry-tick baseline), so every field is coerced
+// the way sanitizeData coerces its live counterpart rather than copied through: only finite
+// numeric vars survive (a string/object var would otherwise feed resolveValue arithmetic and
+// every `<if var=>` gate), entryTicks becomes a non-negative integer (a negative/fractional
+// baseline skews the `<if ticks=>` comparison), and location/sectionTodock become a string or
+// null. book must name a positive integer — with none the whole frame drops, leaving the
+// resume with no return available, exactly as a legacy save without one. (task 203)
+export function deserializeFrame(rec, frameSectionEl) {
+  if (!rec || typeof rec !== 'object' || Array.isArray(rec) || !frameSectionEl) return null;
+  if (rec.section == null) return null;
+  const book = frameNum(rec.book, NaN, { int: true });
+  if (!(book >= 1)) return null; // no positive-int book ⇒ unusable; never clamp into book 1
+  const vars = {};
+  const rawVars = (rec.vars && typeof rec.vars === 'object' && !Array.isArray(rec.vars)) ? rec.vars : {};
+  for (const [k, v] of Object.entries(rawVars)) {
+    const n = frameNum(v, NaN);
+    if (Number.isFinite(n)) vars[k] = n;
+  }
+  return {
+    book,
+    section: String(rec.section),
+    sectionEl: frameSectionEl,
+    ctx: deserializeCtx(rec.ctx, frameSectionEl),
+    sectionTodock: frameStr(rec.sectionTodock),
+    vars,
+    location: frameStr(rec.location),
+    entryTicks: frameNum(rec.entryTicks, 0, { min: 0, int: true }),
+    usedSource: resolveNodePath(rec.usedSourcePath, frameSectionEl),
+  };
+}

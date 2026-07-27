@@ -27,7 +27,8 @@ import {
   computeRollGate, computeTransferGate, computeBuyGate,
 } from './render-gates.js';
 import {
-  newCtx, resolveNodePath, serializeCtx, deserializeCtx, serializeFrame, rebuildVisitScaffold,
+  newCtx, resolveNodePath, serializeCtx, deserializeCtx, serializeFrame, deserializeFrame,
+  rebuildVisitScaffold,
 } from './visit-state.js';
 import {
   renderReroll, renderDifficulty, renderRandom, renderRankcheck, renderTraining,
@@ -191,8 +192,8 @@ function findControl(root, id) {
   return null;
 }
 
-// resolveNodePath / newCtx / (de)serializeCtx / serializeFrame moved to visit-state.js
-// (task 119); the Story visit methods below delegate to them.
+// resolveNodePath / newCtx / (de)serializeCtx / (de)serializeFrame moved to visit-state.js
+// (task 119, deserializeFrame in task 203); the Story visit methods below delegate to them.
 
 export class Story {
   constructor(rootEl, state, opts) {
@@ -635,20 +636,10 @@ export class Story {
   }
 
   // Rebuild a return frame from its serialised form, given the frame's re-parsed section
-  // element (the caller fetches it — getSection is async). Mirrors _captureReturnFrame's shape.
+  // element (the caller fetches it — getSection is async). The coercing inverse of
+  // serializeFrame lives beside it in visit-state.js (task 203); this keeps the Story API.
   deserializeFrame(rec, frameSectionEl) {
-    if (!rec || typeof rec !== 'object' || !frameSectionEl) return null;
-    return {
-      book: rec.book,
-      section: rec.section,
-      sectionEl: frameSectionEl,
-      ctx: deserializeCtx(rec.ctx, frameSectionEl),
-      sectionTodock: rec.sectionTodock ?? null,
-      vars: rec.vars && typeof rec.vars === 'object' ? { ...rec.vars } : {},
-      location: rec.location ?? null,
-      entryTicks: rec.entryTicks,
-      usedSource: rec.usedSourcePath ? resolveNodePath(rec.usedSourcePath, frameSectionEl) : null,
-    };
+    return deserializeFrame(rec, frameSectionEl);
   }
 
   // Resume a saved visit WITHOUT begin()'s entry side-effects (task 116): no clearing of
