@@ -1380,6 +1380,74 @@ export async function run(ctx) {
       }
     }
 
+    // --- task 205: a provisional result must not lock the flee exit ------------------------
+    // Every other navigation gate exempts giving up: computeRollGate/computeTransferGate/
+    // computeBuyGate skip a flee="t" node and computeFightGate leaves both the flee choice and
+    // the escape box= choice ungated. applyPendingRerollGate (task 181) works on rendered
+    // buttons instead of nodes and disabled every .goto/.choice, so a direct <choice flee="t">
+    // was locked behind a provisional roll while the fight widget's own Flee button (a
+    // .btn-secondary, never a .choice) stayed live — the same escape, offered twice, gated once.
+    {
+      window.__FL_INSTANT_DICE__ = true; // resolve the check synchronously, like the roll blocks above
+      const tick = () => new Promise((r) => setTimeout(r, 0));
+      const settle205 = () => new Promise((r) => setTimeout(r, 30));
+      const retryBtn = (c) => Array.from(c.querySelectorAll('button')).find((b) => /Try again/.test(b.textContent));
+      const fleeBtn = (c) => Array.from(c.querySelectorAll('.choice')).find((b) => /Flee/.test(b.textContent));
+      const onwardBtn = (c) => Array.from(c.querySelectorAll('.choice')).find((b) => /Press on/.test(b.textContent));
+      // A SCOUTING check the player cannot pass, beside a direct flee choice and an ordinary
+      // onward choice. Holding Luck makes the failure a pending decision (task 175).
+      const sec205 = '<section name="FLEE205"><p>Slip past the guard.'
+        + '<difficulty ability="scouting" level="20">Test your SCOUTING</difficulty></p>'
+        + '<flee><lose stamina="2"/></flee>'
+        + '<choices><choice section="745" book="2" flee="t">Flee, taking a parting wound</choice>'
+        + '<choice section="746">Press on</choice></choices></section>';
+
+      const g = GameState.create({ name: 'T205', gender: 'm', profession: 'Warrior', book: 1, adv });
+      g.slot = 32; g.data.stamina = g.data.staminaMax; g.addBlessing('luck');
+      const cont = document.createElement('div');
+      let story;
+      const nav = controllable(g, () => story, parse('<section name="745"><p>Away.</p></section>'));
+      story = new Story(cont, g, { navigate: nav.enter, onDeath(){}, notify(){} });
+      g.setVisitProvider(() => story.serializeVisit());
+      g.goTo(1, 'FLEE205'); story.begin(parse(sec205), 1, 'FLEE205');
+      const stam0 = g.data.stamina;
+
+      cont.querySelector('.btn-roll').click(); await settle205(); // fails → provisional decision
+      ok('task205: the failed check is a pending decision', !!cont.querySelector('.keep-roll'));
+      ok('task205: the ordinary onward choice is locked while the result is provisional',
+         !!onwardBtn(cont) && onwardBtn(cont).disabled === true);
+      ok('task205: the flee choice stays clickable', !!fleeBtn(cont) && fleeBtn(cont).disabled === false);
+      ok('task205: the flee choice is tagged as an escape exit, the onward choice is not',
+         fleeBtn(cont).dataset.fleenav === '1' && onwardBtn(cont).dataset.fleenav === undefined);
+
+      // Taking it still routes through task 178's durable-consequence contract.
+      fleeBtn(cont).click();
+      ok('task205: fleeing from a provisional result applies the parting wound once, durably',
+         g.data.stamina === stam0 - 2 && story._navInFlight === true, 'stamina=' + g.data.stamina);
+      nav.pending.reject(); await tick();
+      ok('task205: a rejected escape keeps the one wound and arms a retry-only screen',
+         g.data.stamina === stam0 - 2 && !!retryBtn(cont) && !fleeBtn(cont));
+      retryBtn(cont).click(); nav.pending.ok(); await tick();
+      ok('task205: the retry reaches the escape target with no second wound',
+         story.section === '745' && g.data.stamina === stam0 - 2, `sec=${story.section} stamina=${g.data.stamina}`);
+      deleteSlot(32);
+
+      // The other exempt shape, checked on the predicate itself: a mid-fight surrender choice
+      // gated by an escape codeword (computeFightGate leaves it ungated for the same reason).
+      const esc205 = parse('<section name="E205"><tick codeword="Flee1" hidden="t"/>'
+        + '<fight name="Ogre" combat="5" defence="9" stamina="10"/>'
+        + '<choices><choice box="Flee1" section="9">Surrender</choice><choice section="10">Fight on</choice></choices></section>');
+      const escCw = gates.computeEscapeCodewords(esc205);
+      const surrender = Array.from(esc205.querySelectorAll('choice')).find((c) => c.getAttribute('box') === 'Flee1');
+      const fightOn = Array.from(esc205.querySelectorAll('choice')).find((c) => c.getAttribute('box') == null);
+      ok('task205: isEscapeNav recognises an escape-codeword surrender choice',
+         gates.isEscapeNav(surrender, escCw) === true, 'escape codewords: ' + [...escCw].join(','));
+      ok('task205: an ordinary choice is not an escape exit', gates.isEscapeNav(fightOn, escCw) === false);
+      ok('task205: a flee="t" node needs no codeword set to be recognised',
+         gates.isEscapeNav(parse('<choice flee="t" section="9"/>'), null) === true);
+      window.__FL_INSTANT_DICE__ = false;
+    }
+
     // --- task 173: a durable-move retry target survives a save/reload ----------------------
     // Task 169 arms an in-memory "Try again" retry when a durable consequence's target fails.
     // The retry target is now persisted in the visit record, so reloading at the retry screen

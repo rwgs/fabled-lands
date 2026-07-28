@@ -191,6 +191,20 @@ export function computeTransferGate(sectionEl) {
   return { navNodes };
 }
 
+// Is this nav node an ABANDON-the-encounter exit rather than a way onward? Two shapes, the
+// same two every gate above already skips: a <choice flee="t">, and the mid-fight surrender
+// choice gated by an escape codeword (see computeEscapeCodewords). computeFightGate leaves
+// both ungated and computeRollGate/computeTransferGate/computeBuyGate each skip flee="t",
+// because giving up must never be locked behind the thing you are giving up on. The
+// provisional-result gate (applyPendingRerollGate) works on rendered buttons rather than
+// nodes, so it needs this predicate to recognise the same exits. (task 205)
+export function isEscapeNav(node, escapeCodewords) {
+  if (!node || node.nodeType !== ELEMENT_NODE) return false;
+  if (boolAttr(node.getAttribute('flee'))) return true;
+  const box = node.getAttribute('box');
+  return box != null && !!escapeCodewords && escapeCodewords.has(box);
+}
+
 // The forced-buy gate (task 136.5): a <buy force="t"> is a mandatory "note it on your
 // Adventure Sheet" action — §4.658's free barque, the section's only ship — so the onward
 // navigation after it stays locked until it runs. Unlike <transfer>, force defaults to

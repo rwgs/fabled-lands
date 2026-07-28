@@ -44,7 +44,7 @@ audit pass.
 - [x] 201. A service-worker update can erase an unsaved character-creation draft
 - [x] 202. Complete remaining form, selection and progress semantics
 - [x] 204. A derived `<set>` inside a `<while>` body is not traced per iteration
-- [ ] 205. The provisional-result gate locks a flee exit the fight gate deliberately leaves open
+- [x] 205. The provisional-result gate locks a flee exit the fight gate deliberately leaves open
 - [ ] 207. A `<while>` pass's provisional vars are position-sensitive within the body
 
 **Done**

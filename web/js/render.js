@@ -24,7 +24,7 @@ import {
 } from './render-rules.js';
 import {
   computeFightGate, computeEscapeCodewords, isDeferredDeadChain,
-  computeRollGate, computeTransferGate, computeBuyGate,
+  computeRollGate, computeTransferGate, computeBuyGate, isEscapeNav,
 } from './render-gates.js';
 import {
   newCtx, resolveNodePath, serializeCtx, deserializeCtx, serializeFrame, deserializeFrame,
@@ -1491,6 +1491,12 @@ export class Story {
     if (this.rollGate && this.rollGate.navNodes.has(node)) btn.dataset.rollnav = '1';
   }
 
+  // Tag a rendered nav button as a flee/escape exit (isEscapeNav owns the rule), so
+  // applyPendingRerollGate can leave it clickable like every other gate does. (task 205)
+  tagEscapeNav(node, btn) {
+    if (isEscapeNav(node, this.escapeCodewords)) btn.dataset.fleenav = '1';
+  }
+
   // Disable the onward navigation until the mandatory roll resolves, and keep it
   // suppressed if the matched outcome redirects the player elsewhere. Only ever
   // ADDS a disable, so it composes with applyFightGate (a fight-in-outcome section
@@ -1553,10 +1559,14 @@ export class Story {
   // pendingRerollDecision, set by the reroll/Keep controls actually rendering, so a stored
   // pending roll inside an untaken (grayed) branch can never lock a section with no way to
   // settle it. Only ADDS a disable, so it composes with the fight/roll/transfer/buy gates.
+  // A flee/escape exit is exempt, exactly as it is in those gates (task 205): the fight
+  // widget's own Flee button is not a .goto/.choice and was never locked here, so a direct
+  // <choice flee="t"> offering the same escape must not be either.
   applyPendingRerollGate(flow) {
     if (!this.pendingRerollDecision) return;
     flow.querySelectorAll('.goto, .choice').forEach((btn) => {
       if (btn.disabled) return; // already gated for another reason — keep its own reason
+      if (btn.dataset.fleenav === '1') return; // giving up stays available
       btn.disabled = true;
       btn.classList.add('gated');
       btn.title = 'Keep or reroll the result above first.';
