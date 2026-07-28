@@ -276,10 +276,16 @@ async function showCreate() {
   const wrap = el('div', 'create-wrap');
   wrap.appendChild(el('h1', 'create-title', 'Create your Adventurer'));
 
+  // Each row's <label> is tied to its control with for=/id= and a name= (task 202): adjacent
+  // text alone left every field unlabelled to a screen reader, and clicking the caption did
+  // nothing. The visual markup is unchanged.
   // starting book
   const bookRow = el('div', 'field');
-  bookRow.appendChild(el('label', null, 'Starting book'));
+  const bookLabel = el('label', null, 'Starting book');
+  bookLabel.htmlFor = 'create-book';
+  bookRow.appendChild(bookLabel);
   const bookSel = el('select', 'select');
+  bookSel.id = 'create-book'; bookSel.name = 'startingBook';
   availBooks.forEach((n) => { const o = el('option', null, `Book ${n}: ${data.bookTitle(n)}`); o.value = n; bookSel.appendChild(o); });
   bookSel.value = book;
   bookRow.appendChild(bookSel);
@@ -287,22 +293,33 @@ async function showCreate() {
 
   // name + gender
   const nameRow = el('div', 'field');
-  nameRow.appendChild(el('label', null, 'Name'));
+  const nameLabel = el('label', null, 'Name');
+  nameLabel.htmlFor = 'create-name';
+  nameRow.appendChild(nameLabel);
   const nameInput = el('input', 'input');
   nameInput.type = 'text'; nameInput.placeholder = 'Your adventurer’s name'; nameInput.maxLength = 40;
+  nameInput.id = 'create-name'; nameInput.name = 'adventurerName';
   nameRow.appendChild(nameInput);
   wrap.appendChild(nameRow);
 
   const genderRow = el('div', 'field');
-  genderRow.appendChild(el('label', null, 'Gender'));
+  const genderLabel = el('label', null, 'Gender');
+  genderLabel.htmlFor = 'create-gender';
+  genderRow.appendChild(genderLabel);
   const genderSel = el('select', 'select');
+  genderSel.id = 'create-gender'; genderSel.name = 'gender';
   ['m', 'f'].forEach((g) => { const o = el('option', null, g === 'm' ? 'Male' : 'Female'); o.value = g; genderSel.appendChild(o); });
   genderRow.appendChild(genderSel);
   wrap.appendChild(genderRow);
 
-  // profession cards
-  wrap.appendChild(el('div', 'field-label', 'Choose a profession'));
+  // profession cards: a labelled group of single-select buttons, so the chosen one is announced
+  // as pressed rather than shown only by a CSS class (task 202).
+  const profCaption = el('div', 'field-label', 'Choose a profession');
+  profCaption.id = 'create-prof-label';
+  wrap.appendChild(profCaption);
   const profGrid = el('div', 'prof-grid');
+  profGrid.setAttribute('role', 'group');
+  profGrid.setAttribute('aria-labelledby', 'create-prof-label');
   wrap.appendChild(profGrid);
 
   // ready-made character (name + bio) for the chosen profession
@@ -323,6 +340,8 @@ async function showCreate() {
     for (const p of PROFESSIONS) {
       const scores = adv.professions[p] || {};
       const card = el('button', 'prof-card' + (p === profession ? ' selected' : ''));
+      card.setAttribute('aria-pressed', p === profession ? 'true' : 'false');
+      card.dataset.profession = p;
       card.appendChild(el('div', 'prof-name', p));
       const statList = el('div', 'prof-stats');
       for (const ab of ABILITIES) {
@@ -363,9 +382,17 @@ async function showCreate() {
   }
 
   function selectProfession(p) {
+    // drawProfs() rebuilds every card, which destroys the element the keyboard was on. Put
+    // focus back on the card just chosen so Enter/Space selection doesn't drop the player to
+    // the top of the document. (task 202)
+    const hadFocus = profGrid.contains(document.activeElement);
     profession = p;
     applyDefaults();
     drawProfs();
+    if (hadFocus) {
+      const card = profGrid.querySelector(`.prof-card[data-profession="${p}"]`);
+      if (card) card.focus();
+    }
     renderDetail();
   }
 
@@ -1030,9 +1057,13 @@ function showNarrationSettings() {
   auto.appendChild(cb); auto.appendChild(document.createTextNode(' Auto-narrate each new section'));
   body.appendChild(auto);
 
+  // Same for=/id= association as the creation fields (task 202).
   const vrow = el('div', 'tts-row');
-  vrow.appendChild(el('label', null, 'Voice'));
+  const vlabel = el('label', null, 'Voice');
+  vlabel.htmlFor = 'tts-voice';
+  vrow.appendChild(vlabel);
   const sel = document.createElement('select'); sel.className = 'select';
+  sel.id = 'tts-voice'; sel.name = 'narrationVoice';
   const voices = narrator.englishVoices();
   if (!voices.length) { const o = el('option', null, 'System default'); o.value = ''; sel.appendChild(o); }
   voices.forEach((v) => { const o = el('option', null, `${v.name} (${v.lang})`); o.value = v.voiceURI; sel.appendChild(o); });
@@ -1041,10 +1072,22 @@ function showNarrationSettings() {
   vrow.appendChild(sel); body.appendChild(vrow);
 
   const rrow = el('div', 'tts-row');
-  rrow.appendChild(el('label', null, 'Speed'));
+  const rlabel = el('label', null, 'Speed');
+  rlabel.htmlFor = 'tts-rate';
+  rrow.appendChild(rlabel);
   const rng = document.createElement('input'); rng.type = 'range'; rng.min = '0.6'; rng.max = '1.5'; rng.step = '0.05'; rng.value = String(narrator.settings.rate);
-  const rval = el('span', 'tts-rate', Number(narrator.settings.rate).toFixed(2) + '×');
-  rng.addEventListener('input', () => { narrator.settings.rate = parseFloat(rng.value); rval.textContent = narrator.settings.rate.toFixed(2) + '×'; narrator.saveSettings(); });
+  rng.id = 'tts-rate'; rng.name = 'narrationRate';
+  const rateText = (r) => Number(r).toFixed(2) + '×';
+  const rval = el('span', 'tts-rate', rateText(narrator.settings.rate));
+  // The slider's raw number ("1.05") is meaningless read aloud; announce the multiplier the
+  // player sees beside it. (task 202)
+  rng.setAttribute('aria-valuetext', rateText(narrator.settings.rate));
+  rng.addEventListener('input', () => {
+    narrator.settings.rate = parseFloat(rng.value);
+    rval.textContent = rateText(narrator.settings.rate);
+    rng.setAttribute('aria-valuetext', rval.textContent);
+    narrator.saveSettings();
+  });
   rrow.appendChild(rng); rrow.appendChild(rval); body.appendChild(rrow);
 
   const test = el('button', 'btn', 'Test voice');
@@ -1080,6 +1123,13 @@ function showMaps(activeBook) {
   const img = el('img', 'map-img');
   const note = el('div', 'map-note');
   view.appendChild(img); view.appendChild(note);
+  // These read and behave as tabs, so say so (task 202): before this, the chosen map was marked
+  // only by a CSS class, every tab was its own Tab stop and the arrow keys did nothing.
+  tabsEl.setAttribute('role', 'tablist');
+  tabsEl.setAttribute('aria-label', 'Maps');
+  view.setAttribute('role', 'tabpanel');
+  view.id = 'map-panel';
+  view.tabIndex = -1;
 
   const targets = [{ key: 'world', label: 'World', src: 'assets/world-map.jpg', title: 'The Fabled Lands', missing: 'World map not available.' }];
   data.availableBooks().forEach((n) => {
@@ -1089,7 +1139,15 @@ function showMaps(activeBook) {
   let current = null;
   function select(t, btn) {
     current = t;
-    tabsEl.querySelectorAll('.map-tab').forEach((b) => b.classList.toggle('active', b === btn));
+    // Roving tabindex: the selected tab is the group's single Tab stop, and the arrow keys move
+    // between them (see below). Selection is exposed as aria-selected, not just .active.
+    tabsEl.querySelectorAll('.map-tab').forEach((b) => {
+      const on = b === btn;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+      b.tabIndex = on ? 0 : -1;
+    });
+    view.setAttribute('aria-labelledby', btn.id);
     note.textContent = t.title;
     note.classList.remove('missing');
     img.style.display = '';
@@ -1099,9 +1157,25 @@ function showMaps(activeBook) {
     img.src = t.src;
   }
 
-  targets.forEach((t) => {
+  targets.forEach((t, i) => {
     const btn = el('button', 'map-tab', t.label);
+    btn.id = 'map-tab-' + t.key;
+    btn.setAttribute('role', 'tab');
+    btn.setAttribute('aria-controls', 'map-panel');
     btn.addEventListener('click', () => select(t, btn));
+    // Left/Right walk the tabs (wrapping), Home/End jump to the ends — the standard tab model.
+    // Selection follows focus here: switching maps is instant, so there is nothing to confirm.
+    btn.addEventListener('keydown', (e) => {
+      const step = { ArrowLeft: -1, ArrowRight: 1 }[e.key];
+      let next = null;
+      if (step) next = targets[(i + step + targets.length) % targets.length];
+      else if (e.key === 'Home') next = targets[0];
+      else if (e.key === 'End') next = targets[targets.length - 1];
+      if (!next) return;
+      e.preventDefault();
+      select(next, next._btn);
+      next._btn.focus();
+    });
     tabsEl.appendChild(btn);
     t._btn = btn;
   });

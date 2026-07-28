@@ -445,6 +445,10 @@ export function renderMoneyCache(story, container, node, path) {
   input.type = 'number'; input.min = '0'; input.step = String(mult > 0 ? mult : 1);
   input.value = String(mult > 0 ? mult : 1);
   input.className = 'cache-amount';
+  // Named and labelled from its own cache, so the spinner is not an anonymous number box: the
+  // visible balance line describes the stash, not what typing here does. (task 202)
+  input.name = 'cacheAmount:' + name;
+  input.setAttribute('aria-label', `Shards to deposit or withdraw - ${text}`);
   controls.appendChild(input);
 
   const roundMult = (n) => (mult > 1 ? Math.floor(n / mult) * mult : Math.floor(n));
@@ -548,6 +552,8 @@ export function renderItemCache(story, container, node, path) {
     const input = document.createElement('input');
     input.type = 'number'; input.min = '0'; input.step = '1'; input.value = '0';
     input.className = 'cache-amount';
+    input.name = 'cacheAmount:' + name;   // named + labelled from its cache (task 202)
+    input.setAttribute('aria-label', `Shards to deposit or withdraw - ${text}`);
     mc.appendChild(input);
     const dep = document.createElement('button');
     dep.className = 'btn-mini';

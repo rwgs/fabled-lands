@@ -1275,6 +1275,82 @@ export async function run(ctx) {
           /function buildGameScreen\(\)[\s\S]{0,400}?swUpdateGate\.hold\(false\)/].every((re) => re.test(appSrc201)));
     }
 
+    // --- task 202: labels, selection state and progress semantics -------------------------
+    // Every control below worked by sight only: a caption <div>/<label> sitting NEXT to its
+    // input names nothing programmatically, a CSS class is not selection, an anonymous number
+    // spinner is not an amount, and a styled <div> carries no value. Tasks 153/177 covered live
+    // regions and dialogs, not these. The widgets rendered from XML and the Adventure Sheet are
+    // asserted on the real DOM; the creation, narration and maps screens live inside app.js
+    // functions the harness cannot call, so their wiring is asserted as a source contract (the
+    // task also prescribes a manual pass over those three).
+    { // block-scoped
+      // 1. Cache amount spinners are named and labelled from their own cache.
+      const g202 = GameState.create({ name: 'A202', gender: 'f', profession: 'Rogue', book: 1, adv });
+      g202.data.shards = 200;
+      const c202 = document.createElement('div');
+      const story202 = new Story(c202, g202, { navigate(){}, onDeath(){}, notify(){} });
+      story202.begin(parse('<section name="C202"><moneycache name="vault" text="Strongbox" multiples="10"/>'
+        + '<itemcache name="shelf" text="Shelf" max="500"/></section>'), 1, 'C202');
+      const spinners = Array.from(c202.querySelectorAll('.cache-amount'));
+      ok('task202: both cache amount inputs render', spinners.length === 2, 'n=' + spinners.length);
+      ok('task202: each cache amount input is named from its cache',
+         spinners.every((i) => i.name === 'cacheAmount:vault' || i.name === 'cacheAmount:shelf'),
+         spinners.map((i) => i.name).join(','));
+      ok('task202: each cache amount input says what typing in it does, per cache',
+         spinners.every((i) => /^Shards to deposit or withdraw - (Strongbox|Shelf)$/.test(i.getAttribute('aria-label') || '')),
+         spinners.map((i) => i.getAttribute('aria-label')).join(' | '));
+
+      // 2. The Stamina bar carries its real current/max, not just a CSS width.
+      const gS = GameState.create({ name: 'S202', gender: 'm', profession: 'Warrior', book: 1, adv });
+      gS.data.staminaMax = 20; gS.data.stamina = 7;
+      const sheet202 = document.createElement('div');
+      renderSheet(gS, sheet202, {});
+      const bar202 = sheet202.querySelector('.stamina-bar');
+      ok('task202: the Stamina bar is a labelled progressbar',
+         !!bar202 && bar202.getAttribute('role') === 'progressbar' && bar202.getAttribute('aria-label') === 'Stamina');
+      ok('task202: it reports the live current/max values',
+         bar202.getAttribute('aria-valuenow') === '7' && bar202.getAttribute('aria-valuemin') === '0'
+         && bar202.getAttribute('aria-valuemax') === '20' && bar202.getAttribute('aria-valuetext') === '7 of 20',
+         `${bar202.getAttribute('aria-valuenow')}/${bar202.getAttribute('aria-valuemax')}`);
+      // The ceiling reported is the EFFECTIVE one: a Stamina-cutting affliction (task 60) lowers
+      // what the player can actually reach, so reporting the written max would overstate it.
+      gS.data.curses = [{ name: 'wasting', effects: [{ ability: 'stamina', bonus: -5 }] }];
+      gS.data.stamina = 7;
+      const sheetAff = document.createElement('div');
+      renderSheet(gS, sheetAff, {});
+      const barAff = sheetAff.querySelector('.stamina-bar');
+      ok('task202: an affliction-cut ceiling is what the progressbar reports',
+         barAff.getAttribute('aria-valuemax') === '15' && barAff.getAttribute('aria-valuetext') === '7 of 15',
+         barAff.getAttribute('aria-valuetext'));
+
+      // 3. Source contracts for the three app.js screens.
+      const appSrc202 = await (await fetch('./js/app.js')).text();
+      ok('task202: the creation fields are tied to their labels with for=/id= and named',
+         [/bookLabel\.htmlFor = 'create-book'/, /bookSel\.id = 'create-book'; bookSel\.name = 'startingBook'/,
+          /nameLabel\.htmlFor = 'create-name'/, /nameInput\.id = 'create-name'; nameInput\.name = 'adventurerName'/,
+          /genderLabel\.htmlFor = 'create-gender'/, /genderSel\.id = 'create-gender'; genderSel\.name = 'gender'/,
+         ].every((re) => re.test(appSrc202)));
+      ok('task202: the profession cards are a labelled group with pressed state',
+         /profGrid\.setAttribute\('role', 'group'\)/.test(appSrc202)
+         && /profGrid\.setAttribute\('aria-labelledby', 'create-prof-label'\)/.test(appSrc202)
+         && /card\.setAttribute\('aria-pressed', p === profession \? 'true' : 'false'\)/.test(appSrc202));
+      ok('task202: choosing a profession by keyboard keeps focus on the chosen card',
+         /const hadFocus = profGrid\.contains\(document\.activeElement\)/.test(appSrc202)
+         && /if \(card\) card\.focus\(\)/.test(appSrc202));
+      ok('task202: the narration voice and speed controls are labelled, and the rate is spoken as a multiplier',
+         /vlabel\.htmlFor = 'tts-voice'/.test(appSrc202) && /rlabel\.htmlFor = 'tts-rate'/.test(appSrc202)
+         && /rng\.setAttribute\('aria-valuetext', rval\.textContent\)/.test(appSrc202));
+      ok('task202: the map tabs are a real tablist over one labelled panel',
+         [/tabsEl\.setAttribute\('role', 'tablist'\)/, /view\.setAttribute\('role', 'tabpanel'\)/,
+          /btn\.setAttribute\('role', 'tab'\)/, /btn\.setAttribute\('aria-controls', 'map-panel'\)/,
+          /b\.setAttribute\('aria-selected', on \? 'true' : 'false'\)/,
+          /view\.setAttribute\('aria-labelledby', btn\.id\)/].every((re) => re.test(appSrc202)));
+      ok('task202: the selected map tab is the single Tab stop and the arrows move between them',
+         /b\.tabIndex = on \? 0 : -1/.test(appSrc202)
+         && /\{ ArrowLeft: -1, ArrowRight: 1 \}\[e\.key\]/.test(appSrc202)
+         && /e\.key === 'Home'/.test(appSrc202) && /e\.key === 'End'/.test(appSrc202));
+    }
+
     // --- task 191: a narrow header must not clip its critical controls ---
     // A speech-capable browser builds ten header controls. Their fixed widths, gaps and header
     // padding needed ~393px, so at 320/360 CSS px the trailing ones — Save & quit and the

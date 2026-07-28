@@ -200,7 +200,9 @@ export function renderSheet(state, container, opts = {}) {
   head.appendChild(el('div', 'sheet-sub', `${d.profession} · ${ordinal(rankVal)} Rank ${rankTitle(rankVal, d.gender === 'm')}`));
   container.appendChild(head);
 
-  // Stamina bar
+  // Stamina bar. Styled divs carry no value, so the bar is also a progressbar with the real
+  // current/max numbers: the width of a <div> tells assistive tech nothing, and the effective
+  // maximum (cut by an affliction) is the honest ceiling to report. (task 202)
   const stam = el('div', 'stat-block');
   stam.appendChild(el('div', 'stat-label', 'Stamina'));
   const bar = el('div', 'stamina-bar');
@@ -212,6 +214,12 @@ export function renderSheet(state, container, opts = {}) {
   bar.appendChild(fill);
   const stamText = el('span', 'stamina-text', `${d.stamina} / ${maxStam}`);
   bar.appendChild(stamText);
+  bar.setAttribute('role', 'progressbar');
+  bar.setAttribute('aria-label', 'Stamina');
+  bar.setAttribute('aria-valuemin', '0');
+  bar.setAttribute('aria-valuemax', String(maxStam));
+  bar.setAttribute('aria-valuenow', String(d.stamina));
+  bar.setAttribute('aria-valuetext', `${d.stamina} of ${maxStam}`);
   stam.appendChild(bar);
   container.appendChild(stam);
 

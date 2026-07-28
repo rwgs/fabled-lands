@@ -41,7 +41,7 @@ audit pass.
 - [x] 199. Build validation misses source-schema typos and bundled-book dangling targets
 - [x] 200. AGENTS.md overstates test-suite parse-error isolation
 - [x] 201. A service-worker update can erase an unsaved character-creation draft
-- [ ] 202. Complete remaining form, selection and progress semantics
+- [x] 202. Complete remaining form, selection and progress semantics
 - [ ] 204. A derived `<set>` inside a `<while>` body is not traced per iteration
 - [ ] 205. The provisional-result gate locks a flee exit the fight gate deliberately leaves open
 
