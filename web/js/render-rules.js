@@ -494,8 +494,12 @@ export function unsettledRollVars(sectionEl, state) {
 // vars (rerollPendingVars — the roll var plus everything derived from it, tasks 175/181). This
 // is the DECISION-BOUNDARY set: what a condition, a branch or the onward navigation must not
 // read yet. Either may be absent; returns null when both are empty so callers keep the cheap
-// "no pending vars" path. (A derived <set> inside a <while> body would need the per-pass set
-// closed over too; no section in the corpus writes one, so the pass set stays direct.)
+// "no pending vars" path. Both sides arrive already closed over their derived <set> values —
+// the section-scoped one here (provisionalVarClosure), the per-pass one in markWhilePending,
+// which closes over the <while> subtree only so the same names stay readable outside the loop
+// (task 204). Note the per-pass set is still POSITION-sensitive by design: it grows as the
+// pass's rolls are walked, so an effect placed ABOVE its own pass's roll reads the previous
+// pass's value. No corpus body is written that way (see task 207).
 export function viewPendingVars(view) {
   const a = view.whileIterPendingVars, b = view.rerollPendingVars;
   const aHas = a && a.size, bHas = b && b.size;

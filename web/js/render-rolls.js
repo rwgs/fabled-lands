@@ -9,7 +9,7 @@ import {
   resolveValue, rollDifficulty, rollRankCheck, rollTraining, rollDice,
   childAdjustment, abilityChoiceOptions,
 } from './engine.js';
-import { branchPlan, blessingSpendForReroll, isRollGate, viewPendingVars } from './render-rules.js';
+import { branchPlan, blessingSpendForReroll, isRollGate, viewPendingVars, provisionalVarClosure } from './render-rules.js';
 // renderChoices (render-choices) is reached through story.dispatchChoices, not a direct
 // import, so render-rolls and render-choices no longer form an ES-module cycle. (task 163)
 import { animateDice } from './ui.js';
@@ -146,7 +146,14 @@ function markWhilePending(story, stored, path, varName = null) {
   if (!story.inWhileIter || story.inactive) return;
   if (stored && !story.rerollPendingRolls.has(path)) return; // settled — the pass may advance
   story.whileIterPending = true;
-  if (varName && story.whileIterPendingVars) story.whileIterPendingVars.add(varName);
+  if (!varName || !story.whileIterPendingVars) return;
+  // A value DERIVED from the unsettled var is just as stale, so trace it through the <set>
+  // nodes inside THIS loop body and mark those vars for the pass too — otherwise
+  // `<set var="s" value="x*5">` would defer (its read is pending) while a `<gain shards="s">`
+  // beneath it committed the previous pass's s. The closure is scoped to the <while> subtree,
+  // never the section, so the same names outside the loop stay readable — §6.700's loop-entry
+  // gate must keep reading the roll that opened the loop. (task 204)
+  for (const v of provisionalVarClosure(story.whileIterNode, [varName])) story.whileIterPendingVars.add(v);
 }
 
 // Write a roll's result into its var= and mark it wrote/rolled this visit (task 172): the

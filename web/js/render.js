@@ -299,10 +299,13 @@ export class Story {
     // <while> loop iteration state (task 100), live only while renderWhile is walking
     // an iteration body: whether the current pass is still waiting on an interactive
     // roll, and which roll vars that pass has not yet resolved (so a re-rolled var is
-    // treated as stale until this pass rolls it — see pendingRollVar).
+    // treated as stale until this pass rolls it — see pendingRollVar). The loop element
+    // itself rides along so an unsettled pass var can be traced through the <set> nodes
+    // INSIDE that body, and no further (task 204).
     this.inWhileIter = false;
     this.whileIterPending = false;
     this.whileIterPendingVars = null;
+    this.whileIterNode = null;
     this.deferredCleanups = new Map(); // hidden removetag cleanups to apply on leaving (task 88)
     // One-level "return frame" (task 110): the immediately previous visit, snapshotted
     // as we leave it so a <return> can restore that section at the point it was left —
@@ -1205,7 +1208,9 @@ export class Story {
     const prevActiveRoll = this.activeRoll;
     const prevInWhile = this.inWhileIter;
     const prevPendingVars = this.whileIterPendingVars;
+    const prevWhileNode = this.whileIterNode;
     this.inWhileIter = true;
+    this.whileIterNode = node; // the body a pass's provisional vars are traced within (task 204)
 
     let i = 0, pending = false, terminated = false;
     for (; i < MAX_ITERS; i++) {
@@ -1227,6 +1232,7 @@ export class Story {
     this.activeRoll = prevActiveRoll;
     this.inWhileIter = prevInWhile;
     this.whileIterPendingVars = prevPendingVars;
+    this.whileIterNode = prevWhileNode;
 
     if (i >= MAX_ITERS && !terminated) {
       console.warn(`[render] <while var="${node.getAttribute('var')}"> hit the ${MAX_ITERS}-iteration guard without assigning its variable — aborting to avoid a freeze (malformed, non-progressing body?).`);

@@ -4,7 +4,8 @@ Backlog of recommended improvements. Open tasks are filed under priority buckets
 (**HIGH** / **MEDIUM** / **LOW**) — work the first open (`- [ ]`) item top-down;
 each task's detail section carries the same stable ID. **All filed tasks are
 complete through 181**. The eleventh full review filed tasks 180–202 below; 203
-was filed while working task 180, and 204–205 while working task 181.
+was filed while working task 180, 204–205 while working task 181, 206 while
+working task 197, and 207 while working task 204.
 Completed detail sections are archived in
 [`TASKS-archive.md`](TASKS-archive.md); the Review log at the end records each
 audit pass.
@@ -42,8 +43,9 @@ audit pass.
 - [x] 200. AGENTS.md overstates test-suite parse-error isolation
 - [x] 201. A service-worker update can erase an unsaved character-creation draft
 - [x] 202. Complete remaining form, selection and progress semantics
-- [ ] 204. A derived `<set>` inside a `<while>` body is not traced per iteration
+- [x] 204. A derived `<set>` inside a `<while>` body is not traced per iteration
 - [ ] 205. The provisional-result gate locks a flee exit the fight gate deliberately leaves open
+- [ ] 207. A `<while>` pass's provisional vars are position-sensitive within the body
 
 **Done**
 
@@ -1521,6 +1523,29 @@ this is latent — decide whether to recurse it or leave it and document the con
 
 Verify: the new assertion fails on the current `sw.js`, passes once `edition.js` is listed, and
 fails again if any other `web/js` module is removed from `REQUIRED`. Full browser suite green.
+
+## 207. A `<while>` pass's provisional vars are position-sensitive within the body
+
+**Priority: LOW — latent: no corpus loop body reads its pass's roll var above the roll that
+fills it, so nothing reaches the gap today.**
+
+Found while doing task 204. `whileIterPendingVars` starts each pass EMPTY and grows as the
+pass's rolls are walked (`markWhilePending`), so it only protects nodes that sit *below* the
+roll in the body. An effect or derived `<set>` placed ABOVE its own pass's roll therefore reads
+the previous pass's value (0 on the first pass) and commits it — the same failure mode task 181
+fixed section-wide with the position-blind `unsettledRollVars`, which cannot help here because
+after pass 1 the var HAS a value. Task 204 closed the derivation half (the pass set is now
+closed over the loop body's `<set>` nodes); this is the ordering half.
+
+Fix it position-blind like `unsettledRollVars`: at the start of a pass, seed the set with the
+body's roll vars whose memo for THIS pass (`path + '~' + i`) is missing or still a provisional
+decision, then close over the body. Removing a var as its roll settles mid-pass is what keeps a
+legitimate later read live, so the seed must be computed against the pass's own memo keys, not
+the section's. Keep it DOM-free in `render-rules.js`.
+
+Test a synthetic `<while>` whose body reads (and derives from) its pass roll ABOVE the roll
+itself: prove pass 2 does not charge pass 1's value, that the effect applies once the pass rolls,
+and that §6.700/§5.218 and task 204's loop stay green.
 
 ---
 

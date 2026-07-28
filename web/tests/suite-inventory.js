@@ -1258,6 +1258,57 @@ export async function run(ctx) {
         ok('§6.488 the dragon hoard pays x*1000 once rolled', s488.g.data.shards === 6000, 'shards=' + s488.g.data.shards);
       }
       eng.seedRng(null);
+
+      // --- task 204: a derived <set> inside a <while> body defers PER PASS ------------------
+      // The section-scoped seed is closed over its derived <set> values (above), but the
+      // per-pass one was raw: it held only the roll var the current <while> iteration re-rolls.
+      // So `<set var="s" value="x*2">` inside a loop body deferred (its read was pending) while
+      // the `<lose stamina="s">` beneath it committed the PREVIOUS pass's s — and, on the first
+      // pass, banked s=0 and memoised that no-op. The pass set now closes over the <set> nodes
+      // inside the <while> subtree only, so names outside the loop stay readable. Synthetic:
+      // no corpus section derives a value inside a loop, which is why this was latent.
+      {
+        // Modelled on §6.700: an entry die opens a gate that holds a <while>, and each pass
+        // re-rolls the SAME var the gate outside reads. The gate is `x > 0` so it stays open
+        // whatever the passes roll, isolating the derived-value question from branch shape.
+        const sec204 = '<section name="W204"><p><random dice="1" var="x">Roll a die</random>'
+          + '<if var="x" greaterthan="0"><while var="y">'
+          + '<random dice="1" var="x">roll again</random>'
+          + '<set var="s" value="x*2"/><lose stamina="s">lose that many</lose>'
+          + '<if var="x" equals="6" not="t"><set var="y" value="1"/></if>'
+          + '</while></if><tick shards="s"/></p><goto section="1"/></section>';
+        const g = GameState.create({ name: 'T204', gender: 'm', profession: 'Warrior', book: 6, adv });
+        g.ephemeral = true; g.data.stamina = 999; g.data.staminaMax = 999; g.data.shards = 0;
+        const c = document.createElement('div');
+        const st = new Story(c, g, { navigate() {}, onDeath() {}, notify() {} });
+        st.begin(parse(sec204), 6, 'W204');
+        const lost = () => 999 - g.data.stamina;
+
+        eng.seedRng(4); liveRoll(c).click(); await settle42(); eng.seedRng(null); // entry x = 6 → loop opens
+        ok('task204: the loop opens and its first pass is waiting on a roll',
+           c.querySelectorAll('.while-iter').length === 1 && !!liveRoll(c), 'iters=' + c.querySelectorAll('.while-iter').length);
+        ok('task204: an unrolled pass defers its derived loss entirely (no 0-value no-op)',
+           lost() === 0 && !g.hasVar('s'), `lost=${lost()} s=${g.getVar('s')}`);
+
+        eng.seedRng(4); liveRoll(c).click(); await settle42(); eng.seedRng(null); // pass 1 x = 6 → s = 12
+        ok('task204: the pass applies its derived loss with THIS pass\'s value', lost() === 12, 'lost=' + lost());
+        ok('task204: rolling a six opens a second pass, still unrolled', c.querySelectorAll('.while-iter').length === 2 && !!liveRoll(c));
+        ok('task204: the new pass does not re-charge the previous pass\'s derived value', lost() === 12, 'lost=' + lost());
+        // The gate OUTSIDE the body still reads x while the pass has it (and s) pending: the
+        // closure is scoped to the <while> subtree, so the loop is still on screen at all.
+        ok('task204: a gate outside the body still reads the loop var while a pass is pending',
+           !!c.querySelector('.while-loop'));
+
+        eng.seedRng(14); liveRoll(c).click(); await settle42(); eng.seedRng(null); // pass 2 x = 3 → s = 6, y set
+        ok('task204: each pass charged its own derived value, once (12 then 6)', lost() === 18, 'lost=' + lost());
+        ok('task204: a non-six ends the loop', g.hasVar('y') && c.querySelectorAll('.while-iter').length === 2);
+        // After the loop, `s` is an ordinary settled var again — the deferral was confined to
+        // the body, so the tally banks the final pass's value.
+        ok('task204: after the loop the derived var reads live again', g.data.shards === 6, 'shards=' + g.data.shards);
+        st.rerender();
+        ok('task204: a re-render charges nothing twice', lost() === 18 && g.data.shards === 6, `lost=${lost()} shards=${g.data.shards}`);
+      }
+      eng.seedRng(null);
     }
 
     // --- task 123: "Immunity to Disease and Poison" is one blessing under two spellings ---
