@@ -121,6 +121,31 @@ function syncThemeBtn(btn) {
   btn.setAttribute('aria-label', label);
 }
 
+/** The update-reload gate (task 201). An activated new build reloads the page so the cached
+ *  shell is really replaced — lossless while the only live state is autosaved progress. The
+ *  creation screen is the exception: its book/profession/name/gender live in local variables
+ *  until Begin Adventure, so an update landing mid-form would silently reset the whole draft
+ *  (skipWaiting makes that timing possible without any user action). A screen holding unsaved
+ *  state takes the hold; the reload is remembered and applied the moment it is released, and
+ *  the one-reload guard still holds. Exported for the tests, which drive it without a worker. */
+export function makeUpdateGate(reload) {
+  let held = false, pending = false, reloaded = false;
+  const apply = () => {
+    if (reloaded) return;          // one reload per page, as before
+    if (held) { pending = true; return; }
+    reloaded = true;
+    reload();
+  };
+  return {
+    apply,
+    /** Called by every screen builder: true = this screen holds unsaved state. */
+    hold(on) { held = !!on; if (!held && pending) apply(); },
+    get pending() { return pending; },
+    get held() { return held; },
+  };
+}
+const swUpdateGate = makeUpdateGate(() => location.reload());
+
 function registerSW() {
   if (!('serviceWorker' in navigator)) return;
   // If a worker already controls this page, a later controllerchange means a
@@ -128,14 +153,10 @@ function registerSW() {
   // clients.claim). Reload once so the new HTML/CSS/JS — and the version stamp —
   // actually replace the cached shell, instead of the old cache-first shell
   // lingering until the user happens to hard-reload. Progress autosaves to
-  // localStorage on every change, so the reload is lossless.
+  // localStorage on every change, so the reload is lossless — except on a screen
+  // holding an unsaved draft, where the gate defers it (task 201).
   if (navigator.serviceWorker.controller) {
-    let reloading = false;
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (reloading) return;
-      reloading = true;
-      location.reload();
-    });
+    navigator.serviceWorker.addEventListener('controllerchange', () => swUpdateGate.apply());
   }
   navigator.serviceWorker.register('sw.js').then((reg) => {
     reg.addEventListener('updatefound', () => {
@@ -190,6 +211,7 @@ function releaseGameScreen() {
 // ---- Title screen ----------------------------------------------------------
 function showTitle() {
   releaseGameScreen();
+  swUpdateGate.hold(false); // nothing unsaved here; a deferred update may now land (task 201)
   narrator.stop(); // [TTS]
   // Reconcile so an adventurer whose meta entry was lost (a quota error mid-save) still
   // shows and still counts as a save — otherwise it would silently vanish here. (task 137)
@@ -238,6 +260,9 @@ function showTitle() {
 // ---- Character creation ----------------------------------------------------
 async function showCreate() {
   releaseGameScreen();
+  // Every field below is a local variable until Begin Adventure writes a save, so hold off any
+  // service-worker update reload for as long as this form is on screen (task 201).
+  swUpdateGate.hold(true);
   const app = $('#app');
   app.className = 'screen-create';
   app.innerHTML = '';
@@ -430,6 +455,7 @@ function importSaveFile(after) {
 // ---- Saves screen ----------------------------------------------------------
 function showSaves() {
   releaseGameScreen();
+  swUpdateGate.hold(false); // saved adventurers only — a deferred update may now land (task 201)
   const app = $('#app');
   app.className = 'screen-saves';
   app.innerHTML = '';
@@ -479,6 +505,9 @@ function showSaves() {
 // ---- Game screen -----------------------------------------------------------
 function buildGameScreen() {
   releaseGameScreen(); // retire the outgoing Story before its pane is replaced (task 182)
+  // Play is autosaved, so a deferred update may land from here on: Begin Adventure has already
+  // written the character to its slot by the time this runs (task 201).
+  swUpdateGate.hold(false);
   const app = $('#app');
   app.className = 'screen-game';
   app.innerHTML = '';

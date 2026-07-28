@@ -11,7 +11,7 @@ import { renderGoto } from '../js/render-choices.js';
 import { renderMarket, renderRest } from '../js/render-market.js';
 // app.js only auto-boots when a #app element exists (task 65), so importing its exported
 // new-adventure recovery contract here is side-effect free. (task 189)
-import { openNewAdventure, installSheetDrawer, toggleSheet, syncSheetBreakpoint, keepSheetFocus } from '../js/app.js';
+import { openNewAdventure, installSheetDrawer, toggleSheet, syncSheetBreakpoint, keepSheetFocus, makeUpdateGate } from '../js/app.js';
 import { Narrator } from '../js/tts.js';
 import { renderSheet, renderStatic, modal } from '../js/ui.js';
 
@@ -1224,6 +1224,55 @@ export async function run(ctx) {
       const unreached = [...requiredJs].filter((k) => !keys.includes(k)).sort();
       ok('task206: every precached module is one the walk actually reached',
          unreached.length === 0, 'unreached: ' + unreached.join(', '));
+    }
+
+    // --- task 201: an update must not reload away an unsaved creation draft ---------------
+    // registerSW reloaded on controllerchange the moment a new build activated, which is
+    // lossless while the only live state is autosaved progress. The creation screen is the
+    // exception: its book/profession/name/gender are local variables until Begin Adventure
+    // writes the save, so an update landing mid-form silently reset the whole draft (and
+    // skipWaiting makes that timing possible with no user action at all). The gate below
+    // defers the reload while a screen holds unsaved state and applies it, exactly once, when
+    // that screen is left. Driven directly here - a real controllerchange cannot be forged,
+    // and location.reload() would take the harness with it.
+    { // block-scoped
+      let reloads = 0;
+      const gate = makeUpdateGate(() => { reloads++; });
+
+      // 1. The creation screen holds: the update is remembered, not applied.
+      gate.hold(true);
+      gate.apply();                                  // controllerchange while editing
+      ok('task201: an update during an unsaved draft does not reload', reloads === 0, 'reloads=' + reloads);
+      ok('task201: the deferred update is remembered', gate.pending === true && gate.held === true);
+      gate.apply();                                  // a second activation changes nothing
+      ok('task201: repeated activations still do not reload while held', reloads === 0, 'reloads=' + reloads);
+
+      // 2. Leaving the screen (Begin Adventure or Back) applies it - once.
+      gate.hold(false);
+      ok('task201: leaving the unsaved screen applies the deferred update', reloads === 1, 'reloads=' + reloads);
+      gate.hold(true); gate.apply(); gate.hold(false);
+      ok('task201: the one-reload guard survives the deferral', reloads === 1, 'reloads=' + reloads);
+
+      // 3. Normal autosaved play is unchanged: no hold, so the reload is immediate.
+      let plainReloads = 0;
+      const plain = makeUpdateGate(() => { plainReloads++; });
+      plain.apply();
+      plain.apply();
+      ok('task201: with nothing unsaved the update reloads immediately, once',
+         plainReloads === 1 && plain.pending === false, 'reloads=' + plainReloads);
+
+      // Source contract: the gate is wired to the real controllerchange, the creation screen
+      // takes the hold, and each screen that has nothing unsaved releases it.
+      const appSrc201 = await (await fetch('./js/app.js')).text();
+      ok('task201: controllerchange goes through the gate instead of reloading directly',
+         /addEventListener\('controllerchange', \(\) => swUpdateGate\.apply\(\)\)/.test(appSrc201)
+         && !/addEventListener\('controllerchange'[\s\S]{0,200}location\.reload\(\)/.test(appSrc201));
+      ok('task201: showCreate holds the update while its draft is on screen',
+         /async function showCreate\(\)[\s\S]{0,400}?swUpdateGate\.hold\(true\)/.test(appSrc201));
+      ok('task201: the title, saves and game screens release it',
+         [/function showTitle\(\)[\s\S]{0,200}?swUpdateGate\.hold\(false\)/,
+          /function showSaves\(\)[\s\S]{0,200}?swUpdateGate\.hold\(false\)/,
+          /function buildGameScreen\(\)[\s\S]{0,400}?swUpdateGate\.hold\(false\)/].every((re) => re.test(appSrc201)));
     }
 
     // --- task 191: a narrow header must not clip its critical controls ---
