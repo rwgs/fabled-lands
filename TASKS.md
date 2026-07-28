@@ -48,6 +48,7 @@ audit pass.
 - [x] 205. The provisional-result gate locks a flee exit the fight gate deliberately leaves open
 - [~] 207. A `<while>` pass's provisional vars are position-sensitive within the body
   — **withdrawn, not a defect** (see the Review log)
+- [ ] 208. The documented headless-test command captures no DOM under PowerShell
 
 **Done**
 
@@ -1544,6 +1545,32 @@ Kept as a test instead of a task: `task204b` in `suite-inventory` drives a loop 
 derived `<set>` and `<lose>` sit above the roll and pins the sequential reads (the entry roll on
 pass 1, pass 1's roll on pass 2, once each), and `viewPendingVars` documents why the per-pass set
 is position-sensitive on purpose.
+
+## 208. The documented headless-test command captures no DOM under PowerShell
+
+**Priority: LOW — the failure is silent and mimics the documented "page never loaded"
+symptom, so it misdirects at exactly the moment the suite result is what you need.**
+
+`chrome.exe` is a Windows GUI-subsystem binary, so it inherits no stdout handle when
+PowerShell launches it. The step-2 command in AGENTS.md therefore captures an empty string and
+any `Select-String 'RESULT'` over it finds nothing. `chrome.exe --version` prints nothing
+either, which isolates the cause to the missing handle rather than to the page, the server or
+the suite. The tests do run and pass meanwhile — the static server logs the full request set
+and the reporter reaches its aggregate — so an empty capture is indistinguishable from the
+documented "a 'no RESULT line' therefore means the page never loaded (server down, or a 404
+from the wrong path)". Redirecting through `cmd` gives the process a real handle and the same
+command yields the full dump (135,029 bytes, `RESULT ALL PASS pass=2100 fail=0`, title
+`TESTS_OK`).
+
+Document a capture form that works from PowerShell — redirect via `cmd /c "… > <file>"`, then
+read the RESULT line out of that file — and extend the troubleshooting notes so an empty dump
+is listed as a *capture* failure and not only as a page-load failure. While there, check
+whether "headless Edge occasionally dumps empty DOM" is describing this same missing-handle
+symptom rather than a browser difference; if it is, correct that attribution too.
+
+Docs-only, no app or build change. Verify by copying the documented command verbatim into a
+fresh PowerShell session: it must produce a non-empty dump containing `RESULT ALL PASS` and
+title `TESTS_OK`.
 
 ---
 
