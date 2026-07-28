@@ -12,10 +12,11 @@
   copies the world + regional maps, and refreshes the build stamp.
 
   Source of truth is left untouched:
-    books/book1..book6/<n>.xml    -> web/data/book<n>.json  ( { "<section>": "<xml>" } )
+    books/book<n>/<s>.xml         -> web/data/book<n>.json  ( { "<section>": "<xml>" } )
     books/book<n>/Adventurers.xml -> folded into web/data/meta.json
     rules/*.xml                   -> folded into web/data/meta.json
-    books/books.ini               -> book titles in meta.json
+    books/books.ini               -> book titles in meta.json, and the Published= list
+                                     of book numbers this build bundles
     images/world-map.jpg          -> web/assets/world-map.jpg
     books/book<n>/<Region>-Map.*  -> web/assets/maps/book<n>.jpg
 
@@ -85,8 +86,16 @@ function Get-Pregens([string]$dir, [string]$advXml) {
     return $list
 }
 
-# ---- Parse books.ini for the canonical titles ------------------------------
+# ---- Parse books.ini for the canonical titles and the published set ---------
+# Published= is the set of books this build bundles: validation and all three copy loops
+# below iterate it, so publishing a book is a content change (drop in books/book<N>/, add
+# it to the line) rather than a build-script edit. It is deliberately an explicit list and
+# not a books/book*/ glob: a half-transcribed book folder would otherwise be bundled the
+# moment it appeared - reaching meta.json and the in-game book picker, and failing the
+# closed-vocabulary gate. An explicit list keeps work-in-progress in-tree and inert.
+# (Books= is the 12-title series registry, not the publish set; the build ignores it.)
 $titles = @{}
+$bundled = @()
 $iniPath = Join-Path $books 'books.ini'
 if (Test-Path $iniPath) {
     foreach ($line in Get-Content -Encoding UTF8 $iniPath) {
@@ -96,8 +105,12 @@ if (Test-Path $iniPath) {
             $t = [regex]::Replace($t, '\\u([0-9A-Fa-f]{4})', { param($m) [char][int]('0x' + $m.Groups[1].Value) })
             $titles[$num] = $t
         }
+        elseif ($line -match '^\s*Published\s*=\s*(.+?)\s*$') {
+            $bundled = @($Matches[1] -split '\s*,\s*' | ForEach-Object { [int]$_ } | Sort-Object)
+        }
     }
 }
+if (-not $bundled) { throw "books.ini: no Published= list - nothing to bundle." }
 
 # ---- Validate the source XML before bundling (tasks 13, 199) ----------------
 # Every file the build is about to bundle is checked BEFORE anything is written: well-formed,
@@ -108,7 +121,7 @@ if (Test-Path $iniPath) {
 # DOMParser is more lenient, so this is a deliberately stricter gate; the corpus is clean, so
 # it never fires spuriously.
 Write-Host 'Validating source XML...'
-$v = Test-SourceTree $books $rules (1..6)
+$v = Test-SourceTree $books $rules $bundled
 if ($v.Errors.Count -gt 0) {
     Write-Host ("XML validation FAILED - {0} problem(s) in {1} file(s) checked:" -f $v.Errors.Count, $v.Checked)
     $v.Errors | ForEach-Object { Write-Host "  $_" }
@@ -118,7 +131,7 @@ Write-Host ("XML OK: {0} files validated." -f $v.Checked)
 
 # ---- Bundle each book -------------------------------------------------------
 $bookMeta = @()
-for ($b = 1; $b -le 6; $b++) {
+foreach ($b in $bundled) {
     $dir = Join-Path $books ("book{0}" -f $b)
     if (-not (Test-Path $dir)) { continue }
 
@@ -186,7 +199,7 @@ if (Test-Path $mapSrc) {
 # images/maps/ are copied too. (Section illustrations go in web/assets/illus/.)
 $mapsOut = Join-Path $assets 'maps'
 New-Item -ItemType Directory -Force -Path $mapsOut | Out-Null
-for ($b = 1; $b -le 6; $b++) {
+foreach ($b in $bundled) {
     $dir = Join-Path $books ("book{0}" -f $b)
     if (-not (Test-Path $dir)) { continue }
     $rmap = Get-ChildItem -Path $dir -File | Where-Object { $_.BaseName -match '-Map$' } | Select-Object -First 1
@@ -206,7 +219,7 @@ if (Test-Path $mapsSrc) { Copy-Item (Join-Path $mapsSrc '*') $mapsOut -Force -Er
 # web/assets/illus/ under its own name, so render.js can resolve it there. (task 62)
 $illusOut = Join-Path $assets 'illus'
 New-Item -ItemType Directory -Force -Path $illusOut | Out-Null
-for ($b = 1; $b -le 6; $b++) {
+foreach ($b in $bundled) {
     $dir = Join-Path $books ("book{0}" -f $b)
     if (-not (Test-Path $dir)) { continue }
     Get-ChildItem -Path $dir -File |
