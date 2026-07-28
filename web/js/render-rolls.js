@@ -153,6 +153,12 @@ function markWhilePending(story, stored, path, varName = null) {
   // beneath it committed the previous pass's s. The closure is scoped to the <while> subtree,
   // never the section, so the same names outside the loop stay readable — §6.700's loop-entry
   // gate must keep reading the roll that opened the loop. (task 204)
+  //
+  // Marking from HERE (as the walk reaches the roll) rather than at pass start is deliberate,
+  // and it is what makes a read placed ABOVE the pass's roll read the PREVIOUS pass's value:
+  // JaFL runs a section sequentially, so in iteration 2 a statement above the roll really does
+  // execute before it and really does see iteration 1's value. Seeding the whole body at pass
+  // start would defer such a read forever, since its own roll can never re-assert in time.
   for (const v of provisionalVarClosure(story.whileIterNode, [varName])) story.whileIterPendingVars.add(v);
 }
 

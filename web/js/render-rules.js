@@ -497,9 +497,10 @@ export function unsettledRollVars(sectionEl, state) {
 // "no pending vars" path. Both sides arrive already closed over their derived <set> values —
 // the section-scoped one here (provisionalVarClosure), the per-pass one in markWhilePending,
 // which closes over the <while> subtree only so the same names stay readable outside the loop
-// (task 204). Note the per-pass set is still POSITION-sensitive by design: it grows as the
-// pass's rolls are walked, so an effect placed ABOVE its own pass's roll reads the previous
-// pass's value. No corpus body is written that way (see task 207).
+// (task 204). The per-pass set is POSITION-sensitive on purpose: it grows as the pass's rolls
+// are walked, so a statement ABOVE the pass's roll reads the PREVIOUS pass's value — which is
+// what sequential JaFL execution does (in iteration 2 that statement really does run before
+// the roll). Seeding the whole body at pass start instead would defer such a read forever.
 export function viewPendingVars(view) {
   const a = view.whileIterPendingVars, b = view.rerollPendingVars;
   const aHas = a && a.size, bHas = b && b.size;

@@ -1308,6 +1308,49 @@ export async function run(ctx) {
         st.rerender();
         ok('task204: a re-render charges nothing twice', lost() === 18 && g.data.shards === 6, `lost=${lost()} shards=${g.data.shards}`);
       }
+
+      // --- task 204 (the other half): the pass set is position-sensitive ON PURPOSE ----------
+      // The same body with its derived <set> and loss ABOVE the roll reads the PREVIOUS pass's
+      // value, and that is faithful rather than a leak: JaFL runs a section sequentially, so in
+      // iteration 2 a statement above the roll really does execute before it. (Filed as task 207
+      // while working 204, then withdrawn once this fixture showed what "fixing" it would mean:
+      // seeding the whole body at pass start defers such a read forever, because its own roll
+      // can never re-assert in time.) Pinned here so the deliberate behaviour has a test.
+      {
+        const secAbove = '<section name="W204b"><p><random dice="1" var="x">Roll a die</random>'
+          + '<if var="x" greaterthan="0"><while var="y">'
+          + '<set var="s" value="x*2"/><lose stamina="s">lose that many</lose>'   // ABOVE the roll
+          + '<random dice="1" var="x">roll again</random>'
+          + '<if var="x" equals="6" not="t"><set var="y" value="1"/></if>'
+          + '</while></if></p><goto section="1"/></section>';
+        const g = GameState.create({ name: 'T204b', gender: 'm', profession: 'Warrior', book: 6, adv });
+        g.ephemeral = true; g.data.stamina = 999; g.data.staminaMax = 999;
+        const c = document.createElement('div');
+        const st = new Story(c, g, { navigate() {}, onDeath() {}, notify() {} });
+        st.begin(parse(secAbove), 6, 'W204b');
+        const lost = () => 999 - g.data.stamina;
+
+        eng.seedRng(4); liveRoll(c).click(); await settle42(); eng.seedRng(null); // entry x = 6 → loop opens
+        ok('task204b: the loop opens with its first pass unrolled',
+           c.querySelectorAll('.while-iter').length === 1 && !!liveRoll(c));
+        // Pass 1's statement sits above pass 1's roll, so sequentially it reads the value already
+        // in x — the ENTRY roll's 6 — and charges 12 straight away. It is not deferred: its own
+        // roll is not what it reads.
+        ok('task204b: on the first pass it reads the value the var already holds (the entry roll)',
+           lost() === 12, 'lost=' + lost());
+
+        eng.seedRng(4); liveRoll(c).click(); await settle42(); eng.seedRng(null); // pass 1 x = 6, pass 2 opens
+        ok('task204b: a second pass opens', c.querySelectorAll('.while-iter').length === 2 && !!liveRoll(c));
+        // Pass 2's statement likewise reads pass 1's roll (6 → 12 again), exactly as sequential
+        // play would: in iteration 2 that line really does run before iteration 2's roll.
+        ok('task204b: each later pass reads the previous pass\'s value, once', lost() === 24, 'lost=' + lost());
+
+        eng.seedRng(14); liveRoll(c).click(); await settle42(); eng.seedRng(null); // pass 2 x = 3 → y set
+        ok('task204b: the loop still terminates on a non-six', g.hasVar('y'));
+        ok('task204b: the settled pass charges nothing further above its own roll', lost() === 24, 'lost=' + lost());
+        st.rerender();
+        ok('task204b: a re-render charges nothing twice', lost() === 24, 'lost=' + lost());
+      }
       eng.seedRng(null);
     }
 

@@ -3,9 +3,10 @@
 Backlog of recommended improvements. Open tasks are filed under priority buckets
 (**HIGH** / **MEDIUM** / **LOW**) — work the first open (`- [ ]`) item top-down;
 each task's detail section carries the same stable ID. **All filed tasks are
-complete through 181**. The eleventh full review filed tasks 180–202 below; 203
-was filed while working task 180, 204–205 while working task 181, 206 while
-working task 197, and 207 while working task 204.
+complete through 206 — there is no open work.** The eleventh full review filed
+tasks 180–202 below; 203 was filed while working task 180, 204–205 while working
+task 181, 206 while working task 197, and 207 while working task 204 (withdrawn
+the same day as a misdiagnosis — see the Review log).
 Completed detail sections are archived in
 [`TASKS-archive.md`](TASKS-archive.md); the Review log at the end records each
 audit pass.
@@ -45,7 +46,8 @@ audit pass.
 - [x] 202. Complete remaining form, selection and progress semantics
 - [x] 204. A derived `<set>` inside a `<while>` body is not traced per iteration
 - [x] 205. The provisional-result gate locks a flee exit the fight gate deliberately leaves open
-- [ ] 207. A `<while>` pass's provisional vars are position-sensitive within the body
+- [~] 207. A `<while>` pass's provisional vars are position-sensitive within the body
+  — **withdrawn, not a defect** (see the Review log)
 
 **Done**
 
@@ -1526,26 +1528,22 @@ fails again if any other `web/js` module is removed from `REQUIRED`. Full browse
 
 ## 207. A `<while>` pass's provisional vars are position-sensitive within the body
 
-**Priority: LOW — latent: no corpus loop body reads its pass's roll var above the roll that
-fills it, so nothing reaches the gap today.**
+**WITHDRAWN — the reported behaviour is correct, not a defect.** Filed while working task 204
+and tested straight away; the fixture disproved it.
 
-Found while doing task 204. `whileIterPendingVars` starts each pass EMPTY and grows as the
-pass's rolls are walked (`markWhilePending`), so it only protects nodes that sit *below* the
-roll in the body. An effect or derived `<set>` placed ABOVE its own pass's roll therefore reads
-the previous pass's value (0 on the first pass) and commits it — the same failure mode task 181
-fixed section-wide with the position-blind `unsettledRollVars`, which cannot help here because
-after pass 1 the var HAS a value. Task 204 closed the derivation half (the pass set is now
-closed over the loop body's `<set>` nodes); this is the ordering half.
+The claim was that because `whileIterPendingVars` starts each pass empty and grows as the pass's
+rolls are walked, a statement placed ABOVE its own pass's roll reads the previous pass's value
+and commits it. It does — and that is what JaFL does. A section executes SEQUENTIALLY, so in
+iteration 2 a line above the roll really does run before that roll and really does see iteration
+1's value. Making the set position-blind (seeding the whole body at pass start) is strictly
+wrong: such a read would defer forever, because its own roll can never re-assert in time. The
+attempted fix showed exactly that — the derived charge either used the stale value anyway or
+never applied.
 
-Fix it position-blind like `unsettledRollVars`: at the start of a pass, seed the set with the
-body's roll vars whose memo for THIS pass (`path + '~' + i`) is missing or still a provisional
-decision, then close over the body. Removing a var as its roll settles mid-pass is what keeps a
-legitimate later read live, so the seed must be computed against the pass's own memo keys, not
-the section's. Keep it DOM-free in `render-rules.js`.
-
-Test a synthetic `<while>` whose body reads (and derives from) its pass roll ABOVE the roll
-itself: prove pass 2 does not charge pass 1's value, that the effect applies once the pass rolls,
-and that §6.700/§5.218 and task 204's loop stay green.
+Kept as a test instead of a task: `task204b` in `suite-inventory` drives a loop body whose
+derived `<set>` and `<lose>` sit above the roll and pins the sequential reads (the entry roll on
+pass 1, pass 1's roll on pass 2, once each), and `viewPendingVars` documents why the per-pass set
+is position-sensitive on purpose.
 
 ---
 
@@ -1554,6 +1552,17 @@ and that §6.700/§5.218 and task 204's loop stay green.
 *Running audit log of the backlog — each pass re-verifies the open items against
 the current code and records what was filed, split, or re-confirmed. Task
 numbers refer to the contents checklist at the top of the file.*
+
+Withdrew 2026-07-27: **207**, filed hours earlier while working task 204. It claimed that a
+statement above its own `<while>` pass's roll wrongly reads the previous pass's value. Writing
+the fixture settled it the other way: a section executes SEQUENTIALLY in JaFL, so in iteration 2
+a line above the roll really does run before it and really does see iteration 1's value. The
+"fix" (a position-blind pass seed) would defer such a read forever, since its own roll can never
+re-assert in time — the attempt either used the stale value anyway or never applied the effect.
+The fixture stayed as `task204b` in `suite-inventory`, pinning the sequential reads, and
+`viewPendingVars` now documents why the per-pass set is position-sensitive on purpose. Nothing in
+the corpus is written this way either, so no behaviour changed. With that, **every filed task
+through 206 is complete and the backlog is empty**.
 
 Reviewed 2026-07-26 (eleventh full pass, after tasks 175–179): started clean at
 `d8e8c59`. Re-read the rule/state/economy modules, every renderer and app lifecycle,

@@ -1219,7 +1219,10 @@ export class Story {
       const iterEl = document.createElement('span');
       iterEl.className = 'while-iter';
       // Each pass rolls afresh: its own roll owns any shared <success>/<failure>
-      // branch, and its roll-dependent effects wait for THIS pass's roll.
+      // branch, and its roll-dependent effects wait for THIS pass's roll. The set starts EMPTY
+      // and markWhilePending grows it as the pass's rolls are walked — deliberately, because
+      // JaFL runs a section sequentially: a statement above the pass's roll executes before it
+      // and legitimately reads the previous pass's value.
       this.activeRoll = null;
       this.whileIterPending = false;
       this.whileIterPendingVars = new Set();
