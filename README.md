@@ -311,13 +311,13 @@ fighting), and renders **every section of all six books** to confirm none throw.
 repo root and open `/web/_test.html`, or run it headlessly:
 
 ```powershell
-& "C:\Program Files\Google\Chrome\Application\chrome.exe" `
-  --headless=new --disable-gpu --no-sandbox --dump-dom --virtual-time-budget=60000 `
-  --user-data-dir="$env:TEMP\fl-test-profile" `
-  "http://localhost:8848/web/_test.html"
+cmd /c '"C:\Program Files\Google\Chrome\Application\chrome.exe" --headless=new --disable-gpu --no-sandbox --dump-dom --virtual-time-budget=60000 --user-data-dir="%TEMP%\fl-test-profile" http://localhost:8848/web/_test.html > "%TEMP%\fl-dump.html"'
+Select-String -Path "$env:TEMP\fl-dump.html" -Pattern 'RESULT'
 ```
 
-The first line of the dumped `#results` reads `RESULT ALL PASS …` when healthy (page title
+`--dump-dom` writes to stdout, and the redirect through `cmd` is what gives it somewhere to
+go — see the capture note below. The first line of the dumped `#results` reads
+`RESULT ALL PASS …` when healthy (page title
 `TESTS_OK`); any failure, or any uncaught async error / unhandled promise rejection captured
 during the run, reports `RESULT FAILURES`/`RESULT FATAL` and title `TESTS_FAIL` — the fatal
 state is sticky and can never be overwritten by a later "ALL PASS".
@@ -341,7 +341,14 @@ subset in the same harness — handy for iterating on one area.
 
 > Use a **fresh `--user-data-dir`** (as above) so the service worker can't serve a stale
 > cached copy of the app — otherwise an old bundle can mask your changes and report a
-> false pass. Chrome is used here because headless Edge occasionally emitted empty dumps.
+> false pass.
+
+> **An empty dump means the capture failed, not that the tests did.** `chrome.exe` and
+> `msedge.exe` are Windows GUI-subsystem binaries: launched directly from PowerShell they
+> inherit no stdout handle, so `$dump = & chrome.exe … --dump-dom …` comes back empty even
+> though the suites ran and passed. Confirm it in a second with `chrome.exe --version` from
+> the same prompt — that prints nothing either. The redirect through `cmd` above gives the
+> process a real handle. Either browser works; both fail the same way without the redirect.
 
 ### The DOM-free seam, checked in Node
 

@@ -63,14 +63,31 @@ itself* still has no runtime dependencies; only the offline build step needs pws
 2. Run the headless smoke test (serves `web/`, exercises the engine, and renders
    **every section of all six books** to confirm none throw):
    - Serve from the repo root: `python -m http.server 8848`
-   - `& "C:\Program Files\Google\Chrome\Application\chrome.exe" --headless=new --disable-gpu --no-sandbox --dump-dom --virtual-time-budget=90000 --user-data-dir="$env:TEMP\fl-test-profile" "http://localhost:8848/web/_test.html"`
+   - Dump to a **file, redirected through `cmd`** — `--dump-dom` writes to stdout, and a
+     browser launched straight from PowerShell has no stdout to write to (see the capture
+     note below), so don't try to capture it into a variable:
+     `cmd /c '"C:\Program Files\Google\Chrome\Application\chrome.exe" --headless=new --disable-gpu --no-sandbox --dump-dom --virtual-time-budget=90000 --user-data-dir="%TEMP%\fl-test-profile" http://localhost:8848/web/_test.html > "%TEMP%\fl-dump.html"'`
+   - Read the verdict out of that file:
+     `Select-String -Path "$env:TEMP\fl-dump.html" -Pattern 'RESULT'`
+   - Chrome's own USB/GCM chatter on stderr is unrelated noise; the redirect captures
+     stdout only, so the file stays clean.
 3. Healthy when the dumped `#results` starts with **`RESULT ALL PASS`** (the page
    title becomes `TESTS_OK`).
 
 Notes:
 - Use a **fresh `--user-data-dir`** so a stale service-worker cache can't serve an
   old bundle and report a false pass.
-- Use **Chrome, not Edge** (headless Edge occasionally dumps empty DOM).
+- **An empty dump is a capture failure, not a page-load failure.** `chrome.exe` and
+  `msedge.exe` are Windows GUI-subsystem binaries: launched directly from PowerShell they
+  inherit no stdout handle, so `$dump = & chrome.exe … --dump-dom …` yields an empty string
+  and any `Select-String 'RESULT'` over it finds nothing — while the suites run and pass
+  perfectly well (the static server logs the full request set). `chrome.exe --version`
+  printing nothing from the same prompt confirms the missing handle in one second, and
+  isolates it from the page, the server and the suite. Redirecting through `cmd` as in
+  step 2 gives the process a real handle. This is **not** a browser difference: Chrome and
+  Edge behave identically both ways — direct from PowerShell both print nothing, and
+  through `cmd` both produce the same 135,029-byte dump reading `RESULT ALL PASS
+  pass=2100 fail=0`. (task 208)
 - Give it a virtual-time budget **≥ 60s** — the every-section scan is CPU-heavy.
 - Pure-logic modules (`engine.js`, `combat.js`, `market.js`, `state.js`) can also
   be imported and unit-checked directly in Node for fast feedback. That seam is itself
@@ -96,8 +113,10 @@ Notes:
   instead of hanging at `running…` — so fix the named file, whichever suite you were running.
   A **runtime** throw is isolated by contrast: `main()` catches it per suite, reporting
   `FATAL [<name>] …` while the other suites still run (aggregate `RESULT FAILURES`). A "no
-  RESULT line" therefore means the page never loaded (server down, or a 404
-  from the wrong path — serve the repo root and request `/web/_test.html`). The reporter is
+  RESULT line" therefore means either the dump never reached you (the capture note above —
+  check the dump's size first, since that failure is silent) or the page never loaded (server
+  down, or a 404 from the wrong path — serve the repo root and request `/web/_test.html`);
+  what it never means is that a suite failed quietly. The reporter is
   **sticky-fatal**: an uncaught async error or unhandled promise rejection captured mid-run
   fails the aggregate and can never be overwritten by a later "ALL PASS".
 

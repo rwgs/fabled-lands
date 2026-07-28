@@ -48,7 +48,7 @@ audit pass.
 - [x] 205. The provisional-result gate locks a flee exit the fight gate deliberately leaves open
 - [~] 207. A `<while>` pass's provisional vars are position-sensitive within the body
   — **withdrawn, not a defect** (see the Review log)
-- [ ] 208. The documented headless-test command captures no DOM under PowerShell
+- [x] 208. The documented headless-test command captures no DOM under PowerShell
 
 **Done**
 
@@ -1571,6 +1571,20 @@ symptom rather than a browser difference; if it is, correct that attribution too
 Docs-only, no app or build change. Verify by copying the documented command verbatim into a
 fresh PowerShell session: it must produce a non-empty dump containing `RESULT ALL PASS` and
 title `TESTS_OK`.
+
+**Done.** Step 2 of the build+test loop now dumps to a file redirected through `cmd` and reads
+the verdict back with `Select-String`, and the "no RESULT line" note lists a failed *capture*
+ahead of a failed page load — check the dump's size first, because that failure is the silent
+one. `README.md` carries the same command and a matching capture note. The documented command
+was run verbatim from a fresh PowerShell session: 135,029 bytes, `RESULT ALL PASS pass=2100
+fail=0`, title `TESTS_OK`, against the reproduced empty capture (0 chars) from the old form.
+
+The Edge attribution was wrong and is corrected rather than reworded. "Headless Edge
+occasionally dumps empty DOM" described this same missing-handle symptom: `chrome.exe` and
+`msedge.exe` are both GUI-subsystem binaries and behave identically in both directions — run
+directly from PowerShell each prints nothing even for `--version`, and through the `cmd`
+redirect each produces the same 135,029-byte dump with the same `RESULT ALL PASS pass=2100
+fail=0`. The docs no longer prefer one browser over the other; they require the redirect.
 
 ---
 
