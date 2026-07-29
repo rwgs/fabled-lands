@@ -179,7 +179,8 @@ folder's art and are never touched.
 `REQUIRED` and `OPTIONAL`. Don't hand-edit them (or remove the markers — the build fails
 loudly if they're gone); everything else in `sw.js` is ordinary hand-written source.
 `pwsh -File build/release-selftest.ps1` drives all of this over fixtures, including a real
-build of a temp tree that publishes and then withdraws a synthetic book 7 (CI runs it).
+build of a temp tree that publishes and then withdraws an added book — run for a book number
+inside the twelve-book series and one outside it (CI runs it).
 
 The bundled text is **LF-normalised**, so the JSON is a pure function of the source
 *content* rather than of the builder's checkout: a `core.autocrlf=true` working tree

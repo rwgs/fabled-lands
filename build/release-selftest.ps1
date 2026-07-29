@@ -9,9 +9,10 @@
        Published= entry, plus the shapes that must still be accepted.
     2. The service worker's generated offline inventory - a publish set in, the three
        precache lists out, byte-identical on a no-op re-run.
-    3. A REAL build of a fixture tree, both directions of a next-book transition: adding
-       book 7 must reach meta.json, its bundled data and the offline inventory; withdrawing
-       it must delete exactly its own generated files and nothing else.
+    3. A REAL build of a fixture tree, both directions of an added-book transition, once per
+       number in $ADDED: adding a book must reach meta.json, its bundled data and the
+       offline inventory; withdrawing it must delete exactly its own generated files and
+       nothing else.
 
   Nothing under books/ or web/ is touched: every fixture is built in a temp directory and
   removed afterwards (build-data.ps1 takes -Root for exactly this).
@@ -144,29 +145,38 @@ $SW_TEMPLATE = (@(
     'const OPTIONAL = [...BOOK_MAPS, ...BOOK_ILLUS];'
 ) -join "`n") + "`n"
 
+# The book numbers the added-book coverage runs for: one inside the twelve-book series and
+# one outside it. Every assertion below is written against $ADDED.
+$ADDED = @(2, 99)
+$addedData  = @($ADDED | ForEach-Object { "'./data/book$_.json'," })
+$addedMaps  = @($ADDED | ForEach-Object { "'./assets/maps/book$_.jpg'," })
+$addedArt   = @($ADDED | ForEach-Object { "Art $_.jpg" })
+$addedUrls  = @($ADDED | ForEach-Object { "'./assets/illus/Art%20$_.jpg'," })
+
 Reset-Tmp
 $swPath = Join-Path $tmp 'sw.js'
 Write-Text $swPath $SW_TEMPLATE
-$changed = Set-BookInventory $swPath @(1, 7) @('Art One.jpg', 'Art Seven.jpg')
+$changed = Set-BookInventory $swPath (@(1) + $ADDED) (@('Art 1.jpg') + $addedArt)
 $sw = [System.IO.File]::ReadAllText($swPath)
 Assert 'writing the inventory reports the file changed' ($changed -eq $true)
 Assert 'the publish set becomes the REQUIRED book data' `
-    ($sw -like "*'./data/book1.json',*" -and $sw -like "*'./data/book7.json',*") $sw
+    ($sw -like "*'./data/book1.json',*" -and -not ($addedData | Where-Object { $sw -notlike "*$_*" })) $sw
 Assert 'and the OPTIONAL regional maps' `
-    ($sw -like "*'./assets/maps/book1.jpg',*" -and $sw -like "*'./assets/maps/book7.jpg',*") $sw
+    ($sw -like "*'./assets/maps/book1.jpg',*" -and -not ($addedMaps | Where-Object { $sw -notlike "*$_*" })) $sw
 Assert 'illustration URLs are encoded the way the runtime requests them' `
-    ($sw -like "*'./assets/illus/Art%20Seven.jpg',*") $sw
+    (-not ($addedUrls | Where-Object { $sw -notlike "*$_*" })) $sw
 Assert 'the code around the generated region is untouched' `
     ($sw.StartsWith("const VERSION = 'fl-fixture';") -and $sw -like '*const OPTIONAL = `[...BOOK_MAPS, ...BOOK_ILLUS`];*') $sw
 
 Assert 'rewriting the same inventory is a no-op (a rebuild must leave the tree clean)' `
-    ((Set-BookInventory $swPath @(1, 7) @('Art One.jpg', 'Art Seven.jpg')) -eq $false)
+    ((Set-BookInventory $swPath (@(1) + $ADDED) (@('Art 1.jpg') + $addedArt)) -eq $false)
 
-# Withdrawing a book must restore exactly the smaller inventory, not leave its entries behind.
-[void](Set-BookInventory $swPath @(1) @('Art One.jpg'))
+# Withdrawing books must restore exactly the smaller inventory, not leave their entries behind.
+[void](Set-BookInventory $swPath @(1) @('Art 1.jpg'))
 $sw1 = [System.IO.File]::ReadAllText($swPath)
 Assert 'withdrawing a book drops all three of its inventory entries' `
-    ($sw1 -notlike '*book7*' -and $sw1 -notlike '*Art%20Seven*' -and $sw1 -like "*'./data/book1.json',*") $sw1
+    (-not ($addedData + $addedMaps + $addedUrls | Where-Object { $sw1 -like "*$_*" }) `
+     -and $sw1 -like "*'./data/book1.json',*") $sw1
 
 # Losing the markers must fail loudly: silently shipping an inventory that no longer tracks
 # the publish set is the failure this whole file exists to prevent.
@@ -176,36 +186,38 @@ try { [void](Set-BookInventory $swPath @(1) @()) } catch { $threw = $true }
 Assert 'a missing generated-inventory marker throws instead of passing silently' $threw
 
 # =========================================================================================
-# 3. A real build: both directions of a next-book transition
+# 3. A real build: both directions of an added-book transition
 # =========================================================================================
-# A miniature repo - two book folders (each with a regional map and one illustration), the
-# rules, and just enough of web/ for the stamp step. build-data.ps1 runs against it with
-# -Root, so this exercises the actual validation, bundling, copy, reconcile and inventory
-# steps rather than a re-implementation of them.
-$E2E = @{
-    'books/book1/1.xml'           = '<section name="1"><p>Fixture one. <goto section="2"/></p></section>'
-    'books/book1/2.xml'           = '<section name="2"><p>Second.</p><return/></section>'
-    'books/book1/Adventurers.xml' = '<adventurers><starting><adventurer name="Ona Fixture" profession="warrior" gender="f">A fixture warrior.</adventurer></starting></adventurers>'
-    'books/book1/Sokara-Map.jpg'  = 'MAP1'
-    'books/book1/Art One.jpg'     = 'ART1'
-    'books/book7/1.xml'           = '<section name="1"><p>Fixture seven.</p><return/></section>'
-    'books/book7/Adventurers.xml' = '<adventurers><starting><adventurer name="Sev Fixture" profession="mage" gender="m">A fixture mage.</adventurer></starting></adventurers>'
-    'books/book7/Serpent-Map.jpg' = 'MAP7'
-    'books/book7/Art Seven.jpg'   = 'ART7'
-    'rules/Rules.xml'             = '<section name="rules"><p>Roll two dice.</p></section>'
-    'rules/QuickRules.xml'        = '<section name="quick"><p>Quick.</p></section>'
-    'web/css/style.css'           = 'body{}'
-    'web/js/app.js'               = 'export const app = 1;'
+# A miniature repo - a base book plus ONE added book (each with a regional map and one
+# illustration), the rules, and just enough of web/ for the stamp step. build-data.ps1 runs
+# against it with -Root, so this exercises the actual validation, bundling, copy, reconcile
+# and inventory steps rather than a re-implementation of them. The tree is regenerated, and
+# the whole transition run, once per number in $ADDED.
+function New-E2EFixture([int]$n) {
+    Reset-Tmp
+    $files = @{
+        'books/book1/1.xml'           = '<section name="1"><p>Base one. <goto section="2"/></p></section>'
+        'books/book1/2.xml'           = '<section name="2"><p>Second.</p><return/></section>'
+        'books/book1/Adventurers.xml' = '<adventurers><starting><adventurer name="Ona Fixture" profession="warrior" gender="f">A fixture warrior.</adventurer></starting></adventurers>'
+        'books/book1/Region-Map.jpg'  = 'MAP1'
+        'books/book1/Art 1.jpg'       = 'ART1'
+        "books/book$n/1.xml"           = '<section name="1"><p>Added book.</p><return/></section>'
+        "books/book$n/Adventurers.xml" = '<adventurers><starting><adventurer name="Sev Fixture" profession="mage" gender="m">A fixture mage.</adventurer></starting></adventurers>'
+        "books/book$n/Region-Map.jpg"  = "MAP$n"
+        "books/book$n/Art $n.jpg"      = "ART$n"
+        'rules/Rules.xml'             = '<section name="rules"><p>Roll two dice.</p></section>'
+        'rules/QuickRules.xml'        = '<section name="quick"><p>Quick.</p></section>'
+        'web/css/style.css'           = 'body{}'
+        'web/js/app.js'               = 'export const app = 1;'
+    }
+    foreach ($rel in $files.Keys) { Write-Text (Join-Path $tmp $rel) $files[$rel] }
+    Write-Text (Join-Path $tmp 'web/sw.js') $SW_TEMPLATE
 }
-
-Reset-Tmp
-foreach ($rel in $E2E.Keys) { Write-Text (Join-Path $tmp $rel) $E2E[$rel] }
-Write-Text (Join-Path $tmp 'web/sw.js') $SW_TEMPLATE
-function Set-Published([string]$published) {
+function Set-Published([int]$n, [string]$published) {
     Write-Text (Join-Path $tmp 'books/books.ini') (@(
-        'Books=1,7', "Published=$published",
-        '1.Path=book1', '1.Title=Fixture One',
-        '7.Path=book7', '7.Title=Fixture Seven'
+        "Books=1,$n", "Published=$published",
+        '1.Path=book1', '1.Title=Base Book',
+        "$n.Path=book$n", "$n.Title=Added Book"
     ) -join "`n")
 }
 function Invoke-FixtureBuild {
@@ -213,41 +225,50 @@ function Invoke-FixtureBuild {
     & (Join-Path $PSScriptRoot 'build-data.ps1') -Root $tmp 6>$null
 }
 
-# ---- forwards: publishing book 7 -------------------------------------------------------
-Set-Published '1,7'
-Invoke-FixtureBuild
-$meta = [System.IO.File]::ReadAllText((Join-Path $tmp 'web/data/meta.json'))
-$sw = [System.IO.File]::ReadAllText((Join-Path $tmp 'web/sw.js'))
-Assert 'publishing a book reaches meta.json with its title' `
-    ($meta -like '*"number":7,"title":"Fixture Seven"*') $meta
-Assert 'publishing a book generates its bundled section data' (Test-Path (Join-Path $tmp 'web/data/book7.json'))
-Assert 'publishing a book copies its regional map and illustration' `
-    ((Test-Path (Join-Path $tmp 'web/assets/maps/book7.jpg')) -and (Test-Path (Join-Path $tmp 'web/assets/illus/Art Seven.jpg')))
-Assert 'publishing a book puts its data in the REQUIRED offline inventory' ($sw -like "*'./data/book7.json',*") $sw
-Assert 'publishing a book puts its art in the OPTIONAL offline inventory' `
-    ($sw -like "*'./assets/maps/book7.jpg',*" -and $sw -like "*'./assets/illus/Art%20Seven.jpg',*") $sw
+foreach ($n in $ADDED) {
+    New-E2EFixture $n
+    $data  = Join-Path $tmp "web/data/book$n.json"
+    $map   = Join-Path $tmp "web/assets/maps/book$n.jpg"
+    $art   = Join-Path $tmp "web/assets/illus/Art $n.jpg"
 
-# ---- backwards: withdrawing it, with a manual drop-in present --------------------------
-# The README invites players to drop general per-section art (e.g. 142.jpg) into
-# web/assets/illus/. It matches no book folder's image, so the reconcile must not touch it.
-Write-Text (Join-Path $tmp 'web/assets/illus/142.jpg') 'DROPIN'
-Set-Published '1'
-Invoke-FixtureBuild
-$meta = [System.IO.File]::ReadAllText((Join-Path $tmp 'web/data/meta.json'))
-$sw = [System.IO.File]::ReadAllText((Join-Path $tmp 'web/sw.js'))
-Assert 'withdrawing a book removes its bundled section data' (-not (Test-Path (Join-Path $tmp 'web/data/book7.json')))
-Assert 'withdrawing a book removes its copied regional map' (-not (Test-Path (Join-Path $tmp 'web/assets/maps/book7.jpg')))
-Assert 'withdrawing a book removes its copied illustration' (-not (Test-Path (Join-Path $tmp 'web/assets/illus/Art Seven.jpg')))
-# meta.books is the publish set; meta.titles deliberately keeps ALL series titles, so a
-# choice leading into an unpublished book can still name it in the "not in this edition"
-# message. Only the books array may lose book 7.
-Assert 'withdrawing a book leaves meta.json books and the offline inventory' `
-    ($meta -notlike '*"number":7*' -and $meta -like '*"7":"Fixture Seven"*' `
-     -and $sw -notlike '*book7*' -and $sw -notlike '*Art%20Seven*') "$meta`n$sw"
-Assert 'the still-published book keeps every one of its outputs' `
-    ((Test-Path (Join-Path $tmp 'web/data/book1.json')) -and (Test-Path (Join-Path $tmp 'web/assets/maps/book1.jpg')) `
-     -and (Test-Path (Join-Path $tmp 'web/assets/illus/Art One.jpg')) -and $sw -like "*'./data/book1.json',*")
-Assert 'a manual illustration drop-in is NOT build-owned and survives' (Test-Path (Join-Path $tmp 'web/assets/illus/142.jpg'))
+    # ---- forwards: publishing it -------------------------------------------------------
+    Set-Published $n "1,$n"
+    Invoke-FixtureBuild
+    $meta = [System.IO.File]::ReadAllText((Join-Path $tmp 'web/data/meta.json'))
+    $sw = [System.IO.File]::ReadAllText((Join-Path $tmp 'web/sw.js'))
+    Assert "publishing book $n reaches meta.json with its title" `
+        ($meta -like "*`"number`":$n,`"title`":`"Added Book`"*") $meta
+    Assert "publishing book $n generates its bundled section data" (Test-Path $data)
+    Assert "publishing book $n copies its regional map and illustration" `
+        ((Test-Path $map) -and (Test-Path $art))
+    Assert "publishing book $n puts its data in the REQUIRED offline inventory" `
+        ($sw -like "*'./data/book$n.json',*") $sw
+    Assert "publishing book $n puts its art in the OPTIONAL offline inventory" `
+        ($sw -like "*'./assets/maps/book$n.jpg',*" -and $sw -like "*'./assets/illus/Art%20$n.jpg',*") $sw
+
+    # ---- backwards: withdrawing it, with a manual drop-in present -----------------------
+    # The README invites players to drop general per-section art (e.g. 142.jpg) into
+    # web/assets/illus/. It matches no book folder's image, so the reconcile must not touch it.
+    Write-Text (Join-Path $tmp 'web/assets/illus/142.jpg') 'DROPIN'
+    Set-Published $n '1'
+    Invoke-FixtureBuild
+    $meta = [System.IO.File]::ReadAllText((Join-Path $tmp 'web/data/meta.json'))
+    $sw = [System.IO.File]::ReadAllText((Join-Path $tmp 'web/sw.js'))
+    Assert "withdrawing book $n removes its bundled section data" (-not (Test-Path $data))
+    Assert "withdrawing book $n removes its copied regional map" (-not (Test-Path $map))
+    Assert "withdrawing book $n removes its copied illustration" (-not (Test-Path $art))
+    # meta.books is the publish set; meta.titles deliberately keeps ALL series titles, so a
+    # choice leading into an unpublished book can still name it in the "not in this edition"
+    # message. Only the books array may lose the withdrawn number.
+    Assert "withdrawing book $n leaves meta.json books and the offline inventory" `
+        ($meta -notlike "*`"number`":$n*" -and $meta -like "*`"$n`":`"Added Book`"*" `
+         -and $sw -notlike "*book$n*" -and $sw -notlike "*Art%20$n*") "$meta`n$sw"
+    Assert "withdrawing book $n keeps every one of the base book's outputs" `
+        ((Test-Path (Join-Path $tmp 'web/data/book1.json')) -and (Test-Path (Join-Path $tmp 'web/assets/maps/book1.jpg')) `
+         -and (Test-Path (Join-Path $tmp 'web/assets/illus/Art 1.jpg')) -and $sw -like "*'./data/book1.json',*")
+    Assert "withdrawing book $n leaves a manual illustration drop-in alone (not build-owned)" `
+        (Test-Path (Join-Path $tmp 'web/assets/illus/142.jpg'))
+}
 
 if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
 

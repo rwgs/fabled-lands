@@ -740,10 +740,12 @@ export async function run(ctx) {
       for (const n of bundled) {
         ok(`task195: <if book="${n}"> is true for a bundled book`, eng.evaluateCondition(parse(`<if book="${n}"/>`), gEd) === true);
       }
-      // The unpublished side is derived too: 0 and 999 are never books, and the first
-      // sequel this edition does not bundle stands in for "a real book, not in this build".
-      const nextUnpublished = [7, 8, 9, 10, 11, 12].find((n) => !bundled.includes(n));
-      for (const n of [0, 999, nextUnpublished]) {
+      // The unpublished side is derived too: 0 and 999 are never books, and the lowest book
+      // in meta's series registry that this build does not bundle stands in for "a real book
+      // of the series, not in this edition".
+      const registered = Object.keys(data.getMeta().titles || {}).map(Number);
+      const unregistered = registered.filter((n) => !bundled.includes(n));
+      for (const n of [0, 999].concat(unregistered.length ? [unregistered[0]] : [])) {
         ok(`task195: <if book="${n}"> is false for an unbundled book`, eng.evaluateCondition(parse(`<if book="${n}"/>`), gEd) === false);
       }
       ok('task195: not="t" negates the book test',

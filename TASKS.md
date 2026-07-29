@@ -1663,17 +1663,24 @@ copy loop could have produced (one shared `Get-BookIllustrations`, so the copier
 reconciler cannot disagree): the general per-section art the README invites players to drop
 in matches no book folder and is never touched, so nothing wipes `web/assets/illus/`.
 
-Coverage: `release-selftest.ps1` is **`RESULT ALL PASS pass=36 fail=0`** — fourteen registry
+Coverage: `release-selftest.ps1` is **`RESULT ALL PASS pass=47 fail=0`** — fourteen registry
 cases (missing/empty/non-numeric/zero/duplicate `Published=`, missing and blank titles,
 missing `Path=`, missing directory, plus the shapes that must still pass: padding, ordering,
 a `\uXXXX` title escape, and a non-conventional `Path=`), the inventory writer (encoding, an
 untouched surround, a no-op re-run, a marker-loss throw), and a **real build of a fixture
 tree in both directions** — `build-data.ps1` gained a `-Root` parameter (passed through to
-`stamp-version.ps1`) so publishing a synthetic book 7 is checked to reach `meta.json`, its
-bundled data and the offline inventory, and withdrawing it to delete exactly its own outputs
-while books 1's outputs and a manual `142.jpg` drop-in survive. Note `meta.titles`
-deliberately keeps all twelve series titles either way, so an unpublished book can still be
-named in the "not in this edition" message; only `meta.books` tracks the publish set.
+`stamp-version.ps1`) so publishing an added book is checked to reach `meta.json`, its bundled
+data and the offline inventory, and withdrawing it to delete exactly its own outputs while the
+base book's outputs and a manual `142.jpg` drop-in survive.
+
+The transition runs once per number in a `$ADDED` list — a book inside the series and one
+(99) outside it — with every path, title, meta and inventory assertion written against the
+number under test. `suite-engine.js`'s unpublished example is derived the same way: the
+lowest book in `meta.titles` this build does not bundle. (`meta.titles` deliberately keeps
+all twelve series titles in either direction, so an unpublished book can still be named in
+the "not in this edition" message; only `meta.books` tracks the publish set.) Both directions
+were mutation-checked: stubbing out the reconcile call turns the six "removes its …"
+assertions red for both numbers rather than passing vacuously.
 
 Verified: the `Published=1,2,3,4,5,6` rebuild leaves `web/data` and `web/assets`
 **byte-for-byte unchanged** (only `version.js`/`sw.js` moved, and only because `sw.js`'s own
