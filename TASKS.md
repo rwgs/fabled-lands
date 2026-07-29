@@ -2,11 +2,10 @@
 
 Backlog of recommended improvements. Open tasks are filed under priority buckets
 (**HIGH** / **MEDIUM** / **LOW**) — work the first open (`- [ ]`) item top-down;
-each task's detail section carries the same stable ID. **All filed tasks are
-complete through 206 — there is no open work.** The eleventh full review filed
-tasks 180–202 below; 203 was filed while working task 180, 204–205 while working
-task 181, 206 while working task 197, and 207 while working task 204 (withdrawn
-the same day as a misdiagnosis — see the Review log).
+each task's detail section carries the same stable ID. **Tasks 209–210 are open.**
+The twelfth full review re-checked every completed task through 208 and filed
+these two follow-ups; 207 remains withdrawn as a misdiagnosis (see the Review
+log).
 Completed detail sections are archived in
 [`TASKS-archive.md`](TASKS-archive.md); the Review log at the end records each
 audit pass.
@@ -36,6 +35,7 @@ audit pass.
 - [x] 197. CI tests committed bundles without rebuilding their XML source
 - [x] 203. An imported return frame restores unvalidated vars, ticks and location
 - [x] 206. The service worker's precache list has drifted from `web/js` and nothing checks it
+- [ ] 209. `Published=` does not produce a complete, clean offline edition
 
 **LOW**
 
@@ -49,6 +49,7 @@ audit pass.
 - [~] 207. A `<while>` pass's provisional vars are position-sensitive within the body
   — **withdrawn, not a defect** (see the Review log)
 - [x] 208. The documented headless-test command captures no DOM under PowerShell
+- [ ] 210. Game teardown leaves the mobile Sheet drawer open across screens
 
 **Done**
 
@@ -1586,6 +1587,77 @@ directly from PowerShell each prints nothing even for `--version`, and through t
 redirect each produces the same 135,029-byte dump with the same `RESULT ALL PASS pass=2100
 fail=0`. The docs no longer prefer one browser over the other; they require the redirect.
 
+## 209. `Published=` does not produce a complete, clean offline edition
+
+**Priority: MEDIUM — the current six-book edition is intact, but publishing or withdrawing
+a book through the new registry can leave an online-only or stale offline bundle, and the
+supposedly edition-wide corpus check can pass without scanning the added book.**
+
+Found while re-reviewing the unnumbered `184f566` refactor after task 208. That change made
+`books/books.ini`'s `Published=` line drive source validation, JSON generation and the map /
+illustration copy loops, with the explicit goal that publishing a book become a content-only
+change. Three release/test consumers still hard-code Books 1–6: `sw.js` lists six
+`data/book<N>.json` files and six regional maps (plus today's three illustrations), and
+`suite-corpus.js` loops `for (b = 1; b <= 6; b++)`, while `suite-engine.js` asserts the
+published count is exactly six. Adding Book 7 is therefore not content-only: the aggregate
+first fails at a stale count assertion; after that obvious assertion is updated, Book 7 can
+appear in `meta.json` and work online while its data/art are absent from a fresh offline
+install and every one of its sections remains outside the final render scan.
+
+The reverse transition is also not clean. `build-data.ps1` overwrites outputs for listed
+books but never removes build-owned `web/data/book<N>.json`, regional maps or copied
+illustrations for a book removed from `Published=`. CI's rebuild-and-diff gate cannot expose
+those stale tracked files because the rebuild leaves them in place. Configuration mistakes
+are similarly quiet: a missing published directory is `continue`d in validation and all
+three build loops, duplicate numbers survive the parse, and a missing title silently becomes
+`Book N`. A typo can thus produce a partial edition rather than fail before generated files
+are written.
+
+Finish the single-source contract. Validate `Published=` as a unique positive set whose
+entries have the required title/path and source directory, before the build writes anything.
+Make its normalized set drive the generated book inventory, service-worker required/optional
+inventory and the corpus scan. Generate or stamp the offline inventory from the registry
+instead of maintaining another six-book list by hand. Reconcile build-owned outputs on each
+run so withdrawing a book removes its stale JSON/map/copied art, but preserve unrelated
+manual illustration drop-ins documented by the README (stage/replace owned outputs or track
+their ownership; do not wipe `web/assets/illus/`).
+
+Add fixture coverage for malformed/duplicate/missing entries and for both directions of a
+synthetic next-book transition: adding it reaches meta, required offline data and the
+meta-driven every-section scan; removing it deletes only its build-owned outputs. Prove the
+current `Published=1,2,3,4,5,6` rebuild remains byte-for-byte unchanged, then run the source
+validator self-test, Node import boundary and full browser suite.
+
+## 210. Game teardown leaves the mobile Sheet drawer open across screens
+
+**Priority: LOW — a recovery/death transition can make the next game start with its story
+and header inert and the Sheet unexpectedly open; it is recoverable with Close, but leaks
+accessibility and focus state between SPA screens.**
+
+Task 192 made `body.sheet-open` the drawer's source of truth and correctly preserves it when
+a dialog opens above the Sheet. `releaseGameScreen()`, which every title/create/saves/game
+shell transition calls, only disposes the `Story`; it does not close the drawer, clear
+`sheetOpener`, or retire the old drawer root. On mobile, `syncSheetDrawer()` removes the body
+class only at the desktop breakpoint. A modal path that leaves the game while the Sheet is
+open (the death/recovery routes can call `showSaves()` or `showCreate()`) therefore clears the
+old markup but leaves the global class. The next `installSheetDrawer()` sees that class,
+announces `aria-expanded="true"` and makes the new header/story inert before the player has
+opened anything.
+
+Add a small drawer teardown/reset operation to the existing game-shell release lifecycle.
+It should remove `sheet-open`, clear the stale opener/root reference and leave the outgoing
+shell unisolated without trying to focus a control that is about to be removed. Keep the
+document-level Escape/breakpoint listeners single-install as they are; this is state cleanup,
+not repeated listener churn. Installing a genuinely new mobile shell should also establish a
+closed state defensively, while ordinary Sheet rerenders must continue preserving an open
+drawer and focus.
+
+Extend the task-192 lifecycle fixture: open the mobile drawer, emulate a transition to a
+non-game screen, then install a second game shell. Assert the body class is gone between
+screens, the new toggle starts collapsed, the new Sheet is closed/inert, the new header/story
+are live, and no detached opener receives focus. Keep the existing dialog-over-drawer,
+mobile↔desktop and in-drawer rerender tests green; run the full browser suite.
+
 ---
 
 ## Review log
@@ -1593,6 +1665,33 @@ fail=0`. The docs no longer prefer one browser over the other; they require the 
 *Running audit log of the backlog — each pass re-verifies the open items against
 the current code and records what was filed, split, or re-confirmed. Task
 numbers refer to the contents checklist at the top of the file.*
+
+Reviewed 2026-07-29 (twelfth full pass, after tasks 180–208): started clean at
+`9a511ac`. Re-read the completion commits and their regression coverage across imported
+state/visit restoration, rule planners, combat/economy, renderer and Story lifecycle,
+accessibility, persistence, service-worker ownership, build/CI and workflow documentation.
+Rechecked the post-review `Published=` refactor separately because it changed the release
+boundary without a task number. No completed rule task needs reopening, and task 207 remains
+correctly withdrawn.
+
+Filed **209** (MEDIUM): `Published=` drives only part of a release. The service-worker data /
+map inventory and final corpus scan still hard-code six books, the build leaves withdrawn
+book outputs behind, and invalid/missing registry entries are skipped or duplicated rather
+than rejected. A future book can consequently work online while failing fresh offline play
+and escaping the every-section scan. Filed **210** (LOW): task 192's global mobile-drawer
+class survives `releaseGameScreen()`, so a modal/recovery transition out of an open Sheet can
+make the next game start open with its story and header inert.
+
+Organization verdict is unchanged: keep the dependency-free ES modules and existing
+rule/view boundary. Task 209 belongs at the build/release manifest boundary and task 210 in
+the existing app drawer teardown; neither warrants a framework, folder move or broad
+refactor. PowerShell 7 build: **4,407 XML files valid**, 4,369 sections generated, **no
+generated-file drift**. Validator fixture self-test: **`RESULT ALL PASS pass=23 fail=0`**.
+DOM-free Node import suite: **`RESULT ALL PASS pass=35 fail=0`**.
+Fresh-profile Chrome aggregate: **`RESULT ALL PASS pass=2100 fail=0`**, title `TESTS_OK`,
+including every currently scanned section of all six published books. The connected
+interactive browser was unavailable, so this pass does not claim an additional manual visual
+inspection; the repository's real-Chrome headless suite completed normally.
 
 Withdrew 2026-07-27: **207**, filed hours earlier while working task 204. It claimed that a
 statement above its own `<while>` pass's roll wrongly reads the previous pass's value. Writing
