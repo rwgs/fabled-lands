@@ -729,13 +729,21 @@ export async function run(ctx) {
     {
       const gEd = GameState.create({ name: 'ED195', gender: 'm', profession: 'Warrior', book: 1, adv });
       const bundled = data.availableBooks();
-      ok('task195: the registry is populated from meta.json', bundled.length === 6, JSON.stringify(bundled));
+      // Checked against meta.json's own book list rather than a literal 6 (task 209): a
+      // count assertion made publishing a book fail here first, which invited "bump the 6"
+      // instead of noticing the offline inventory and corpus scan had not followed.
+      const published = (data.getMeta().books || []).map((b) => b.number);
+      ok('task195: the registry is populated from meta.json',
+         bundled.length > 0 && JSON.stringify(bundled) === JSON.stringify(published), JSON.stringify(bundled));
       ok('task195: edition.availableBooks agrees with data.availableBooks',
          JSON.stringify(edition.availableBooks()) === JSON.stringify(bundled));
       for (const n of bundled) {
         ok(`task195: <if book="${n}"> is true for a bundled book`, eng.evaluateCondition(parse(`<if book="${n}"/>`), gEd) === true);
       }
-      for (const n of [0, 7, 999]) {
+      // The unpublished side is derived too: 0 and 999 are never books, and the first
+      // sequel this edition does not bundle stands in for "a real book, not in this build".
+      const nextUnpublished = [7, 8, 9, 10, 11, 12].find((n) => !bundled.includes(n));
+      for (const n of [0, 999, nextUnpublished]) {
         ok(`task195: <if book="${n}"> is false for an unbundled book`, eng.evaluateCondition(parse(`<if book="${n}"/>`), gEd) === false);
       }
       ok('task195: not="t" negates the book test',

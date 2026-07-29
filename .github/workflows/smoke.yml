@@ -45,6 +45,16 @@ jobs:
         shell: pwsh
         run: ./build/validate-selftest.ps1
 
+      # The edition manifest (task 209): books.ini's Published= line is the single source of
+      # which books a build ships, so its validation, the service worker's generated offline
+      # inventory and the removal of a withdrawn book's outputs are driven over fixtures --
+      # including a REAL build of a temp tree in both directions of a next-book transition.
+      # A publish set that silently stopped reaching one of its consumers would otherwise
+      # look exactly like today's intact six-book edition. Touches no repo file.
+      - name: The edition manifest publishes and withdraws a book completely
+        shell: pwsh
+        run: ./build/release-selftest.ps1
+
   # The DOM-free seam (task 195). AGENTS.md promises the rule modules import and run in plain
   # Node; a single stray import of a browser-touching module breaks that without failing the
   # browser suite, which has a DOM either way. Runs on Node's stdlib only — no npm install,

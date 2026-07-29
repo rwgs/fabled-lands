@@ -255,18 +255,20 @@ function Get-ExplicitTargets($el, [int]$ownBook, [System.Collections.ArrayList]$
 # ---- The whole source tree -------------------------------------------------------------
 # Validates every file the build is about to bundle and returns @{ Errors; Checked }. Nothing
 # is written and nothing is thrown: the caller decides what a failure means (the build aborts,
-# the self-test asserts). $bookNumbers is the set of BUNDLED books - a link into any other
-# book (the unbundled 7-12) is intentional and never reported as dangling.
-function Test-SourceTree([string]$booksDir, [string]$rulesDir, [int[]]$bookNumbers) {
+# the self-test asserts). $bookDirs is the BUNDLED set as number -> source directory, exactly
+# as Get-BookRegistry resolved it from books.ini's Published= line (task 209): the build and
+# this gate then iterate one set, and a published book whose folder is missing has already
+# been reported there rather than skipped here. A link into any OTHER book (the unbundled
+# 7-12) is intentional and never reported as dangling.
+function Test-SourceTree([string]$rulesDir, [hashtable]$bookDirs) {
     $errors = [System.Collections.ArrayList]::new()
     $checked = 0
+    $bookNumbers = @($bookDirs.Keys | Sort-Object)
 
     # 1. Index the section ids each bundled book really contains, so a link can be resolved.
     $known = @{}
     foreach ($b in $bookNumbers) {
-        $dir = Join-Path $booksDir ("book{0}" -f $b)
-        if (-not (Test-Path $dir)) { continue }
-        Get-ChildItem -Path $dir -Filter '*.xml' |
+        Get-ChildItem -Path $bookDirs[$b] -Filter '*.xml' |
             Where-Object { $_.BaseName -match '^\d+[a-z]?$' } |
             ForEach-Object { $known["$b`:$($_.BaseName)"] = $true }
     }
@@ -274,13 +276,14 @@ function Test-SourceTree([string]$booksDir, [string]$rulesDir, [int[]]$bookNumbe
     # 2. Section files: well-formed, rooted at <section>, name matching the filename, a known
     #    vocabulary, and every explicit link resolving inside a bundled book.
     foreach ($b in $bookNumbers) {
-        $dir = Join-Path $booksDir ("book{0}" -f $b)
-        if (-not (Test-Path $dir)) { continue }
+        $dir = $bookDirs[$b]
+        # Errors name the folder the author would open, which is the Path= leaf, not "book<N>".
+        $dirName = Split-Path -Leaf $dir
         Get-ChildItem -Path $dir -Filter '*.xml' |
             Where-Object { $_.BaseName -match '^\d+[a-z]?$' } |
             ForEach-Object {
                 $checked++
-                $label = "book{0}/{1}" -f $b, $_.Name
+                $label = "{0}/{1}" -f $dirName, $_.Name
                 $xml = Read-Xml $_.FullName
                 # Accepted names: the full filename, and its numeric prefix for a lettered
                 # continuation (609a -> "609" or "609a"). (task 78)
@@ -306,7 +309,7 @@ function Test-SourceTree([string]$booksDir, [string]$rulesDir, [int[]]$bookNumbe
         $advPath = Join-Path $dir 'Adventurers.xml'
         if (Test-Path $advPath) {
             $checked++
-            $label = "book{0}/Adventurers.xml" -f $b
+            $label = "{0}/Adventurers.xml" -f $dirName
             $advXml = Read-Xml $advPath
             $e = Test-XmlDoc $advXml $label 'adventurers'
             if ($e) { [void]$errors.Add($e) }
@@ -323,7 +326,7 @@ function Test-SourceTree([string]$booksDir, [string]$rulesDir, [int[]]$bookNumbe
                         continue
                     }
                     $checked++
-                    $bioLabel = "book{0}/{1}.xml" -f $b, $first
+                    $bioLabel = "{0}/{1}.xml" -f $dirName, $first
                     $bioXml = Read-Xml $bioPath
                     $e = Test-XmlDoc $bioXml $bioLabel 'section'
                     if ($e) { [void]$errors.Add($e); continue }

@@ -16,7 +16,8 @@
     books/book<n>/Adventurers.xml -> folded into web/data/meta.json
     rules/*.xml                   -> folded into web/data/meta.json
     books/books.ini               -> book titles in meta.json, and the Published= list
-                                     of book numbers this build bundles
+                                     of book numbers this build bundles (which also drives
+                                     sw.js's generated offline inventory)
     images/world-map.jpg          -> web/assets/world-map.jpg
     books/book<n>/<Region>-Map.*  -> web/assets/maps/book<n>.jpg
 
@@ -29,8 +30,13 @@
   line endings. It is deliberately dependency-free - stock pwsh 7, no modules.
 #>
 
+
+# -Root exists so release-selftest.ps1 can run a REAL build over a fixture tree and check
+# both directions of a publish/withdraw transition. It defaults to this repo. (task 209)
+param([string]$Root = (Split-Path -Parent $PSScriptRoot))
+
 $ErrorActionPreference = 'Stop'
-$root   = Split-Path -Parent $PSScriptRoot   # repo root (parent of build/)
+$root   = $Root                              # repo root (parent of build/ by default)
 $books  = Join-Path $root 'books'
 $rules  = Join-Path $root 'rules'
 $images = Join-Path $root 'images'
@@ -44,6 +50,11 @@ New-Item -ItemType Directory -Force -Path $assets | Out-Null
 # validate-source.ps1, so the self-test can drive the same validation over mutation fixtures
 # instead of a real build. (tasks 13, 78, 197, 199)
 . (Join-Path $PSScriptRoot 'validate-source.ps1')
+
+# The edition manifest - the publish set, the service worker's offline inventory, and the
+# reconciliation of build-owned outputs - lives in release.ps1 so release-selftest.ps1 can
+# drive it over fixtures instead of trusting it. (task 209)
+. (Join-Path $PSScriptRoot 'release.ps1')
 
 # ---- Pregen starting characters --------------------------------------------
 # Each book's Adventurers.xml <starting> block lists the six pre-made characters
@@ -86,31 +97,30 @@ function Get-Pregens([string]$dir, [string]$advXml) {
     return $list
 }
 
-# ---- Parse books.ini for the canonical titles and the published set ---------
-# Published= is the set of books this build bundles: validation and all three copy loops
-# below iterate it, so publishing a book is a content change (drop in books/book<N>/, add
+# ---- The publish set (books.ini) --------------------------------------------
+# Published= is the set of books this build bundles: source validation, all three copy loops
+# below, the service worker's offline inventory and the reconciliation of withdrawn outputs
+# all read this ONE set, so publishing a book is a content change (drop in the folder, add
 # it to the line) rather than a build-script edit. It is deliberately an explicit list and
 # not a books/book*/ glob: a half-transcribed book folder would otherwise be bundled the
 # moment it appeared - reaching meta.json and the in-game book picker, and failing the
 # closed-vocabulary gate. An explicit list keeps work-in-progress in-tree and inert.
 # (Books= is the 12-title series registry, not the publish set; the build ignores it.)
-$titles = @{}
-$bundled = @()
-$iniPath = Join-Path $books 'books.ini'
-if (Test-Path $iniPath) {
-    foreach ($line in Get-Content -Encoding UTF8 $iniPath) {
-        if ($line -match '^\s*(\d+)\.Title\s*=\s*(.+?)\s*$') {
-            $num = [int]$Matches[1]
-            $t   = $Matches[2]
-            $t = [regex]::Replace($t, '\\u([0-9A-Fa-f]{4})', { param($m) [char][int]('0x' + $m.Groups[1].Value) })
-            $titles[$num] = $t
-        }
-        elseif ($line -match '^\s*Published\s*=\s*(.+?)\s*$') {
-            $bundled = @($Matches[1] -split '\s*,\s*' | ForEach-Object { [int]$_ } | Sort-Object)
-        }
-    }
+#
+# The line is validated BEFORE anything is written (task 209): a non-numeric or duplicated
+# entry, or one whose title, Path= or source folder is missing, aborts here instead of
+# quietly producing a partial edition.
+Write-Host 'Validating books.ini...'
+$reg = Get-BookRegistry (Join-Path $books 'books.ini') $books
+if ($reg.Errors.Count -gt 0) {
+    Write-Host ("books.ini validation FAILED - {0} problem(s):" -f $reg.Errors.Count)
+    $reg.Errors | ForEach-Object { Write-Host "  $_" }
+    throw "Build aborted: fix books/books.ini above and re-run."
 }
-if (-not $bundled) { throw "books.ini: no Published= list - nothing to bundle." }
+$bundled = $reg.Published
+$titles  = $reg.Titles
+$bookDirs = $reg.Dirs
+Write-Host ("books.ini OK: publishing book(s) {0}." -f ($bundled -join ', '))
 
 # ---- Validate the source XML before bundling (tasks 13, 199) ----------------
 # Every file the build is about to bundle is checked BEFORE anything is written: well-formed,
@@ -121,7 +131,7 @@ if (-not $bundled) { throw "books.ini: no Published= list - nothing to bundle." 
 # DOMParser is more lenient, so this is a deliberately stricter gate; the corpus is clean, so
 # it never fires spuriously.
 Write-Host 'Validating source XML...'
-$v = Test-SourceTree $books $rules $bundled
+$v = Test-SourceTree $rules $bookDirs
 if ($v.Errors.Count -gt 0) {
     Write-Host ("XML validation FAILED - {0} problem(s) in {1} file(s) checked:" -f $v.Errors.Count, $v.Checked)
     $v.Errors | ForEach-Object { Write-Host "  $_" }
@@ -132,8 +142,7 @@ Write-Host ("XML OK: {0} files validated." -f $v.Checked)
 # ---- Bundle each book -------------------------------------------------------
 $bookMeta = @()
 foreach ($b in $bundled) {
-    $dir = Join-Path $books ("book{0}" -f $b)
-    if (-not (Test-Path $dir)) { continue }
+    $dir = $bookDirs[$b]
 
     # Numeric sections, plus lettered sub-sections like "448a"/"609a" that the
     # numbered sections link to (e.g. <success section="609a"/>). Sort by the
@@ -154,7 +163,7 @@ foreach ($b in $bundled) {
 
     $bookMeta += [ordered]@{
         number      = $b
-        title       = if ($titles.ContainsKey($b)) { $titles[$b] } else { "Book $b" }
+        title       = $titles[$b]
         sections    = $map.Count
         adventurers = $advXml
         pregens     = $pregens
@@ -200,9 +209,7 @@ if (Test-Path $mapSrc) {
 $mapsOut = Join-Path $assets 'maps'
 New-Item -ItemType Directory -Force -Path $mapsOut | Out-Null
 foreach ($b in $bundled) {
-    $dir = Join-Path $books ("book{0}" -f $b)
-    if (-not (Test-Path $dir)) { continue }
-    $rmap = Get-ChildItem -Path $dir -File | Where-Object { $_.BaseName -match '-Map$' } | Select-Object -First 1
+    $rmap = Get-ChildItem -Path $bookDirs[$b] -File | Where-Object { $_.BaseName -match '-Map$' } | Select-Object -First 1
     if ($rmap) {
         Copy-Item $rmap.FullName (Join-Path $mapsOut ("book{0}.jpg" -f $b)) -Force
         Write-Host ("book{0} map: {1}" -f $b, $rmap.Name)
@@ -217,20 +224,37 @@ if (Test-Path $mapsSrc) { Copy-Item (Join-Path $mapsSrc '*') $mapsOut -Force -Er
 # Bazalek Isle, the Black Diptych. Each image file lives beside its book's XML.
 # Copy every book-folder image that is NOT the "<Region>-Map" regional map into
 # web/assets/illus/ under its own name, so render.js can resolve it there. (task 62)
+# The copied names are remembered: they are this build's OWNED art, which the offline
+# inventory precaches and the reconciler below uses to tell its own output apart from the
+# per-section art a player may have dropped in. (task 209)
 $illusOut = Join-Path $assets 'illus'
 New-Item -ItemType Directory -Force -Path $illusOut | Out-Null
+$illusNames = @()
 foreach ($b in $bundled) {
-    $dir = Join-Path $books ("book{0}" -f $b)
-    if (-not (Test-Path $dir)) { continue }
-    Get-ChildItem -Path $dir -File |
-        Where-Object { $_.Extension -match '^\.(jpg|jpeg|png|gif)$' -and $_.BaseName -notmatch '-Map$' -and $_.BaseName -notmatch 'cover' } |
-        ForEach-Object {
-            Copy-Item $_.FullName (Join-Path $illusOut $_.Name) -Force
-            Write-Host ("book{0} illustration: {1}" -f $b, $_.Name)
-        }
+    foreach ($img in (Get-BookIllustrations $bookDirs[$b])) {
+        Copy-Item $img.FullName (Join-Path $illusOut $img.Name) -Force
+        $illusNames += $img.Name
+        Write-Host ("book{0} illustration: {1}" -f $b, $img.Name)
+    }
 }
 
+# ---- Reconcile build-owned outputs with the publish set ----------------------
+# The loops above overwrite what IS published; this clears what is not, so withdrawing a
+# book from Published= cannot leave a stale book<N>.json, regional map or copied
+# illustration behind (CI's rebuild-and-diff gate cannot see a file a rebuild leaves in
+# place). Manual illustration drop-ins are preserved. (task 209)
+foreach ($gone in (Remove-StaleBookOutputs $root $bundled $illusNames)) {
+    Write-Host "removed withdrawn output: $gone"
+}
+
+# ---- Regenerate the service worker's offline inventory ----------------------
+# sw.js used to hand-list six data files, six maps and three illustrations, so a newly
+# published book would have worked online and been missing from a fresh offline install.
+# (task 209)
+$swChanged = Set-BookInventory (Join-Path $root 'web/sw.js') $bundled $illusNames
+Write-Host ($swChanged ? 'sw.js: offline book inventory updated' : 'sw.js: offline book inventory already current')
+
 # ---- Refresh the build stamp shown in-game ----------------------------------
-& (Join-Path $PSScriptRoot 'stamp-version.ps1')
+& (Join-Path $PSScriptRoot 'stamp-version.ps1') -Root $root
 
 Write-Host 'Done.'

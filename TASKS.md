@@ -35,7 +35,7 @@ audit pass.
 - [x] 197. CI tests committed bundles without rebuilding their XML source
 - [x] 203. An imported return frame restores unvalidated vars, ticks and location
 - [x] 206. The service worker's precache list has drifted from `web/js` and nothing checks it
-- [ ] 209. `Published=` does not produce a complete, clean offline edition
+- [x] 209. `Published=` does not produce a complete, clean offline edition
 
 **LOW**
 
@@ -1599,10 +1599,10 @@ illustration copy loops, with the explicit goal that publishing a book become a 
 change. Three release/test consumers still hard-code Books 1–6: `sw.js` lists six
 `data/book<N>.json` files and six regional maps (plus today's three illustrations), and
 `suite-corpus.js` loops `for (b = 1; b <= 6; b++)`, while `suite-engine.js` asserts the
-published count is exactly six. Adding Book 7 is therefore not content-only: the aggregate
-first fails at a stale count assertion; after that obvious assertion is updated, Book 7 can
-appear in `meta.json` and work online while its data/art are absent from a fresh offline
-install and every one of its sections remains outside the final render scan.
+published count is exactly six. Adding a book is therefore not content-only: the aggregate
+first fails at a stale count assertion; after that obvious assertion is updated, the added
+book can appear in `meta.json` and work online while its data/art are absent from a fresh
+offline install and every one of its sections remains outside the final render scan.
 
 The reverse transition is also not clean. `build-data.ps1` overwrites outputs for listed
 books but never removes build-owned `web/data/book<N>.json`, regional maps or copied
@@ -1623,10 +1623,73 @@ manual illustration drop-ins documented by the README (stage/replace owned outpu
 their ownership; do not wipe `web/assets/illus/`).
 
 Add fixture coverage for malformed/duplicate/missing entries and for both directions of a
-synthetic next-book transition: adding it reaches meta, required offline data and the
+synthetic added-book transition: adding it reaches meta, required offline data and the
 meta-driven every-section scan; removing it deletes only its build-owned outputs. Prove the
 current `Published=1,2,3,4,5,6` rebuild remains byte-for-byte unchanged, then run the source
 validator self-test, Node import boundary and full browser suite.
+
+**Done.** The edition manifest now lives in one place, `build/release.ps1`, dot-sourced by
+`build-data.ps1` and driven over fixtures by the new `build/release-selftest.ps1` (CI runs it
+beside the source-gate self-test). `Get-BookRegistry` parses *and* validates `books.ini`
+before the build writes anything: `Published=` must be a unique set of positive numbers, and
+each entry must carry a non-blank `<N>.Title=`, a `<N>.Path=`, and a source directory that
+exists. All four used to fail quietly — the old parse cast every token straight to `[int]`
+(so a typo aborted with a raw cast exception rather than a diagnosis), duplicates survived,
+a missing title became `Book N`, and a missing directory was `continue`d by validation and by
+each of the three copy loops, yielding a partial edition. `Path=` is now honoured rather than
+decorative: `Test-SourceTree` takes the publish set as number → directory, so the gate and
+the build iterate one resolved set (its error labels name the actual folder, which is
+byte-identical to the old `book<N>/…` for today's tree).
+
+The two release consumers that duplicated the line follow it now. `sw.js` has one generated
+region between `BEGIN`/`END GENERATED BOOK INVENTORY` markers holding `BOOK_DATA`,
+`BOOK_MAPS` and `BOOK_ILLUS`, spread into `REQUIRED`/`OPTIONAL`; `Set-BookInventory` rewrites
+it from the publish set and the illustrations the copy loop actually copied, throwing if the
+markers are gone rather than shipping an inventory that no longer tracks the edition. The
+illustration URLs are escaped to match `encodeURIComponent` exactly (`Uri.EscapeDataString`
+additionally escapes `!'()*`, which are put back) because a precache URL *is* the cache key.
+`suite-corpus.js` scans `data.availableBooks()` instead of `1..6` and now also asserts the
+edition is non-empty and that every published book has bundled section data — so a book that
+reached `meta.json` with no JSON fails the suite instead of only a player's browser. The
+`suite-engine.js` count assertion checks the registry against `meta.json`'s own book list
+rather than a literal `6`, and derives its unpublished example from the same list; a literal
+count would have failed first and invited "bump the 6" instead of noticing the other two
+consumers had not followed.
+
+`Remove-StaleBookOutputs` reconciles build-owned outputs on every run, so a withdrawal
+removes `web/data/book<N>.json`, `web/assets/maps/book<N>.jpg` and that book's copied
+illustrations. Ownership of `illus/` is decided by scanning every book folder for the art the
+copy loop could have produced (one shared `Get-BookIllustrations`, so the copier and the
+reconciler cannot disagree): the general per-section art the README invites players to drop
+in matches no book folder and is never touched, so nothing wipes `web/assets/illus/`.
+
+Coverage: `release-selftest.ps1` is **`RESULT ALL PASS pass=36 fail=0`** — fourteen registry
+cases (missing/empty/non-numeric/zero/duplicate `Published=`, missing and blank titles,
+missing `Path=`, missing directory, plus the shapes that must still pass: padding, ordering,
+a `\uXXXX` title escape, and a non-conventional `Path=`), the inventory writer (encoding, an
+untouched surround, a no-op re-run, a marker-loss throw), and a **real build of a fixture
+tree in both directions** — `build-data.ps1` gained a `-Root` parameter (passed through to
+`stamp-version.ps1`) so publishing a synthetic book 7 is checked to reach `meta.json`, its
+bundled data and the offline inventory, and withdrawing it to delete exactly its own outputs
+while books 1's outputs and a manual `142.jpg` drop-in survive. Note `meta.titles`
+deliberately keeps all twelve series titles either way, so an unpublished book can still be
+named in the "not in this edition" message; only `meta.books` tracks the publish set.
+
+Verified: the `Published=1,2,3,4,5,6` rebuild leaves `web/data` and `web/assets`
+**byte-for-byte unchanged** (only `version.js`/`sw.js` moved, and only because `sw.js`'s own
+source changed), and the hand-written inventory region matched the generated one exactly on
+the first run (`sw.js: offline book inventory already current`). Source validator self-test
+**`RESULT ALL PASS pass=23 fail=0`**; Node import boundary **`RESULT ALL PASS pass=35
+fail=0`**; fresh-profile Chrome aggregate **`RESULT ALL PASS pass=2102 fail=0`** (2100 + the
+two new corpus assertions), title `TESTS_OK`.
+
+One process note worth keeping, added to `AGENTS.md`: the first browser run reported a
+byte-identical `pass=2100` dump *after* the suite edits, because a leftover
+`python -m http.server 8848` from a previous session still owned the port. Python sets
+`allow_reuse_address`, so the new server bound without error on Windows while the old process
+kept answering — a stale tree served under a confident `RESULT ALL PASS`. Checking the port's
+owning process (a `CreationDate` predating the session) and `curl`ing an edited file exposes
+it in seconds.
 
 ## 210. Game teardown leaves the mobile Sheet drawer open across screens
 

@@ -40,7 +40,7 @@ the browser, on any device, with progress saved locally.
 fabled-lands/
 ├── books/            Original section XML, one file per section (SOURCE OF TRUTH)
 │   ├── book1/…book6/  e.g. book1/20.xml, plus Adventurers.xml (starting characters)
-│   └── books.ini      Book titles
+│   └── books.ini      Book titles + the `Published=` set this build ships
 ├── rules/            Rules.xml, QuickRules.xml
 ├── images/           world-map.jpg (+ icons). General per-section art is NOT included.
 ├── java-engine/      The original Java engine (JaFL) — kept for reference, UNTOUCHED
@@ -48,6 +48,9 @@ fabled-lands/
 │   ├── build-data.ps1  Bundles books/ + rules/ + maps → web/data & web/assets
 │   ├── validate-source.ps1  The source-XML gate the build runs before writing anything
 │   ├── validate-selftest.ps1  Drives that gate over mutation fixtures (CI runs it)
+│   ├── release.ps1     The edition manifest: `Published=`, sw.js's offline inventory,
+│   │                   and removing a withdrawn book's generated outputs
+│   ├── release-selftest.ps1  Drives that over fixtures, incl. a real fixture build (CI)
 │   └── stamp-version.ps1  Writes the in-game version stamp
 └── web/              ← the web app (this is what you deploy)
     ├── index.html
@@ -151,6 +154,32 @@ The gate is itself tested: `pwsh -File build/validate-selftest.ps1` runs it over
 tree, once clean and then once per class of mistake (CI runs this on every push). The real
 corpus is clean, so a gate that quietly stopped catching typos would otherwise look exactly
 like a passing build.
+
+### Which books a build ships — `books.ini`
+
+`books/books.ini` holds two lists: `Books=` is the twelve-title series registry (used for
+titles only), and **`Published=` is the set of books this build actually bundles**. That one
+line drives everything downstream — source validation, the per-book JSON, the copied
+regional maps and illustrations, `sw.js`'s offline precache inventory, and the smoke suite's
+every-section scan — so publishing a book is a **content** change (drop in the folder, add
+its number, `<N>.Path=` and `<N>.Title=`) rather than a build-script edit. It is deliberately
+an explicit list and not a `books/book*/` glob, which would bundle a half-transcribed folder
+the moment it appeared.
+
+The line is **validated before anything is written**: a non-numeric, zero or duplicated
+entry, or a published book missing its `Title=`, `Path=` or source directory, aborts the
+build instead of quietly producing a partial edition. Taking a book back off the line
+**removes its generated outputs** (`web/data/book<N>.json`, `web/assets/maps/book<N>.jpg`
+and its copied illustrations), so a withdrawal can't leave a stale bundle that CI's
+rebuild-and-diff gate is blind to. Manual illustration drop-ins (below) match no book
+folder's art and are never touched.
+
+`web/sw.js` therefore has one **generated region** — the `BOOK_DATA` / `BOOK_MAPS` /
+`BOOK_ILLUS` lists between its `BEGIN`/`END GENERATED BOOK INVENTORY` markers, spread into
+`REQUIRED` and `OPTIONAL`. Don't hand-edit them (or remove the markers — the build fails
+loudly if they're gone); everything else in `sw.js` is ordinary hand-written source.
+`pwsh -File build/release-selftest.ps1` drives all of this over fixtures, including a real
+build of a temp tree that publishes and then withdraws a synthetic book 7 (CI runs it).
 
 The bundled text is **LF-normalised**, so the JSON is a pure function of the source
 *content* rather than of the builder's checkout: a `core.autocrlf=true` working tree
@@ -307,8 +336,10 @@ Two behaviours follow the original Java app rather than a simpler "hide it" appr
 
 `web/_test.html` is a headless smoke test: it creates a character, exercises the engine 
 (conditions, effects, dice, ranges, combat), verifies interactions (rolling, choosing,
-fighting), and renders **every section of all six books** to confirm none throw. Serve the
-repo root and open `/web/_test.html`, or run it headlessly:
+fighting), and renders **every section of every published book** (today's six) to confirm
+none throw — the scan reads the book list out of `meta.json`, so it follows `books.ini`'s
+`Published=` line rather than a hardcoded 1–6. Serve the repo root and open
+`/web/_test.html`, or run it headlessly:
 
 ```powershell
 cmd /c '"C:\Program Files\Google\Chrome\Application\chrome.exe" --headless=new --disable-gpu --no-sandbox --dump-dom --virtual-time-budget=60000 --user-data-dir="%TEMP%\fl-test-profile" http://localhost:8848/web/_test.html > "%TEMP%\fl-dump.html"'

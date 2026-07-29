@@ -10,8 +10,15 @@ combat, markets, ships, live adventure sheet). Plain HTML/CSS/ES modules —
 ## Repository map — what is source, what is generated
 - **`books/book<N>/*.xml`** — section text + rules markup. **SOURCE OF TRUTH**
   (~4,400 sections). Edit these.
+- **`books/books.ini`** — the edition registry. `Published=` is the **single source** of
+  which books a build ships: it drives validation, the per-book JSON, the copied maps and
+  art, `sw.js`'s offline inventory and the every-section scan. Publishing/withdrawing a
+  book is a content change to this line, never a build-script edit (task 209).
 - **`web/data/*.json` and `web/js/version.js`** — **GENERATED** from `books/` +
   `rules/` by the build. **Never hand-edit them;** change the XML and rebuild.
+- **`web/sw.js`** — hand-written, *except* the `BOOK_DATA`/`BOOK_MAPS`/`BOOK_ILLUS` lists
+  between its `BEGIN`/`END GENERATED BOOK INVENTORY` markers and the `VERSION` line, which
+  the build owns. Don't hand-edit those or drop the markers (the build then fails loudly).
 - **`web/js/*.js`** — the app (vanilla ES modules; see the module table in `README.md`).
 - **`rules/`** — the original JaFL XML spec, for reference: `JaFL-XML-Tags.html`
   (full tag list), `JaFL-XML-Intro.html`, `Rules.xml`, `QuickRules.xml`. The two
@@ -24,6 +31,10 @@ combat, markets, ships, live adventure sheet). Plain HTML/CSS/ES modules —
   (`validate-source.ps1`) the build runs before writing anything and its fixture
   self-test (`validate-selftest.ps1`, run by CI). Adding a new tag/attribute/value
   to `books/` means adding it to that allowlist in the same change (task 199).
+  The edition manifest — `Published=`'s validation, the service-worker inventory and the
+  reconciliation of a withdrawn book's outputs — lives in `release.ps1`, driven over
+  fixtures (including a real build of a temp tree) by `release-selftest.ps1`, also run by
+  CI. Both self-tests touch nothing under `books/` or `web/`.
   **`TASKS.md`** — the backlog (see workflow below).
 
 ## Architecture invariant — keep the rules out of the view
@@ -61,7 +72,7 @@ itself* still has no runtime dependencies; only the offline build step needs pws
    build fails. Keep both `.ps1` scripts OS-neutral: forward slashes in path literals (a
    `'web\data'` literal becomes a *file* named `web\data` on Linux). (task 197)
 2. Run the headless smoke test (serves `web/`, exercises the engine, and renders
-   **every section of all six books** to confirm none throw):
+   **every section of every published book** — six today — to confirm none throw):
    - Serve from the repo root: `python -m http.server 8848`
    - Dump to a **file, redirected through `cmd`** — `--dump-dom` writes to stdout, and a
      browser launched straight from PowerShell has no stdout to write to (see the capture
@@ -86,8 +97,20 @@ Notes:
   isolates it from the page, the server and the suite. Redirecting through `cmd` as in
   step 2 gives the process a real handle. This is **not** a browser difference: Chrome and
   Edge behave identically both ways — direct from PowerShell both print nothing, and
-  through `cmd` both produce the same 135,029-byte dump reading `RESULT ALL PASS
-  pass=2100 fail=0`. (task 208)
+  through `cmd` both produce the same dump and the same verdict (task 208's run: a
+  135,029-byte dump reading `RESULT ALL PASS pass=2100 fail=0`; both numbers move as suites
+  grow, so treat them as that run's figures and not as today's expected output). (task 208)
+- **A leftover `http.server` on :8848 serves a stale tree and reports a confident false
+  pass.** Python sets `allow_reuse_address`, so on Windows a *second* `python -m http.server
+  8848` binds without complaint while the older process keeps answering — the suite then runs
+  green against whatever that process's working directory holds. It looks exactly like a
+  normal pass, including a plausible `RESULT ALL PASS`, so always **stop the server when you
+  are done**, and if a verdict looks unchanged after you edited a suite, check the owner
+  first: `Get-NetTCPConnection -LocalPort 8848 -State Listen` then
+  `Get-CimInstance Win32_Process -Filter "ProcessId=<pid>"` — a `CreationDate` older than
+  your session is the tell. A one-line `curl` of a file you just edited
+  (`curl -s http://localhost:8848/web/tests/suite-corpus.js`) confirms what is really being
+  served. (task 209)
 - Give it a virtual-time budget **≥ 60s** — the every-section scan is CPU-heavy.
 - Pure-logic modules (`engine.js`, `combat.js`, `market.js`, `state.js`) can also
   be imported and unit-checked directly in Node for fast feedback. That seam is itself

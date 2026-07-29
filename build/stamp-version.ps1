@@ -33,8 +33,13 @@
       rebuild on a later day with no source change is a byte-for-byte no-op
       and leaves the tree clean. A new date is only chosen for real changes.
 #>
+
+# -Root defaults to this repo; build-data.ps1 passes its own -Root through so a fixture
+# build stamps the fixture tree rather than the checkout. (task 209)
+param([string]$Root = (Split-Path -Parent $PSScriptRoot))
+
 $ErrorActionPreference = 'Stop'
-$root = Split-Path -Parent $PSScriptRoot
+$root = $Root
 $web  = Join-Path $root 'web'
 $verFile = Join-Path $web 'js/version.js'
 $swFile  = Join-Path $web 'sw.js'

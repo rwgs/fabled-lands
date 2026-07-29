@@ -50,8 +50,13 @@ function Build-Fixture([hashtable]$overrides) {
         [System.IO.File]::WriteAllText($path, $text, (New-Object System.Text.UTF8Encoding($false)))
     }
     # A file the fixture does not name at all (extra pregen bios and the like) still needs the
-    # two book dirs and rules dir to exist, which the loop above has created.
-    return Test-SourceTree (Join-Path $tmp 'books') (Join-Path $tmp 'rules') @(1, 2)
+    # two book dirs and rules dir to exist, which the loop above has created. The gate takes
+    # the publish set as number -> source directory, exactly as Get-BookRegistry resolves it
+    # from books.ini (task 209); books.ini's own validation is covered by release-selftest.ps1.
+    return Test-SourceTree (Join-Path $tmp 'rules') @{
+        1 = (Join-Path $tmp 'books/book1')
+        2 = (Join-Path $tmp 'books/book2')
+    }
 }
 
 # ---- 1. The clean fixture must pass ----------------------------------------------------

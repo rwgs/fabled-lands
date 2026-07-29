@@ -8,7 +8,39 @@
 // lives in one dependency-free file so the tests can drive it directly. (task 190)
 importScripts('./js/sw-cache.js');
 
-const VERSION = 'fl-26.07.27.9dec330';
+const VERSION = 'fl-26.07.29.2e0669e';
+
+// The published edition's data, maps and section illustrations. GENERATED from
+// books/books.ini's Published= line by build/build-data.ps1 — do not hand-edit.
+// These three lists used to be six + six + three literals maintained here by hand,
+// so publishing a book was not the content-only change Published= promises: the new
+// book worked online while being absent from a fresh offline install. (task 209)
+// The illustration URLs are pre-encoded to match the runtime request render.js
+// makes ('assets/illus/' + encodeURIComponent(name)) — a precache URL is the cache
+// key, so a differently-escaped one would cache a file nothing asks for.
+// BEGIN GENERATED BOOK INVENTORY
+const BOOK_DATA = [
+  './data/book1.json',
+  './data/book2.json',
+  './data/book3.json',
+  './data/book4.json',
+  './data/book5.json',
+  './data/book6.json',
+];
+const BOOK_MAPS = [
+  './assets/maps/book1.jpg',
+  './assets/maps/book2.jpg',
+  './assets/maps/book3.jpg',
+  './assets/maps/book4.jpg',
+  './assets/maps/book5.jpg',
+  './assets/maps/book6.jpg',
+];
+const BOOK_ILLUS = [
+  './assets/illus/Forest%20of%20the%20Forsaken.JPG',
+  './assets/illus/Map%20of%20Bazalek%20Isle.JPG',
+  './assets/illus/TheBlackDiptych.jpg',
+];
+// END GENERATED BOOK INVENTORY
 
 // REQUIRED = the app shell + all book data. Without every one of these the game
 // can't run offline, so the install must FAIL (and the previous complete cache
@@ -47,32 +79,17 @@ const REQUIRED = [
   './assets/icon-192.png',
   './assets/icon-512.png',
   './data/meta.json',
-  './data/book1.json',
-  './data/book2.json',
-  './data/book3.json',
-  './data/book4.json',
-  './data/book5.json',
-  './data/book6.json',
+  ...BOOK_DATA,
 ];
 
-// OPTIONAL = large, nice-to-have assets (the maps and world image). A miss here
+// OPTIONAL = large, nice-to-have assets (the world image, the regional maps and the
+// section illustrations a few sections show via <image> — tasks 62/64). A miss here
 // is fetched lazily on demand later and must never abort the upgrade or cause a
 // complete cache to be discarded, so these are added best-effort.
 const OPTIONAL = [
   './assets/world-map.jpg',
-  './assets/maps/book1.jpg',
-  './assets/maps/book2.jpg',
-  './assets/maps/book3.jpg',
-  './assets/maps/book4.jpg',
-  './assets/maps/book5.jpg',
-  './assets/maps/book6.jpg',
-  // Section illustrations (task 62/64): a few sections show these via <image>.
-  // render.js requests them as 'assets/illus/' + encodeURIComponent(name), so the
-  // URLs are pre-encoded here to match the runtime request (and thus the cache
-  // key). OPTIONAL so an offline miss can't abort the upgrade.
-  './assets/illus/Forest%20of%20the%20Forsaken.JPG',
-  './assets/illus/Map%20of%20Bazalek%20Isle.JPG',
-  './assets/illus/TheBlackDiptych.jpg',
+  ...BOOK_MAPS,
+  ...BOOK_ILLUS,
 ];
 
 self.addEventListener('install', (event) => {
