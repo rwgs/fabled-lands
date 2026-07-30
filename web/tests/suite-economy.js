@@ -11,7 +11,7 @@ import { renderGoto } from '../js/render-choices.js';
 import { renderMarket, renderRest } from '../js/render-market.js';
 // app.js only auto-boots when a #app element exists (task 65), so importing its exported
 // new-adventure recovery contract here is side-effect free. (task 189)
-import { openNewAdventure, installSheetDrawer, toggleSheet, syncSheetBreakpoint, keepSheetFocus, makeUpdateGate } from '../js/app.js';
+import { openNewAdventure, installSheetDrawer, releaseSheetDrawer, toggleSheet, syncSheetBreakpoint, keepSheetFocus, makeUpdateGate } from '../js/app.js';
 import { Narrator } from '../js/tts.js';
 import { renderSheet, renderStatic, modal } from '../js/ui.js';
 
@@ -1635,7 +1635,91 @@ export async function run(ctx) {
       ok('task192: the Close control is hidden where the aside is permanent',
          /\.sheet-close \{ display: none; \}/.test(cssSrc192));
 
+      // --- task 210: the drawer state must not survive the shell it belongs to ---
+      // `sheet-open` is a body class, and syncSheetDrawer() only clears it on desktop. Leaving
+      // the game from an open mobile drawer (a death/recovery route to the saves or create
+      // screen) therefore used to strand it, so the *next* game shell started with the drawer
+      // "open": header and story inert, toggle announcing expanded, before any tap.
+      toggle192.focus();
+      toggle192.click();
+      ok('task210: precondition — the drawer is open on mobile before leaving the screen',
+         document.body.classList.contains('sheet-open') && document.activeElement === closeBtn()
+         && hdr.hasAttribute('inert'));
+
+      // Emulate the transition to a non-game screen: releaseGameScreen() releases the drawer,
+      // then the screen builder blanks #app (here, drops the shell).
+      releaseSheetDrawer();
+      ok('task210: leaving the game screen clears the drawer class between screens',
+         !document.body.classList.contains('sheet-open'));
+      ok('task210: the outgoing shell is left unisolated, not frozen mid-teardown',
+         !hdr.hasAttribute('inert') && !hdr.hasAttribute('aria-hidden')
+         && !storyPane192.hasAttribute('inert') && !pane192.hasAttribute('inert'));
+      ok('task210: the teardown does not chase focus into the shell it is discarding',
+         document.activeElement !== toggle192);
       shell.remove();
+
+      // The next game shell: fresh markup, same document-level listeners.
+      const shell2 = mk('div', 'screen-game');
+      const hdr2 = mk('header', 'game-header');
+      const toggle2 = mk('button', 'icon-btn sheet-toggle'); toggle2.textContent = '📜';
+      hdr2.appendChild(toggle2);
+      const main2 = mk('div', 'game-main');
+      const storyPane2 = mk('main', 'story-pane');
+      const storyBtn2 = mk('button', 'choice'); storyBtn2.textContent = 'Go south';
+      storyPane2.appendChild(storyBtn2);
+      const pane2 = mk('aside', 'sheet-pane', 'sheet-pane');
+      pane2.setAttribute('aria-label', 'Adventure Sheet');
+      pane2.tabIndex = -1;
+      main2.appendChild(storyPane2); main2.appendChild(pane2);
+      const backdrop2 = mk('div', 'sheet-backdrop', 'sheet-backdrop');
+      shell2.appendChild(hdr2); shell2.appendChild(main2); shell2.appendChild(backdrop2);
+      document.body.appendChild(shell2);
+      const paint2 = () => renderSheet(g192, pane2, { onClose: () => toggleSheet(false) });
+      paint2();
+      toggle2.addEventListener('click', () => toggleSheet());
+      installSheetDrawer(shell2, { isMobile: () => mobile192 });
+
+      const close2 = () => pane2.querySelector('.sheet-close');
+      const tabbable2 = () => [...shell2.querySelectorAll(FOCUSABLE)].filter((n) => !n.closest('[inert]'));
+      ok('task210: the new game shell starts with no drawer state on the body',
+         !document.body.classList.contains('sheet-open'));
+      ok('task210: the new toggle starts collapsed, not announcing an open drawer',
+         toggle2.getAttribute('aria-expanded') === 'false'
+         && toggle2.getAttribute('aria-controls') === 'sheet-pane');
+      ok('task210: the new Sheet starts closed and sealed',
+         pane2.hasAttribute('inert') && pane2.getAttribute('aria-hidden') === 'true'
+         && !tabbable2().includes(close2()));
+      ok('task210: the new header and story are live, not inert from the previous screen',
+         !hdr2.hasAttribute('inert') && !hdr2.hasAttribute('aria-hidden')
+         && !storyPane2.hasAttribute('inert') && !storyPane2.hasAttribute('aria-hidden')
+         && tabbable2().includes(toggle2) && tabbable2().includes(storyBtn2));
+      ok('task210: no detached control from the retired shell is given focus',
+         document.activeElement !== toggle192 && document.contains(document.activeElement),
+         document.activeElement && document.activeElement.className);
+
+      // The new drawer is a working drawer, and an in-drawer rerender still keeps focus.
+      toggle2.focus();
+      toggle2.click();
+      ok('task210: the new shell’s drawer opens normally',
+         document.body.classList.contains('sheet-open') && document.activeElement === close2()
+         && hdr2.hasAttribute('inert') && !pane2.hasAttribute('inert'));
+      keepSheetFocus(pane2, paint2);
+      ok('task210: a rerender inside the new open drawer still preserves it and its focus',
+         document.body.classList.contains('sheet-open') && document.activeElement === close2());
+
+      // Source contracts: the release lifecycle every screen transition runs owns the teardown,
+      // and installing over new markup re-establishes a closed drawer defensively.
+      ok('task210: releaseGameScreen() releases the drawer alongside the Story',
+         /function releaseGameScreen\(\) \{\s*if \(story\) story\.dispose\(\);\s*releaseSheetDrawer\(\);/.test(appSrc192));
+      ok('task210: the teardown clears the class, the opener and the shell isolation',
+         /export function releaseSheetDrawer\(\) \{[^}]*classList\.remove\('sheet-open'\)[^}]*sheetOpener = null;[^}]*sheetRoot = null;/.test(appSrc192));
+      ok('task210: installing a new shell starts from a released drawer',
+         /if \(root !== sheetRoot\) releaseSheetDrawer\(\);/.test(appSrc192));
+      ok('task210: the teardown adds no repeated document-level listeners',
+         !/addEventListener/.test(appSrc192.slice(appSrc192.indexOf('export function releaseSheetDrawer()'),
+                                                 appSrc192.indexOf('export function syncSheetBreakpoint()'))));
+
+      shell2.remove();
       document.body.classList.remove('sheet-open');
     }
 

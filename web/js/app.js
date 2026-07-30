@@ -206,6 +206,7 @@ function creditsHtml() {
 // while the title screen or a different game is on screen. Idempotent; safe before the first game.
 function releaseGameScreen() {
   if (story) story.dispose();
+  releaseSheetDrawer(); // the mobile drawer's body class and isolation must go with the shell (task 210)
 }
 
 // ---- Title screen ----------------------------------------------------------
@@ -794,6 +795,24 @@ export function toggleSheet(force) {
   if (open) focusSheetDrawer(); else restoreSheetOpener();
 }
 
+// Leaving the game shell for good (task 210). `sheet-open` lives on <body>, so it outlives the
+// markup it described: syncSheetDrawer() only clears it at the desktop breakpoint, so a mobile
+// transition out of an open drawer (the death/recovery routes reach showSaves()/showCreate())
+// would strand the class. The next installSheetDrawer() would then announce aria-expanded="true"
+// and make the incoming header and story inert before the player has opened anything. Drop the
+// class, unisolate the outgoing shell while it is still reachable, and retire the root and
+// opener. Deliberately no focus restoration: the control sheetOpener names is being discarded
+// with the screen, and focusing a detached node only dumps the caret on <body>. Idempotent, and
+// it touches no listener — the document-level Escape/breakpoint hooks stay single-install.
+export function releaseSheetDrawer() {
+  document.body.classList.remove('sheet-open');
+  sheetOpener = null;
+  setIsolated(sheetQ('.game-header'), false);
+  setIsolated(sheetQ('.story-pane'), false);
+  setIsolated(sheetQ('#sheet-pane'), false);
+  sheetRoot = null;
+}
+
 // Crossing the breakpoint turns the drawer into the permanent column and back, so the
 // mobile-only state must be dropped rather than left stranding inert on a visible aside.
 export function syncSheetBreakpoint() {
@@ -806,6 +825,10 @@ export function syncSheetBreakpoint() {
 // it to a consistent state. Exported (with the injectable breakpoint probe) so the suite can
 // drive the whole lifecycle against the same markup buildGameScreen produces. (task 192)
 export function installSheetDrawer(root, opts = {}) {
+  // A genuinely new shell starts closed, whether or not the outgoing one was released: the
+  // toggle, pane and backdrop below are all fresh markup, so any surviving `sheet-open` would
+  // describe a drawer nobody opened. Re-installing over the identical root is left alone. (task 210)
+  if (root !== sheetRoot) releaseSheetDrawer();
   sheetRoot = root;
   if (typeof opts.isMobile === 'function') sheetIsMobile = opts.isMobile;
   const backdrop = sheetQ('.sheet-backdrop');

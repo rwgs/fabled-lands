@@ -2,10 +2,10 @@
 
 Backlog of recommended improvements. Open tasks are filed under priority buckets
 (**HIGH** / **MEDIUM** / **LOW**) — work the first open (`- [ ]`) item top-down;
-each task's detail section carries the same stable ID. **Tasks 209–210 are open.**
-The twelfth full review re-checked every completed task through 208 and filed
-these two follow-ups; 207 remains withdrawn as a misdiagnosis (see the Review
-log).
+each task's detail section carries the same stable ID. **No tasks are open.**
+The twelfth full review re-checked every completed task through 208 and filed two
+follow-ups, 209 and 210, both now complete; 207 remains withdrawn as a
+misdiagnosis (see the Review log).
 Completed detail sections are archived in
 [`TASKS-archive.md`](TASKS-archive.md); the Review log at the end records each
 audit pass.
@@ -49,7 +49,7 @@ audit pass.
 - [~] 207. A `<while>` pass's provisional vars are position-sensitive within the body
   — **withdrawn, not a defect** (see the Review log)
 - [x] 208. The documented headless-test command captures no DOM under PowerShell
-- [ ] 210. Game teardown leaves the mobile Sheet drawer open across screens
+- [x] 210. Game teardown leaves the mobile Sheet drawer open across screens
 
 **Done**
 
@@ -1750,7 +1750,8 @@ book outputs behind, and invalid/missing registry entries are skipped or duplica
 than rejected. A future book can consequently work online while failing fresh offline play
 and escaping the every-section scan. Filed **210** (LOW): task 192's global mobile-drawer
 class survives `releaseGameScreen()`, so a modal/recovery transition out of an open Sheet can
-make the next game start open with its story and header inert.
+make the next game start open with its story and header inert. Both are now closed, so **every
+filed task through 210 is complete and the backlog is empty**.
 
 Organization verdict is unchanged: keep the dependency-free ES modules and existing
 rule/view boundary. Task 209 belongs at the build/release manifest boundary and task 210 in
