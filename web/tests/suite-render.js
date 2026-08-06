@@ -21,6 +21,16 @@ export async function run(ctx) {
     // bonus text (weapon/armour/tool vocabulary; zero bonus omitted).
     ok('task170: titleCase capitalises each word', titleCase('fur cloak') === 'Fur Cloak');
     ok('task170: titleCase tolerates null/empty', titleCase(null) === '' && titleCase('') === '');
+    // task 212: a word boundary sits after an apostrophe, so the possessive item names the
+    // corpus has carried since book 1 used to render "Ghoul'S Head" — straight and curly alike.
+    ok('task212: titleCase leaves the letter after an apostrophe alone',
+       titleCase("ghoul's head") === "Ghoul's Head"
+       && titleCase("pirate captain's head") === "Pirate Captain's Head"
+       && titleCase('merchant’s cloak') === 'Merchant’s Cloak');
+    ok('task212: titleCase still capitalises ordinary and hyphenated words',
+       titleCase('silver holy symbol') === 'Silver Holy Symbol'
+       && titleCase('fur cloak') === 'Fur Cloak'
+       && titleCase('half-elf charm') === 'Half-Elf Charm');
     ok('task170: escapeHtml neutralises HTML metacharacters', escapeHtml('<b>a&"c"</b>') === '&lt;b&gt;a&amp;&quot;c&quot;&lt;/b&gt;');
     ok('task170: escapeHtml stringifies null/numbers safely', escapeHtml(null) === '' && escapeHtml(0) === '0' && escapeHtml(42) === '42');
     ok('task170: bonusSuffix — weapon shows Combat', bonusSuffix('weapon', 2) === ' (Combat +2)');

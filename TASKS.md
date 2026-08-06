@@ -3,7 +3,7 @@
 Backlog of recommended improvements. Open tasks are filed under priority buckets
 (**HIGH** / **MEDIUM** / **LOW**) — work the first open (`- [ ]`) item top-down;
 each task's detail section carries the same stable ID. **There are currently no
-open tasks:** every filed task through 211 is complete (listed under **Done**
+open tasks:** every filed task through 212 is complete (listed under **Done**
 below), apart from 207, withdrawn as a misdiagnosis (see the Review log).
 Completed detail sections are archived in
 [`TASKS-archive.md`](TASKS-archive.md); the Review log at the end of this file
@@ -239,10 +239,32 @@ this order.*
 - [x] 209. `Published=` does not produce a complete, clean offline edition
 - [x] 210. Game teardown leaves the mobile Sheet drawer open across screens
 - [x] 211. Re-archive completed task details 166–210 and clear them out of the priority buckets
+- [x] 212. `titleCase` capitalises the letter after an apostrophe ("Ghoul'S Head")
 
 ---
 
-> **Completed task details (tasks 1–211) are archived** in [`TASKS-archive.md`](TASKS-archive.md) (tasks 141, 165, 211) to keep this file focused on open work. The checklist above still carries every task's stable ID and status; a done task's detail lives in the archive under the same `## <N>.` heading. Open-task details (none at present) and the Review log follow below.
+> **Completed task details (tasks 1–211) are archived** in [`TASKS-archive.md`](TASKS-archive.md) (tasks 141, 165, 211) to keep this file focused on open work. The checklist above still carries every task's stable ID and status; a done task's detail lives in the archive under the same `## <N>.` heading. Task 212's detail is still below, awaiting the next re-archive pass; open-task details (none at present) and the Review log follow it.
+
+---
+
+## 212. `titleCase` capitalises the letter after an apostrophe ("Ghoul'S Head")
+
+**Priority: LOW — cosmetic, but it is in the shared display helper, so it affects every book.**
+
+`titleCase` in `web/js/render-util.js` was `s.replace(/\b\w/g, (c) => c.toUpperCase())`. A word
+boundary sits after an apostrophe, so a possessive item name rendered with a stray capital:
+book1/517's `<item name="ghoul's head"/>` showed as "Ghoul'S Head", as did `pirate captain's head`
+and `boar's tusk`. It surfaced anywhere `itemLabel`/`bonusSuffix` runs — award buttons, the
+Adventure Sheet, market rows.
+
+Fixed by matching the word-initial letter with its preceding character instead of a bare word
+boundary — `/(^|[^\w'’])(\w)/g`, upper-casing only the captured letter — so a `\w` directly after
+an apostrophe, straight or curly, is skipped and everything else is unchanged. `suite-render`
+pins both halves: "ghoul's head" → "Ghoul's Head" and "merchant’s cloak" → "Merchant’s Cloak",
+while "silver holy symbol", "fur cloak" and hyphenated "half-elf charm" title-case as before.
+
+Found while converting book 7, whose `merchant's cloak` renders the same way, but it is not a
+book 7 defect: the corpus has carried possessive item names since book 1.
 
 ---
 

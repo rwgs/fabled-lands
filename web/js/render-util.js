@@ -9,7 +9,9 @@ export const MARKET_TITLES = {
   weapon: 'Weapons', magic: 'Magical equipment', other: 'Goods for sale',
 };
 
-export function titleCase(s) { return (s || '').replace(/\b\w/g, (c) => c.toUpperCase()); }
+// Title-case each word, but NOT the letter after an apostrophe: a word boundary sits there,
+// so a plain /\b\w/ turns the corpus's possessive item names into "Ghoul'S Head". (task 212)
+export function titleCase(s) { return (s || '').replace(/(^|[^\w'’])(\w)/g, (m, pre, c) => pre + c.toUpperCase()); }
 
 export function diceWord(n) { return n === 1 ? '1 die' : `${n} dice`; }
 
