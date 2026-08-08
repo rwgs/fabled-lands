@@ -790,12 +790,12 @@ export class Story {
     // applyBuyGate then disables the tagged navs. Reset per render.
     this.buyGate = computeBuyGate(el);
     this.pendingBuy = false;
-    // Visit-box redirect gating (task 214): a matched <if ticks=…> redirect at the section
-    // head is JaFL's forced <goto> — it blocked the rest of the section, which is what made
-    // the once-only reward below it one-time. computeRedirectGate decides whether this visit
-    // takes that redirect; the walk then holds everything after it (redirectHeld, set as
-    // appendChildren passes the <if>).
-    this.redirectGate = computeRedirectGate(el, this.state);
+    // Visit-box redirect gating (tasks 214 + 217): a matched <if ticks=…> redirect is JaFL's
+    // forced <goto> — it blocked the rest of the section, which is what made the once-only
+    // reward below it one-time and left only one of the two printed exits live.
+    // computeRedirectGate names the eligible <if>s; the walk holds everything after whichever
+    // one it renders ACTIVE (redirectHeld, set as appendChildren passes it).
+    this.redirectGate = computeRedirectGate(el);
     this.redirectHeld = false;
     // The walk's box-tick position (task 216): the count an `<if ticks=>` guard reached HERE
     // must read. Starts at the entry snapshot and advances as the walk passes each <tick>
@@ -1032,9 +1032,9 @@ export class Story {
           active = evaluateCondition(node, this.state, { ticksNow: this.walkTicks }); chainDone = active;
         }
         this.renderConditionalBranch(container, node, path, active);
-        // The section's head redirect, and it matched: its <goto> has just rendered live,
-        // so everything from here on is held (task 214).
-        if (active && this.redirectGate && node === this.redirectGate.ifNode) this.redirectHeld = true;
+        // An eligible visit-box redirect, and it matched: its <goto> has just rendered live,
+        // so everything from here on is held (tasks 214 + 217).
+        if (active && this.redirectGate && this.redirectGate.has(node)) this.redirectHeld = true;
         return;
       }
       chainActive = false; chainDone = false; chainDeferred = false;

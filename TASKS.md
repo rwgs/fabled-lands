@@ -3,9 +3,9 @@
 Backlog of recommended improvements. Open tasks are filed under priority buckets
 (**HIGH** / **MEDIUM** / **LOW**) — work the first open (`- [ ]`) item top-down;
 each task's detail section carries the same stable ID. Every filed task through
-216 is complete (listed under **Done** below), apart from 207, withdrawn as a
-misdiagnosis (see the Review log); **217 is open**, a renderer defect that
-book 1 carries today.
+217 is complete (listed under **Done** below), apart from 207, withdrawn as a
+misdiagnosis (see the Review log), so **the backlog is empty** — file new work
+under the priority buckets and record the pass in the Review log.
 Completed detail sections are archived in
 [`TASKS-archive.md`](TASKS-archive.md); the Review log at the end of this file
 records each audit pass and is where new work is filed.
@@ -23,7 +23,7 @@ records each audit pass and is where new work is filed.
 **LOW**
 
 - [x] 215. A self-closing effect tag renders no words, so published sentences print with a hole
-- [ ] 217. A visit-box redirect below the section head still leaves both exits live (book1/91)
+- [x] 217. A visit-box redirect below the section head still leaves both exits live (book1/91)
 
 **Done**
 
@@ -248,11 +248,11 @@ this order.*
 - [x] 214. A visit-box redirect does not hold the section body, so a one-time reward is re-takeable
 - [x] 215. A self-closing effect tag renders no words, so published sentences print with a hole
 - [x] 216. `<if ticks="N">` after an in-section `<tick>` reads the pre-tick count, so "now ticked" branches never fire
-- [ ] 217. A visit-box redirect below the section head still leaves both exits live (book1/91)
+- [x] 217. A visit-box redirect below the section head still leaves both exits live (book1/91)
 
 ---
 
-> **Completed task details (tasks 1–211) are archived** in [`TASKS-archive.md`](TASKS-archive.md) (tasks 141, 165, 211) to keep this file focused on open work. The checklist above still carries every task's stable ID and status; a done task's detail lives in the archive under the same `## <N>.` heading. The details for tasks 212–216 are still below, awaiting the next re-archive pass; the open task 217 and the Review log follow them.
+> **Completed task details (tasks 1–211) are archived** in [`TASKS-archive.md`](TASKS-archive.md) (tasks 141, 165, 211) to keep this file focused on open work. The checklist above still carries every task's stable ID and status; a done task's detail lives in the archive under the same `## <N>.` heading. The details for tasks 212–217 are still below, awaiting the next re-archive pass; the Review log follows them.
 
 ---
 
@@ -632,6 +632,41 @@ against task 216 once that lands, since book1/91's guard sits below a hidden tic
 trailing sentence in an `<else>` in the source, which is the form book2/443 and book2/160 already use
 for exactly this pair of exits and is a one-line, section-local change. Regression coverage belongs
 in `suite-render` beside the task 214 cases.
+
+Fixed by **widening the gate**, for the reason task 214 chose the engine over the source: in JaFL the
+matched `<if>`'s forced `<goto>` blocks the rest of the section wherever it sits, so book1/91 is
+correctly written as it stands and an `<else>` wrap would work around a gap the original engine did
+not have. Editing one file rather than 89 does not change which side the defect is on.
+
+The scan that scoped it found the section count is **four, not one**. Classifying every
+`<if|elseif ticks=>` in the corpus that carries a mandatory redirect: **146 head** (already gated),
+**6 mid-section** in 5 sections, **5 nested inside another condition**, 0 inside a player-optional
+wrapper. The mid-section six are book1/91, **book2/465** (the SCOUTING training), **book3/57** (the
+island rest) and **book3/84** (Lose the codeword Cosy) — all four printing the same "…and →A, unless
+the box is already ticked, in which case →B" pair — plus book4/467's `<if ticks="1">`/`<elseif
+ticks="2">`, where holding the rest of a chain whose other branches are already inactive is a no-op.
+
+So the head window is gone, replaced by the exclusion it was really standing in for: a redirect is
+eligible when it is reached **unconditionally** — no `<if>/<elseif>/<else>/<success>/<failure>/
+<outcome>` and no `<choice>/<choices>/<group>` above it. That keeps book1/10 out (its `ticks="4"`
+redirect sits under two codeword guards) and book2/542's inner chain out (its own outer `<if>` is
+already the section's head gate), which is every one of the five nested cases.
+
+`computeRedirectGate(sectionEl)` consequently stopped taking `state`: eligibility is a **structural**
+property, and whether one matches this visit is the walk's call, made by the same if/elseif chain
+evaluation it runs anyway. That also removes a disagreement task 216 would otherwise have introduced
+— the planner read `ticks=` against the entry snapshot while the walk reads it at its own position,
+which for book4/467 named a branch the walk does not activate. The planner now returns the Set of
+eligible nodes and the walk holds after whichever it renders active.
+
+book1/91's gamble is untouched: its `<moneycache>` bet, the roll `<group>` and the `lock`/`unlock`
+ticks (task 38) all sit **above** the redirect, so only the closing sentence is held.
+
+`suite-render` pins the planner's three structural rules (eligible below a live effect, not eligible
+nested in a condition, not eligible for an optional/`<choice>` goto) and all four sections end to end
+— empty-box visit leaves only the ticking exit live and still prints the words above the redirect;
+ticked visit leaves only the other exit — plus §1.91's bet widget and roll surviving on the empty-box
+visit. Aggregate: `RESULT ALL PASS pass=2200 fail=0`.
 
 ---
 

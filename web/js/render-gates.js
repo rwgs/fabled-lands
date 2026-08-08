@@ -6,7 +6,7 @@
 // the actual buttons (the tag*/apply* methods stay in the view); these functions only
 // DECIDE. No DOM construction, no browser UI globals.
 
-import { boolAttr, evaluateCondition } from './engine.js';
+import { boolAttr } from './engine.js';
 
 // True when a die roll in this section is gated behind the payment keyed `k`: a
 // <random|rankcheck|difficulty flag="k"> paired with a [price="k"] cost — the "pay to
@@ -41,10 +41,9 @@ const BUY_GROUP_WRAP = new Set(['group']);
 // A navigation inside one of these is the player's to pick, not a step the section
 // executes: a <choice> row, and a <group>'s bundled "click to do this" action.
 const REDIRECT_OPTIONAL_WRAP = new Set(['choice', 'choices', 'group']);
-// What may precede a section's head redirect and still leave it the FIRST thing the
-// section executes: the printed words and their inline styling. Anything else — an
-// effect, a roll, another condition — closes the head window (see computeRedirectGate).
-const HEAD_PROSE_TAGS = new Set(['p', 'b', 'i', 'u', 'caps', 'text', 'desc', 'br']);
+// A redirect nested inside another condition is not the section's own "leave now" step but
+// one arm of a wider decision, so it never gates the rest of the section (computeRedirectGate).
+const REDIRECT_CONDITIONAL_WRAP = new Set(['if', 'elseif', 'else', 'success', 'failure', 'outcome', 'outcomes']);
 
 // Does an ancestor of `node` carry one of these (lowercased) tag names? Walks up to the
 // section root. A manual sibling of DOM `closest`, kept explicit for the parsed section tree.
@@ -260,8 +259,8 @@ function isMandatoryRedirect(node) {
   return !hasAncestorTag(node, REDIRECT_OPTIONAL_WRAP);
 }
 
-// The visit-box redirect gate (task 214). The corpus's once-only idiom writes the redirect
-// and the thing it protects as SIBLINGS at the head of a boxes= section:
+// The visit-box redirect gate (tasks 214 + 217). The corpus's once-only idiom writes the
+// redirect and the thing it protects as SIBLINGS of a boxes= section:
 //
 //   <if ticks="1">If there is a tick in the box, <goto section="251"/> immediately.</if>
 //   If not, <tick/> and read on.
@@ -270,31 +269,30 @@ function isMandatoryRedirect(node) {
 // In JaFL that body never executed on the ticked visit: the matched <if> runs its <goto>,
 // which blocks the rest of the section (see isMandatoryRedirect). This port renders the
 // whole section, so a revisit re-offered book1/16's eight treasures and book1/160's MAGIC
-// roll alongside the redirect. Once the redirect matches, everything AFTER the <if> is
+// roll alongside the redirect. Once such an <if> renders ACTIVE, everything after it is
 // held — the same treatment the untaken branch it really is would get, and exactly what
 // the sections already written with an explicit <else> (book5/592) produce today.
 //
-// Scoped to the section HEAD: only prose and hidden book-keeping (which JaFL runs before it
-// reaches the goto) may precede the <if>. That keeps this the "leave now" redirect and
-// never a mid-section option — book1/10's ticks="4" redirect sits under two codeword guards
-// after a live <tick>, and holding its body would strip the StillInYellowport book-keeping
-// that stops Yellowport re-redirecting to §273 forever.
-// Returns { ifNode } — everything after it renders held — or null.
-export function computeRedirectGate(sectionEl, state) {
-  if (!sectionEl || !state) return null;
-  let hiddenRoot = null; // the hidden subtree currently being skipped over
-  for (const el of sectionEl.querySelectorAll('*')) {
-    if (hiddenRoot && hiddenRoot.contains(el)) continue;
-    hiddenRoot = null;
-    const tag = el.tagName.toLowerCase();
-    if (HEAD_PROSE_TAGS.has(tag)) continue;
-    if (boolAttr(el.getAttribute('hidden'))) { hiddenRoot = el; continue; }
-    // The first executable element decides: a visit-box <if> is the candidate, anything
-    // else closes the head window.
-    if (tag !== 'if' || el.getAttribute('ticks') == null) return null;
-    if (!evaluateCondition(el, state)) return null; // the read-on branch — nothing to hold
-    return Array.from(el.querySelectorAll('goto, return')).some(isMandatoryRedirect)
-      ? { ifNode: el } : null;
+// This planner decides only which nodes are ELIGIBLE — a purely structural property of the
+// section. Whether one matches on this visit is the walk's call, from the same if/elseif
+// chain evaluation it runs anyway, so the two can never disagree about the box count now
+// that a `ticks=` guard reads its own walk position (task 216).
+//
+// Eligible = a visit-box <if>/<elseif> carrying a MANDATORY redirect, reached
+// unconditionally: no conditional and no player-optional wrapper above it. That exclusion
+// is what keeps book1/10 out — its ticks="4" redirect sits under two codeword guards, and
+// holding its body would strip the StillInYellowport book-keeping that stops Yellowport
+// re-redirecting to §273 forever — while admitting the four sections whose redirect sits in
+// the CLOSING paragraph rather than the head (book1/91's Gambler's Den, book2/465, book3/57,
+// book3/84), where the trailing "unless the box is already ticked, →N" used to stay live
+// beside it and let the player leave without ticking (task 217).
+// Returns a Set of eligible nodes, or null when the section has none.
+export function computeRedirectGate(sectionEl) {
+  if (!sectionEl) return null;
+  const eligible = new Set();
+  for (const el of sectionEl.querySelectorAll('if[ticks], elseif[ticks]')) {
+    if (hasAncestorTag(el, REDIRECT_CONDITIONAL_WRAP) || hasAncestorTag(el, REDIRECT_OPTIONAL_WRAP)) continue;
+    if (Array.from(el.querySelectorAll('goto, return')).some(isMandatoryRedirect)) eligible.add(el);
   }
-  return null;
+  return eligible.size ? eligible : null;
 }

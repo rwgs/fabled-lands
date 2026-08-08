@@ -989,28 +989,25 @@ export async function run(ctx) {
     // the body never ran on a ticked visit; this port rendered it all, making the haul
     // farmable. computeRedirectGate decides; the walk holds everything after the <if>.
     {
-      // (planner) the head redirect, matched and unmatched.
+      // (planner) eligibility is STRUCTURAL — which <if ticks> could halt the section. Whether
+      // one matches on this visit is the walk's call (task 217), so the planner takes no state.
       const redirSec = () => parse('<section name="t214" boxes="1"><p><if ticks="1">If there is a tick in the box, <goto section="251"/> immediately.</if> If not, <tick/> and read on.</p><p>A <item name="ruby"/>.</p></section>');
-      const gTicked = GameState.create({ name:'R214', gender:'m', profession:'Warrior', book:1, adv });
-      gTicked.ephemeral = true; gTicked.setEntryTicks(1);
-      const gFresh = GameState.create({ name:'F214', gender:'m', profession:'Warrior', book:1, adv });
-      gFresh.ephemeral = true; gFresh.setEntryTicks(0);
-      ok('task214: a matched head <if ticks> redirect makes a gate',
-         (() => { const s = redirSec(); const gt = gates.computeRedirectGate(s, gTicked); return !!gt && gt.ifNode === s.querySelector('if'); })());
-      ok('task214: the same section on the read-on visit has no gate',
-         gates.computeRedirectGate(redirSec(), gFresh) === null);
-      // (planner) the head window. An effect before the <if> means it is not the section's
-      // first step — book1/10's ticks="4" hub redirect — but hidden book-keeping, which JaFL
-      // runs before it reaches the goto, does not close it (book5/697).
-      ok('task214: a redirect below a live effect is NOT a head redirect',
-         gates.computeRedirectGate(parse('<section boxes="1"><p><tick/> <if ticks="1">go <goto section="9"/></if></p><p>body</p></section>'), gTicked) === null);
-      ok('task214: hidden book-keeping before the redirect keeps the head window open',
-         !!gates.computeRedirectGate(parse('<section boxes="1"><p><lose curse="X" hidden="t"/><if ticks="1">go <goto section="9"/></if></p><p>body</p></section>'), gTicked));
+      ok('task214: a visit-box <if ticks> redirect is eligible',
+         (() => { const s = redirSec(); const gt = gates.computeRedirectGate(s); return !!gt && gt.size === 1 && gt.has(s.querySelector('if')); })());
+      // (planner) a redirect BELOW the section head is eligible too — book1/91's closing
+      // paragraph — but one nested inside another condition is one arm of a wider decision,
+      // never the section's own "leave now" step (book1/10's ticks="4" hub redirect).
+      ok('task217: a redirect below a live effect is still eligible',
+         !!gates.computeRedirectGate(parse('<section boxes="1"><p><tick/> <if ticks="1">go <goto section="9"/></if></p><p>body</p></section>')));
+      ok('task217: a redirect nested inside another condition is NOT eligible',
+         gates.computeRedirectGate(parse('<section boxes="1"><p><if codeword="X"><if ticks="1">go <goto section="9"/></if></if></p><p>body</p></section>')) === null);
+      ok('task214: hidden book-keeping before the redirect leaves it eligible',
+         !!gates.computeRedirectGate(parse('<section boxes="1"><p><lose curse="X" hidden="t"/><if ticks="1">go <goto section="9"/></if></p><p>body</p></section>')));
       // (planner) only a goto the player MUST follow halts a section.
       ok('task214: an optional force="f" goto is not a redirect',
-         gates.computeRedirectGate(parse('<section boxes="1"><p><if ticks="1">you may <goto section="9" force="f"/></if></p><p>body</p></section>'), gTicked) === null);
+         gates.computeRedirectGate(parse('<section boxes="1"><p><if ticks="1">you may <goto section="9" force="f"/></if></p><p>body</p></section>')) === null);
       ok('task214: a goto inside a <choice> is not a redirect',
-         gates.computeRedirectGate(parse('<section boxes="1"><p><if ticks="1"><choices><choice section="9">Leave</choice></choices></if></p><p>body</p></section>'), gTicked) === null);
+         gates.computeRedirectGate(parse('<section boxes="1"><p><if ticks="1"><choices><choice section="9">Leave</choice></choices></if></p><p>body</p></section>')) === null);
 
       // (§1.16 end to end) the sea dragon's hoard: "choose up to three of the following
       // treasures", eight awards, behind a one-visit box.
@@ -1258,5 +1255,46 @@ export async function run(ctx) {
       ok('task215: §1.186 hands over 75 Shards in the printed sentence', /hands you over 75 Shards/.test(s186), s186.slice(0, 200));
       const s26 = await shown(4, '26');
       ok('task215: §4.26 prints its lone codeword paragraph', /Tick the codeword Dread\./.test(s26), s26.slice(0, 200));
+    }
+
+    // --- task 217: a visit-box redirect below the section head halts the section too ---
+    // Four sections put the pair of exits in their CLOSING paragraph: "…<if ticks='0'><tick/>
+    // and →A,</if> unless the box is already ticked, in which case →B." Task 214's head-only
+    // scope left both live on the empty-box visit, so the player could leave by →B without
+    // ticking and come back. The book offers one exit or the other, never both.
+    {
+      const liveGotos = (root) => Array.from(root.querySelectorAll('.goto'))
+        .filter((b) => !b.disabled).map((b) => b.textContent.trim());
+      const cases = [
+        { book: 1, section: '91', first: '109', later: '100', keep: /Gambler/i },
+        { book: 2, section: '465', first: '489', later: '514', keep: /SCOUTING/ },
+        { book: 3, section: '57', first: '133', later: '171', keep: /palm trees/i },
+        { book: 3, section: '84', first: '104', later: '433', keep: /Cosy/ },
+      ];
+      for (const tc of cases) {
+        const tag = `§${tc.book}.${tc.section}`;
+        const el = await data.getSection(tc.book, tc.section);
+        const g = GameState.create({ name: `T217${tc.section}`, gender: 'm', profession: 'Warrior', book: tc.book, adv });
+        const c = document.createElement('div');
+        const st = new Story(c, g, { navigate() {}, onDeath() {}, notify() {} });
+        g.data.book = tc.book; g.data.section = tc.section;
+        st.begin(el, tc.book, tc.section);
+        ok(`task217: ${tag} empty-box visit leaves only the ticking exit live`,
+           liveGotos(c).join(',') === tc.first, liveGotos(c).join(','));
+        ok(`task217: ${tag} still prints the words above the redirect`, tc.keep.test(c.textContent), c.textContent.slice(0, 160));
+        st.begin(el, tc.book, tc.section);
+        ok(`task217: ${tag} ticked visit leaves only the other exit live`,
+           liveGotos(c).join(',') === tc.later, liveGotos(c).join(','));
+      }
+      // §1.91's bet widget sits ABOVE the redirect, so the gamble is untouched on both visits.
+      const g91 = GameState.create({ name: 'B217', gender: 'm', profession: 'Warrior', book: 1, adv });
+      const c91 = document.createElement('div');
+      const st91 = new Story(c91, g91, { navigate() {}, onDeath() {}, notify() {} });
+      g91.data.book = 1; g91.data.section = '91';
+      g91.data.shards = 50;
+      st91.begin(await data.getSection(1, '91'), 1, '91');
+      ok('task217: §1.91 still offers the bet and its roll on the empty-box visit',
+         !!c91.querySelector('.money-cache') && !!c91.querySelector('.btn-roll:not([disabled])'),
+         `cache=${!!c91.querySelector('.money-cache')} roll=${!!c91.querySelector('.btn-roll:not([disabled])')}`);
     }
 }
