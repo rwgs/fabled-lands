@@ -3,9 +3,9 @@
 Backlog of recommended improvements. Open tasks are filed under priority buckets
 (**HIGH** / **MEDIUM** / **LOW**) — work the first open (`- [ ]`) item top-down;
 each task's detail section carries the same stable ID. Every filed task through
-214 is complete (listed under **Done** below), apart from 207, withdrawn as a
-misdiagnosis (see the Review log); **215, 216 and 217 are open**, all three
-renderer defects that books 1–6 carry today.
+216 is complete (listed under **Done** below), apart from 207, withdrawn as a
+misdiagnosis (see the Review log); **215 and 217 are open**, both renderer
+defects that books 1–6 carry today.
 Completed detail sections are archived in
 [`TASKS-archive.md`](TASKS-archive.md); the Review log at the end of this file
 records each audit pass and is where new work is filed.
@@ -18,7 +18,7 @@ records each audit pass and is where new work is filed.
 
 - [x] 213. The post-fight gate does not hold an item award, so loot is takeable before the fight
 - [x] 214. A visit-box redirect does not hold the section body, so a one-time reward is re-takeable
-- [ ] 216. `<if ticks="N">` after an in-section `<tick>` reads the pre-tick count, so "now ticked" branches never fire
+- [x] 216. `<if ticks="N">` after an in-section `<tick>` reads the pre-tick count, so "now ticked" branches never fire
 
 **LOW**
 
@@ -247,12 +247,12 @@ this order.*
 - [x] 213. The post-fight gate does not hold an item award, so loot is takeable before the fight
 - [x] 214. A visit-box redirect does not hold the section body, so a one-time reward is re-takeable
 - [ ] 215. A self-closing effect tag renders no words, so published sentences print with a hole
-- [ ] 216. `<if ticks="N">` after an in-section `<tick>` reads the pre-tick count, so "now ticked" branches never fire
+- [x] 216. `<if ticks="N">` after an in-section `<tick>` reads the pre-tick count, so "now ticked" branches never fire
 - [ ] 217. A visit-box redirect below the section head still leaves both exits live (book1/91)
 
 ---
 
-> **Completed task details (tasks 1–211) are archived** in [`TASKS-archive.md`](TASKS-archive.md) (tasks 141, 165, 211) to keep this file focused on open work. The checklist above still carries every task's stable ID and status; a done task's detail lives in the archive under the same `## <N>.` heading. The details for tasks 212–214 are still below, awaiting the next re-archive pass; the open tasks 215–217 and the Review log follow them.
+> **Completed task details (tasks 1–211) are archived** in [`TASKS-archive.md`](TASKS-archive.md) (tasks 141, 165, 211) to keep this file focused on open work. The checklist above still carries every task's stable ID and status; a done task's detail lives in the archive under the same `## <N>.` heading. The details for tasks 212–214 and 216 are still below, awaiting the next re-archive pass; the open tasks 215 and 217 and the Review log follow them.
 
 ---
 
@@ -525,6 +525,41 @@ that `evaluateCondition` does not have today, so the count belongs on the per-vi
 per-pass vars. Regression coverage belongs in `suite-render` (book4/467's three routes, book2/542's
 inner/outer split) and `suite-inventory` (book1/19's Anvil on the third visit), plus a pin that
 book1/496 still behaves exactly as task 105 requires.
+
+Fixed as filed: the guard now reads its **own position**, not a frozen snapshot. A corpus scan for
+an `<if|elseif ticks=>` sitting below a bare box `<tick>` found a **fifth** affected section beyond
+the four above — **book6/164**, whose "if you have just ticked the *N*th box" choices are gated on
+codewords that post-tick guards set. Off by one, the first visit set **none** of them, so the tengu
+king's section offered no live choice at all and the player could only Undo out of it.
+
+`evaluateCondition(el, state, opts)` takes an optional `opts.ticksNow`; without it the `ticks=`
+disjunct still reads `state.entryTickCount()`, so the headless effect-body walk, `computeRedirectGate`
+and direct use are unchanged. The renderer supplies it: `render()` seeds `story.walkTicks` from the
+entry snapshot beside `redirectHeld`, `appendChildren` calls the new `noteBoxTick(path, before)` as
+the walk passes each `<tick>`, and the three view-side `evaluateCondition` calls (the if/elseif chain
+and the per-node `renderIfChain`) pass the running value. `noteBoxTick` compares this section's box
+count either side of the node: when it moved, this visit's tick landed there, so the resulting count
+is memoised on the per-visit record (`ctx.boxTicks`, `visit-state.js`) under the node's positional
+path and replayed by every later draw — the tick itself cannot re-fire, its `fx@` memo being in
+`ctx.applied`. The memo is serialised with the rest of the ctx and coerced back through `frameNum`
+(non-negative integer, string key) on load, since it feeds a routing comparison straight from an
+untrusted save. A tick inside an untaken branch, or below a taken task-214 redirect, never applies
+and so never advances the position.
+
+That keeps task 105 exactly: a guard **above** a tick reads the entry count on the first draw and on
+every rerender, because the walk has not passed the tick when it is evaluated. Scope limit: only
+ticks the section walk itself passes advance the position — one bundled inside a roll `<group>`'s
+deferred effects would not — which no section in the corpus needs today.
+
+`suite-render` pins **§4.467** (four visits → 516 / 397 / 284 / 284, all four of which used to be
+284), **§2.542** (490 / 565 / 613, then the fourth visit's §390 — the outer `not ticks="3"` entry
+reading and the inner post-tick one coexisting in one section, all three of which used to be 613),
+**§6.164** (the first visit offers exactly the "just ticked the first box" choice, where it used to
+offer none), **§1.496** end to end as the task 105 idiom (first visit reads the box empty and keeps
+reading it empty across a mid-visit rerender after taking the spear; the second takes the §317
+redirect), and a save/reload of §4.467's second visit that still routes to §397. `suite-inventory`
+pins **§1.19**'s Anvil arriving on the third visit and not before. Aggregate: `RESULT ALL PASS
+pass=2167 fail=0`.
 
 ---
 

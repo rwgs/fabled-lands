@@ -1,7 +1,7 @@
 // FL test suite — render & interaction: rolls, choices, fights, pays, blessings, choose-one
 // Extracted verbatim from web/_test.html run() lines 514-913 (task 120).
 import * as data from '../js/data.js';
-import { GameState, makeItem, readSlotData, deleteSlot } from '../js/state.js';
+import { GameState, makeItem, readSlotData, deleteSlot, sanitizeData } from '../js/state.js';
 import * as eng from '../js/engine.js';
 import * as gates from '../js/render-gates.js';
 import { fightRound } from '../js/combat.js';
@@ -1100,5 +1100,96 @@ export async function run(ctx) {
          /waterfall/i.test(c592.textContent)
          && Array.from(c592.querySelectorAll('.goto')).filter((b) => !b.disabled).map((b) => b.textContent.trim()).join(',') === '307',
          Array.from(c592.querySelectorAll('.goto')).filter((b) => !b.disabled).map((b) => b.textContent.trim()).join(','));
+    }
+
+    // --- task 216: an `<if ticks=>` guard reads the count as of its OWN position ---
+    // Task 105 froze the guard on an ENTRY snapshot so a <tick/> BELOW it could not flip it on
+    // a mid-visit rerender (§1.496, where the guard asks "was the box already ticked?"). The
+    // corpus also writes the mirror idiom — the <tick> first, the guard asking about the count
+    // NOW — and against a frozen snapshot those branches were permanently a visit late. A
+    // section runs sequentially in JaFL, so the walk now carries the position: entry ticks plus
+    // the ticks this visit has applied above the node.
+    {
+      const liveGotos = (root) => Array.from(root.querySelectorAll('.goto'))
+        .filter((b) => !b.disabled).map((b) => b.textContent.trim());
+
+      // (§4.467) "Tick one now", then first/second/third-visit routing. Every visit used to
+      // fall through to the <else> and route to §284.
+      const sec467 = await data.getSection(4, '467');
+      const g467 = GameState.create({ name: 'G467', gender: 'm', profession: 'Warrior', book: 4, adv });
+      const c467 = document.createElement('div');
+      const st467 = new Story(c467, g467, { navigate() {}, onDeath() {}, notify() {} });
+      g467.data.book = 4; g467.data.section = '467';
+      const visit467 = () => { st467.begin(sec467, 4, '467'); return liveGotos(c467).join(','); };
+      const r467a = visit467(), r467b = visit467(), r467c = visit467(), r467d = visit467();
+      ok('task216: §4.467 first visit routes to §516', r467a === '516', r467a);
+      ok('task216: §4.467 second visit routes to §397', r467b === '397', r467b);
+      ok('task216: §4.467 third visit routes to §284', r467c === '284', r467c);
+      ok('task216: §4.467 stays on §284 once the boxes are full', r467d === '284', r467d);
+
+      // (§2.542) the two readings coexist in ONE section: the outer `not ticks="3"` is the
+      // ENTRY question ("were they all ticked already?"), the inner chain the post-tick one.
+      const sec542t = await data.getSection(2, '542');
+      const g542t = GameState.create({ name: 'G542', gender: 'm', profession: 'Warrior', book: 2, adv });
+      const c542t = document.createElement('div');
+      const st542t = new Story(c542t, g542t, { navigate() {}, onDeath() {}, notify() {} });
+      g542t.data.book = 2; g542t.data.section = '542';
+      const visit542 = () => { st542t.begin(sec542t, 2, '542'); return liveGotos(c542t).join(','); };
+      const r542a = visit542(), r542b = visit542(), r542c = visit542(), r542d = visit542();
+      // The outer `<if>` is also this section's task 214 head redirect, so on visits 1-3 its
+      // inner goto is the ONLY live exit and the trailing "if all the boxes were already
+      // ticked, →390" is held; on the fourth the outer guard fails and only §390 is left.
+      ok('task216: §2.542 first visit routes to §490', r542a === '490', r542a);
+      ok('task216: §2.542 second visit routes to §565', r542b === '565', r542b);
+      ok('task216: §2.542 third visit routes to §613', r542c === '613', r542c);
+      ok('task216: §2.542 fourth visit holds the whole inner chain, leaving only §390', r542d === '390', r542d);
+
+      // (§6.164) the "if you have just ticked the Nth box" choices are gated on codewords the
+      // post-tick guards set. On a frozen snapshot the first visit set none of them, so the
+      // section offered no live choice at all.
+      const sec164 = await data.getSection(6, '164');
+      const g164 = GameState.create({ name: 'G164', gender: 'm', profession: 'Warrior', book: 6, adv });
+      const c164 = document.createElement('div');
+      const st164 = new Story(c164, g164, { navigate() {}, onDeath() {}, notify() {} });
+      g164.data.book = 6; g164.data.section = '164';
+      st164.begin(sec164, 6, '164');
+      const live164 = Array.from(c164.querySelectorAll('.choice')).filter((b) => !b.disabled);
+      ok('task216: §6.164 first visit offers exactly the "just ticked the first box" choice',
+         live164.length === 1 && /first box/.test(live164[0].textContent), `n=${live164.length}`);
+
+      // (§1.496 — the task 105 idiom) the guard sits ABOVE the tick, so it must keep reading
+      // the entry count, on the first draw AND after a mid-visit rerender.
+      const sec496 = await data.getSection(1, '496');
+      const g496 = GameState.create({ name: 'G496', gender: 'm', profession: 'Warrior', book: 1, adv });
+      const c496 = document.createElement('div');
+      const st496 = new Story(c496, g496, { navigate() {}, onDeath() {}, notify() {} });
+      g496.data.book = 1; g496.data.section = '496';
+      st496.begin(sec496, 1, '496');
+      ok('task216: §1.496 first visit reads the box as empty and offers only §85',
+         liveGotos(c496).join(',') === '85', liveGotos(c496).join(','));
+      const spear496 = c496.querySelector('.take-item');
+      ok('task216: §1.496 first visit offers the magic spear', !!spear496);
+      spear496.click(); // rerenders mid-visit, with this visit's tick now applied
+      ok('task216: §1.496 a tick BELOW the guard still cannot flip it on a rerender (task 105)',
+         liveGotos(c496).join(',') === '85', liveGotos(c496).join(','));
+      st496.begin(sec496, 1, '496');
+      ok('task216: §1.496 second visit takes the §317 redirect',
+         liveGotos(c496).join(',') === '317', liveGotos(c496).join(','));
+
+      // (resume) the position rides on the per-visit record — the tick cannot re-fire on a
+      // reload, so without it the guard would fall back to the entry count and re-route.
+      const gR = GameState.create({ name: 'R216', gender: 'm', profession: 'Warrior', book: 4, adv });
+      gR.addTick(4, '467', 1); // this is the SECOND visit
+      const cR = document.createElement('div');
+      const stR = new Story(cR, gR, { navigate() {}, onDeath() {}, notify() {} });
+      gR.setVisitProvider(() => stR.serializeVisit());
+      gR.goTo(4, '467'); stR.begin(sec467, 4, '467');
+      ok('task216: §4.467 second visit routes to §397 before the reload', liveGotos(cR).join(',') === '397', liveGotos(cR).join(','));
+      const gR2 = new GameState(sanitizeData(JSON.parse(JSON.stringify({ ...gR.data, visit: stR.serializeVisit() }))));
+      const cR2 = document.createElement('div');
+      const stR2 = new Story(cR2, gR2, { navigate() {}, onDeath() {}, notify() {} });
+      stR2.resume(sec467, 4, '467', gR2.data.visit, null);
+      ok('task216: a resumed visit replays the tick position (§4.467 still routes to §397)',
+         liveGotos(cR2).join(',') === '397', liveGotos(cR2).join(','));
     }
 }

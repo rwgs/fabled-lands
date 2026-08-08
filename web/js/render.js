@@ -797,6 +797,11 @@ export class Story {
     // appendChildren passes the <if>).
     this.redirectGate = computeRedirectGate(el, this.state);
     this.redirectHeld = false;
+    // The walk's box-tick position (task 216): the count an `<if ticks=>` guard reached HERE
+    // must read. Starts at the entry snapshot and advances as the walk passes each <tick>
+    // this visit applied (noteBoxTick), so a guard above a tick still reads the entry count
+    // (task 105) while one below it sees the tick. Re-derived per draw, like redirectHeld.
+    this.walkTicks = this.state.entryTickCount();
     // Blessing-guarded storm/capsize outcomes (task 108): the blessings named on this
     // section's <outcome blessing="X"> hazards. A held blessing vetoes that outcome
     // (renderBranch), and a non-hidden sibling <lose blessing="X"> is the deferred
@@ -1013,7 +1018,7 @@ export class Story {
           // inactive until the fight is decided (won or lost); the else must not slip
           // active either, so the flag rides the whole chain. (task 39)
           chainDeferred = pendingCond || (tag === 'if' && isDeferredDeadChain(node, this.sectionFights));
-          active = chainDeferred ? false : (tag === 'else' ? true : evaluateCondition(node, this.state));
+          active = chainDeferred ? false : (tag === 'else' ? true : evaluateCondition(node, this.state, { ticksNow: this.walkTicks }));
           chainDone = active;
         } else if (chainDeferred) {
           active = false; // still inside the deferred (fight-outcome / provisional-result) chain
@@ -1024,7 +1029,7 @@ export class Story {
         } else if (tag === 'else') {
           active = true; chainDone = true;
         } else { // elseif with no prior match
-          active = evaluateCondition(node, this.state); chainDone = active;
+          active = evaluateCondition(node, this.state, { ticksNow: this.walkTicks }); chainDone = active;
         }
         this.renderConditionalBranch(container, node, path, active);
         // The section's head redirect, and it matched: its <goto> has just rendered live,
@@ -1038,7 +1043,12 @@ export class Story {
         renderBranch(this, container, node, path, this.activeRoll);
         return;
       }
+      // A <tick> the walk passes moves the box-tick position every `<if ticks=>` below it
+      // reads (task 216): note the count before it renders so noteBoxTick can see whether
+      // this visit's tick landed here.
+      const ticksBefore = tag === 'tick' ? this.state.tickCount() : 0;
       this.renderElement(container, node, path);
+      if (tag === 'tick') this.noteBoxTick(path, ticksBefore);
       // Track the roll a shared <success>/<failure> binds to. An inactive branch's
       // roll never counts. When two rolls feed ONE shared branch ("make a MAGIC roll
       // …or a SCOUTING roll", book2/122/book6/630), bind to whichever ACTUALLY
@@ -1049,6 +1059,21 @@ export class Story {
         if (this.ctx.rolls.has('roll@' + path) || !curResolved) this.activeRoll = { node, path };
       }
     });
+  }
+
+  /** Carry the walk's box-tick position past a <tick> it has just rendered (task 216).
+   *  `before` is this section's box count read immediately before the node: when it moved,
+   *  this visit's tick landed HERE, so the resulting count is memoised on the per-visit
+   *  record under the node's path. Every later draw replays that memo instead — the tick
+   *  itself cannot re-fire (its fx@ memo is in ctx.applied), and a resume rebuilds the map
+   *  from the save. A tick inside an untaken branch (or below a taken redirect) never
+   *  applies and never advances the position, so the guards below it read the same count
+   *  they would have on the printed page. */
+  noteBoxTick(path, before) {
+    const after = this.state.tickCount();
+    if (after > before) this.ctx.boxTicks.set(path, after);
+    const at = this.ctx.boxTicks.get(path);
+    if (at != null) this.walkTicks = at;
   }
 
   // Render one branch of an if/elseif/else chain. The taken branch renders
@@ -1409,7 +1434,7 @@ export class Story {
     // Undecided while it reads a provisional reroll result — the same hold the walker's
     // chain applies, so a choice-label/group conditional can't commit early either. (task 181)
     if (conditionPending(node, viewPendingVars(this))) return null;
-    const ok = evaluateCondition(node, this.state);
+    const ok = evaluateCondition(node, this.state, { ticksNow: this.walkTicks });
     const chainKey = 'chain@' + path;
     if (ok) {
       this.ctx.applied.add(chainKey); // this branch taken

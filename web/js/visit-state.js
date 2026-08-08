@@ -13,7 +13,7 @@ import { restoreFight } from './combat.js';
 // applied/resolved this visit, keyed by positional node paths. Shared by begin() and
 // deserializeCtx() so the shape has a single definition.
 export function newCtx() {
-  return { applied: new Set(), rolls: new Map(), fights: new Map(), buys: new Map(), groupLimits: new Map(), groupPicks: new Map(), wroteVars: new Set(), rolledVars: new Set(), pathNodes: new Map(), rollLockCaches: new Set(), forcedChosen: new Map(), awardCounts: new Map(), stock: new Map(), usedSource: null };
+  return { applied: new Set(), rolls: new Map(), fights: new Map(), buys: new Map(), groupLimits: new Map(), groupPicks: new Map(), wroteVars: new Set(), rolledVars: new Set(), pathNodes: new Map(), rollLockCaches: new Set(), forcedChosen: new Map(), awardCounts: new Map(), stock: new Map(), boxTicks: new Map(), usedSource: null };
 }
 
 // Resolve a serialised memo path back to its parsed-section node (task 116). Paths are the
@@ -56,6 +56,7 @@ export function serializeCtx(ctx) {
     forcedChosen: [...ctx.forcedChosen],
     awardCounts: [...ctx.awardCounts],
     stock: [...ctx.stock],
+    boxTicks: [...ctx.boxTicks],
     usedSourcePath,
   };
 }
@@ -137,6 +138,16 @@ export function deserializeCtx(rec, sectionEl) {
   arr(r.forcedChosen).forEach((e) => { if (Array.isArray(e) && e.length === 2) ctx.forcedChosen.set(e[0], e[1]); });
   arr(r.awardCounts).forEach((e) => { if (Array.isArray(e) && e.length === 2) ctx.awardCounts.set(e[0], e[1]); });
   arr(r.stock).forEach((e) => { if (Array.isArray(e) && e.length === 2) ctx.stock.set(e[0], e[1]); });
+  // Where each <tick> this visit already applied left the section's box count (task 216) —
+  // the walk replays these on a resume, since ctx.applied stops the ticks re-firing and the
+  // sequential `<if ticks=>` reading would otherwise fall back to the entry count. Feeds a
+  // routing comparison straight from an untrusted save, so it is coerced like entryTicks:
+  // a non-negative integer keyed by a memo path, anything else dropped.
+  arr(r.boxTicks).forEach((e) => {
+    if (!Array.isArray(e) || e.length !== 2 || typeof e[0] !== 'string') return;
+    const n = frameNum(e[1], NaN, { min: 0, int: true });
+    if (Number.isFinite(n)) ctx.boxTicks.set(e[0], n);
+  });
   if (r.usedSourcePath) ctx.usedSource = resolveNodePath(r.usedSourcePath, sectionEl);
   rebuildVisitScaffold(ctx, sectionEl);
   return ctx;
@@ -164,7 +175,8 @@ export function serializeFrame(frame) {
 
 // sanitizeData's numeric/string coercions, inlined for the frame (its helpers are private to
 // state.js): a number or a numeric string, else the default; rounded when integral; floored
-// at `min`. Kept here so serializeFrame and its inverse stay in one place. (task 203)
+// at `min`. Kept here so serializeFrame and its inverse stay in one place (task 203); the ctx's
+// own numeric memo (boxTicks) coerces through the same helper.
 function frameNum(v, dflt, { min = -Infinity, int = false } = {}) {
   let n = typeof v === 'number' ? v : (typeof v === 'string' && v.trim() !== '' ? parseFloat(v) : NaN);
   if (!Number.isFinite(n)) return dflt;

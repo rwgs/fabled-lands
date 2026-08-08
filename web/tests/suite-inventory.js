@@ -1841,4 +1841,19 @@ export async function run(ctx) {
     Array.from(cMulti.querySelectorAll('.ship-choice button')).find((b) => /Kraken/.test(b.textContent)).click();
     ok('§TSAIL choosing sails exactly that ship and navigates', m2.docked === null && m1.docked === 'Kunrir' && navM && String(navM.sec) === '10');
 
+    // task 216: §1.19 ticks a box, then asks "if all three boxes are NOW ticked" and awards the
+    // codeword Anvil. Read against a frozen entry snapshot that guard could never match on the
+    // visit that filled the third box — one visit late, and since the boxes cap at three it
+    // never matched at all, leaving Anvil unobtainable. The guard now reads its own position.
+    const sec19 = await data.getSection(1, '19');
+    const g19 = GameState.create({ name: 'ANV', gender: 'm', profession: 'Warrior', book: 1, adv });
+    g19.data.book = 1; g19.data.section = '19';
+    const st19 = new Story(document.createElement('div'), g19, { navigate(){}, onDeath(){}, notify(){} });
+    st19.begin(sec19, 1, '19');
+    ok('task216: §1.19 first visit does not gain Anvil', !g19.hasCodeword('Anvil'));
+    st19.begin(sec19, 1, '19');
+    ok('task216: §1.19 second visit does not gain Anvil', !g19.hasCodeword('Anvil'));
+    st19.begin(sec19, 1, '19');
+    ok('task216: §1.19 third visit gains Anvil', g19.hasCodeword('Anvil'), `boxes=${g19.tickCount(1, '19')}`);
+
 }

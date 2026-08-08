@@ -184,7 +184,8 @@ function applyAbilityChange(el, state, sign, opts) {
 // list keep their own AND/OR meaning via matchCodewords / the title split.
 // A node with no recognized attribute at all (only `not`, or attrs this engine
 // doesn't yet handle) defaults to true — task 17 tightens that to a warning.
-export function evaluateCondition(el, state) {
+// `opts.ticksNow` is the walk's box-tick position for a `ticks=` guard (task 216).
+export function evaluateCondition(el, state, opts = {}) {
   const get = (a) => el.getAttribute(a);
   const tag = el.tagName.toLowerCase();
   let matched = false; // did we recognize any condition attribute?
@@ -208,9 +209,15 @@ export function evaluateCondition(el, state) {
   const safeAdd = get('safeAddGod');
 
   add(get('codeword'), () => matchCodewords(state, get('codeword')));
-  // Entry snapshot, not the live count: this visit's own <tick/> must not satisfy the
-  // guard on a mid-visit rerender (task 105). Falls back to live when unset (headless).
-  add(get('ticks'), () => state.entryTickCount() === resolveValue(state, get('ticks')));
+  // A section runs SEQUENTIALLY in JaFL, so a ticks= guard reads the box count as of its OWN
+  // position: `opts.ticksNow` is the entry snapshot plus the ticks this visit has already
+  // applied ABOVE this node, which the renderer's walk tracks (task 216) — §4.467's
+  // first/second/third-visit routing and §1.19's third-tick codeword read the post-tick count.
+  // A caller with no walk position (the headless effect-body walk, the head redirect gate,
+  // direct use) falls back to the entry snapshot alone: that is task 105's guarantee that a
+  // <tick/> BELOW the guard can never satisfy it on a mid-visit rerender (§1.496).
+  const ticksHere = () => (opts.ticksNow != null ? opts.ticksNow : state.entryTickCount());
+  add(get('ticks'), () => ticksHere() === resolveValue(state, get('ticks')));
   add(get('shards'), () => money >= resolveValue(state, get('shards')));
   add(get('item'), () => {
     // "?" = any possession, optionally tag-filtered (e.g. <if item="?" tags="light">
