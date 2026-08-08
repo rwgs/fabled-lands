@@ -3,6 +3,7 @@
 import * as data from '../js/data.js';
 import { GameState, makeItem, readSlotData, deleteSlot } from '../js/state.js';
 import * as eng from '../js/engine.js';
+import * as gates from '../js/render-gates.js';
 import { fightRound } from '../js/combat.js';
 import { buyOptions, payChoiceCost } from '../js/market.js';
 import { Story } from '../js/render.js';
@@ -979,5 +980,125 @@ export async function run(ctx) {
       ok('task150: the choice renders', !!choice150);
       ok('task150: a false <if> in a choice label shows nothing', !!choice150 && choice150.textContent.indexOf('SEEN-IF') < 0);
       ok('task150: the trailing <else> does NOT render unconditionally', !!choice150 && choice150.textContent.indexOf('SEEN-ELSE') < 0);
+    }
+
+    // --- task 214: a taken visit-box redirect holds the rest of the section ---
+    // The corpus writes the "if the box is ticked, leave now" redirect and the one-time
+    // reward it protects as SIBLINGS. JaFL's forced <goto> blocked the section there, so
+    // the body never ran on a ticked visit; this port rendered it all, making the haul
+    // farmable. computeRedirectGate decides; the walk holds everything after the <if>.
+    {
+      // (planner) the head redirect, matched and unmatched.
+      const redirSec = () => parse('<section name="t214" boxes="1"><p><if ticks="1">If there is a tick in the box, <goto section="251"/> immediately.</if> If not, <tick/> and read on.</p><p>A <item name="ruby"/>.</p></section>');
+      const gTicked = GameState.create({ name:'R214', gender:'m', profession:'Warrior', book:1, adv });
+      gTicked.ephemeral = true; gTicked.setEntryTicks(1);
+      const gFresh = GameState.create({ name:'F214', gender:'m', profession:'Warrior', book:1, adv });
+      gFresh.ephemeral = true; gFresh.setEntryTicks(0);
+      ok('task214: a matched head <if ticks> redirect makes a gate',
+         (() => { const s = redirSec(); const gt = gates.computeRedirectGate(s, gTicked); return !!gt && gt.ifNode === s.querySelector('if'); })());
+      ok('task214: the same section on the read-on visit has no gate',
+         gates.computeRedirectGate(redirSec(), gFresh) === null);
+      // (planner) the head window. An effect before the <if> means it is not the section's
+      // first step — book1/10's ticks="4" hub redirect — but hidden book-keeping, which JaFL
+      // runs before it reaches the goto, does not close it (book5/697).
+      ok('task214: a redirect below a live effect is NOT a head redirect',
+         gates.computeRedirectGate(parse('<section boxes="1"><p><tick/> <if ticks="1">go <goto section="9"/></if></p><p>body</p></section>'), gTicked) === null);
+      ok('task214: hidden book-keeping before the redirect keeps the head window open',
+         !!gates.computeRedirectGate(parse('<section boxes="1"><p><lose curse="X" hidden="t"/><if ticks="1">go <goto section="9"/></if></p><p>body</p></section>'), gTicked));
+      // (planner) only a goto the player MUST follow halts a section.
+      ok('task214: an optional force="f" goto is not a redirect',
+         gates.computeRedirectGate(parse('<section boxes="1"><p><if ticks="1">you may <goto section="9" force="f"/></if></p><p>body</p></section>'), gTicked) === null);
+      ok('task214: a goto inside a <choice> is not a redirect',
+         gates.computeRedirectGate(parse('<section boxes="1"><p><if ticks="1"><choices><choice section="9">Leave</choice></choices></if></p><p>body</p></section>'), gTicked) === null);
+
+      // (§1.16 end to end) the sea dragon's hoard: "choose up to three of the following
+      // treasures", eight awards, behind a one-visit box.
+      const takeBtns = (root) => Array.from(root.querySelectorAll('.take-item'));
+      const g16 = GameState.create({ name:'H16', gender:'m', profession:'Warrior', book:1, adv });
+      const c16 = document.createElement('div');
+      const st16 = new Story(c16, g16, { navigate(){}, onDeath(){}, notify(){} });
+      const goto16 = (s) => Array.from(c16.querySelectorAll('.goto')).find((b) => b.textContent.trim() === s);
+      g16.data.book = 1; g16.data.section = '16';
+      st16.begin(await data.getSection(1, '16'), 1, '16');
+      ok('task214: §1.16 first visit offers all eight treasures live',
+         takeBtns(c16).length === 8 && takeBtns(c16).every((b) => b.disabled === false),
+         `n=${takeBtns(c16).length} live=${takeBtns(c16).filter((b) => !b.disabled).length}`);
+      ok('task214: §1.16 first visit keeps the ticks=1 redirect inactive',
+         !!goto16('251') && goto16('251').disabled === true);
+      const before16 = g16.data.items.length; // the starting pack
+      takeBtns(c16)[0].click();
+      const took16 = g16.data.items.length;
+      ok('task214: §1.16 first visit really banks a treasure', took16 === before16 + 1,
+         `before=${before16} after=${took16}`);
+      // A genuine second visit re-enters via begin(), which re-snapshots the entry ticks.
+      st16.begin(await data.getSection(1, '16'), 1, '16');
+      ok('task214: §1.16 revisit activates the redirect to §251',
+         !!goto16('251') && goto16('251').disabled === false);
+      ok('task214: §1.16 revisit holds every Take (the hoard is not farmable)',
+         takeBtns(c16).length === 8 && takeBtns(c16).every((b) => b.disabled === true),
+         `live=${takeBtns(c16).filter((b) => !b.disabled).length}`);
+      ok('task214: §1.16 revisit holds the read-on exit to §135 too',
+         !!goto16('135') && goto16('135').disabled === true);
+      takeBtns(c16).forEach((b) => b.click());
+      ok('task214: §1.16 clicking a held Take banks nothing', g16.data.items.length === took16,
+         `n=${g16.data.items.length}`);
+
+      // (§1.542 single award) the simpler one-award form previously banked a SECOND copy
+      // on every revisit.
+      const g542 = GameState.create({ name:'P542', gender:'m', profession:'Warrior', book:1, adv });
+      const c542 = document.createElement('div');
+      const st542 = new Story(c542, g542, { navigate(){}, onDeath(){}, notify(){} });
+      const potion = () => Array.from(c542.querySelectorAll('.take-item')).find((b) => /potion of strength/i.test(b.textContent));
+      g542.data.book = 1; g542.data.section = '542';
+      st542.begin(await data.getSection(1, '542'), 1, '542');
+      potion().click();
+      ok('task214: §1.542 first visit banks the potion', g542.findItems('potion of strength').length === 1);
+      st542.begin(await data.getSection(1, '542'), 1, '542');
+      ok('task214: §1.542 revisit holds the Take', !!potion() && potion().disabled === true,
+         `dis=${potion() && potion().disabled}`);
+      potion().click();
+      ok('task214: §1.542 revisit cannot bank a second potion',
+         g542.findItems('potion of strength').length === 1, `n=${g542.findItems('potion of strength').length}`);
+
+      // (§1.160 routing) the leak is not only loot: a revisit re-offered the MAGIC roll
+      // and its two exits beside the redirect, so the player could route around it.
+      const g160 = GameState.create({ name:'M160', gender:'m', profession:'Warrior', book:1, adv });
+      const c160 = document.createElement('div');
+      const st160 = new Story(c160, g160, { navigate(){}, onDeath(){}, notify(){} });
+      g160.data.book = 1; g160.data.section = '160';
+      st160.begin(await data.getSection(1, '160'), 1, '160');
+      ok('task214: §1.160 first visit offers the MAGIC roll', !!c160.querySelector('.btn-roll:not([disabled])'));
+      st160.begin(await data.getSection(1, '160'), 1, '160');
+      ok('task214: §1.160 revisit holds the MAGIC roll',
+         !!c160.querySelector('.btn-roll') && !c160.querySelector('.btn-roll:not([disabled])'));
+      ok('task214: §1.160 revisit leaves only the redirect to §461 live',
+         Array.from(c160.querySelectorAll('.goto')).filter((b) => !b.disabled).map((b) => b.textContent.trim()).join(',') === '461',
+         Array.from(c160.querySelectorAll('.goto')).filter((b) => !b.disabled).map((b) => b.textContent.trim()).join(','));
+
+      // (non-regression) book1/10's Yellowport hub is deliberately out of scope: its
+      // ticks="4" redirect sits under two codeword guards after a live <tick>, so the head
+      // rule leaves the hub's choices alone even on the fourth visit.
+      const g10 = GameState.create({ name:'Y10', gender:'m', profession:'Warrior', book:1, adv });
+      const c10 = document.createElement('div');
+      const st10 = new Story(c10, g10, { navigate(){}, onDeath(){}, notify(){} });
+      g10.data.book = 1; g10.data.section = '10';
+      g10.addTick(1, '10', 4);
+      st10.begin(await data.getSection(1, '10'), 1, '10');
+      ok('task214: §1.10 keeps its hub choices live on the fourth visit',
+         st10.redirectGate === null && Array.from(c10.querySelectorAll('.choice')).filter((b) => !b.disabled).length >= 5,
+         `gate=${!!st10.redirectGate} live=${Array.from(c10.querySelectorAll('.choice')).filter((b) => !b.disabled).length}`);
+
+      // (non-regression) §5.592 already writes the body inside an explicit <else>, which is
+      // the shape this gate reproduces: its display must not change.
+      const g592 = GameState.create({ name:'W592', gender:'m', profession:'Warrior', book:5, adv });
+      const c592 = document.createElement('div');
+      const st592 = new Story(c592, g592, { navigate(){}, onDeath(){}, notify(){} });
+      g592.data.book = 5; g592.data.section = '592';
+      g592.addTick(5, '592', 1);
+      st592.begin(await data.getSection(5, '592'), 5, '592');
+      ok('task214: §5.592 (already <else>-wrapped) still shows its prose and only the §307 redirect',
+         /waterfall/i.test(c592.textContent)
+         && Array.from(c592.querySelectorAll('.goto')).filter((b) => !b.disabled).map((b) => b.textContent.trim()).join(',') === '307',
+         Array.from(c592.querySelectorAll('.goto')).filter((b) => !b.disabled).map((b) => b.textContent.trim()).join(','));
     }
 }

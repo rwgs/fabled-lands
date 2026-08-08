@@ -6,7 +6,7 @@
 // the actual buttons (the tag*/apply* methods stay in the view); these functions only
 // DECIDE. No DOM construction, no browser UI globals.
 
-import { boolAttr } from './engine.js';
+import { boolAttr, evaluateCondition } from './engine.js';
 
 // True when a die roll in this section is gated behind the payment keyed `k`: a
 // <random|rankcheck|difficulty flag="k"> paired with a [price="k"] cost — the "pay to
@@ -38,6 +38,13 @@ const ROLLGATE_OPTIONAL_WRAP = new Set(['if', 'elseif', 'else', 'success', 'fail
 const ROLLGATE_OUTCOME_WRAP = new Set(['outcomes', 'outcome']);
 const TRANSFER_GROUP_WRAP = new Set(['group']);
 const BUY_GROUP_WRAP = new Set(['group']);
+// A navigation inside one of these is the player's to pick, not a step the section
+// executes: a <choice> row, and a <group>'s bundled "click to do this" action.
+const REDIRECT_OPTIONAL_WRAP = new Set(['choice', 'choices', 'group']);
+// What may precede a section's head redirect and still leave it the FIRST thing the
+// section executes: the printed words and their inline styling. Anything else — an
+// effect, a roll, another condition — closes the head window (see computeRedirectGate).
+const HEAD_PROSE_TAGS = new Set(['p', 'b', 'i', 'u', 'caps', 'text', 'desc', 'br']);
 
 // Does an ancestor of `node` carry one of these (lowercased) tag names? Walks up to the
 // section root. A manual sibling of DOM `closest`, kept explicit for the parsed section tree.
@@ -236,4 +243,58 @@ export function computeBuyGate(sectionEl) {
   });
   if (!navNodes.size) return null;
   return { navNodes };
+}
+
+// Is this <goto>/<return> one the player MUST follow? JaFL's GotoNode defaults force=true
+// and its execute() then returns false — "user must follow this goto - block further
+// execution" — so a reached forced goto ends the section. An explicit force="f" is the
+// optional "or you may turn back" link, flee/sail are abandon/travel actions, and a
+// navigation inside a <choice>/<choices>/<group> is an opt-in the player selects: none of
+// those halt anything. A price=/flag= exit is only conditionally usable (flagGate), so it
+// is not a guaranteed halt either.
+function isMandatoryRedirect(node) {
+  const force = node.getAttribute('force');
+  if (force != null && !boolAttr(force, true)) return false;
+  if (boolAttr(node.getAttribute('flee')) || boolAttr(node.getAttribute('sail'))) return false;
+  if (node.getAttribute('price') != null || node.getAttribute('flag') != null) return false;
+  return !hasAncestorTag(node, REDIRECT_OPTIONAL_WRAP);
+}
+
+// The visit-box redirect gate (task 214). The corpus's once-only idiom writes the redirect
+// and the thing it protects as SIBLINGS at the head of a boxes= section:
+//
+//   <if ticks="1">If there is a tick in the box, <goto section="251"/> immediately.</if>
+//   If not, <tick/> and read on.
+//   …the reward / the roll / the encounter…
+//
+// In JaFL that body never executed on the ticked visit: the matched <if> runs its <goto>,
+// which blocks the rest of the section (see isMandatoryRedirect). This port renders the
+// whole section, so a revisit re-offered book1/16's eight treasures and book1/160's MAGIC
+// roll alongside the redirect. Once the redirect matches, everything AFTER the <if> is
+// held — the same treatment the untaken branch it really is would get, and exactly what
+// the sections already written with an explicit <else> (book5/592) produce today.
+//
+// Scoped to the section HEAD: only prose and hidden book-keeping (which JaFL runs before it
+// reaches the goto) may precede the <if>. That keeps this the "leave now" redirect and
+// never a mid-section option — book1/10's ticks="4" redirect sits under two codeword guards
+// after a live <tick>, and holding its body would strip the StillInYellowport book-keeping
+// that stops Yellowport re-redirecting to §273 forever.
+// Returns { ifNode } — everything after it renders held — or null.
+export function computeRedirectGate(sectionEl, state) {
+  if (!sectionEl || !state) return null;
+  let hiddenRoot = null; // the hidden subtree currently being skipped over
+  for (const el of sectionEl.querySelectorAll('*')) {
+    if (hiddenRoot && hiddenRoot.contains(el)) continue;
+    hiddenRoot = null;
+    const tag = el.tagName.toLowerCase();
+    if (HEAD_PROSE_TAGS.has(tag)) continue;
+    if (boolAttr(el.getAttribute('hidden'))) { hiddenRoot = el; continue; }
+    // The first executable element decides: a visit-box <if> is the candidate, anything
+    // else closes the head window.
+    if (tag !== 'if' || el.getAttribute('ticks') == null) return null;
+    if (!evaluateCondition(el, state)) return null; // the read-on branch — nothing to hold
+    return Array.from(el.querySelectorAll('goto, return')).some(isMandatoryRedirect)
+      ? { ifNode: el } : null;
+  }
+  return null;
 }

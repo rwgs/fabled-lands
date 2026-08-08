@@ -24,7 +24,7 @@ import {
 } from './render-rules.js';
 import {
   computeFightGate, computeEscapeCodewords, isDeferredDeadChain,
-  computeRollGate, computeTransferGate, computeBuyGate, isEscapeNav,
+  computeRollGate, computeTransferGate, computeBuyGate, computeRedirectGate, isEscapeNav,
 } from './render-gates.js';
 import {
   newCtx, resolveNodePath, serializeCtx, deserializeCtx, serializeFrame, deserializeFrame,
@@ -790,6 +790,13 @@ export class Story {
     // applyBuyGate then disables the tagged navs. Reset per render.
     this.buyGate = computeBuyGate(el);
     this.pendingBuy = false;
+    // Visit-box redirect gating (task 214): a matched <if ticks=…> redirect at the section
+    // head is JaFL's forced <goto> — it blocked the rest of the section, which is what made
+    // the once-only reward below it one-time. computeRedirectGate decides whether this visit
+    // takes that redirect; the walk then holds everything after it (redirectHeld, set as
+    // appendChildren passes the <if>).
+    this.redirectGate = computeRedirectGate(el, this.state);
+    this.redirectHeld = false;
     // Blessing-guarded storm/capsize outcomes (task 108): the blessings named on this
     // section's <outcome blessing="X"> hazards. A held blessing vetoes that outcome
     // (renderBranch), and a non-hidden sibling <lose blessing="X"> is the deferred
@@ -967,6 +974,11 @@ export class Story {
       } else if (!prevNode) {
         this.ctx.pathNodes.set(path, node);
       }
+      // Past a taken visit-box redirect the section is over — JaFL's forced <goto> blocked
+      // execution here, so the words below it are the branch the player did NOT take
+      // (task 214). Hold them like any untaken branch. Inside one already, the normal
+      // inactive path is doing the same job, so don't wrap twice.
+      if (this.redirectHeld && !this.inactive) { this.renderHeldNode(container, node, path); return; }
       if (node.nodeType === Node.TEXT_NODE) {
         this.appendText(container, node.nodeValue);
         // Prose between branches does NOT break an if/elseif/else chain: the books
@@ -1015,6 +1027,9 @@ export class Story {
           active = evaluateCondition(node, this.state); chainDone = active;
         }
         this.renderConditionalBranch(container, node, path, active);
+        // The section's head redirect, and it matched: its <goto> has just rendered live,
+        // so everything from here on is held (task 214).
+        if (active && this.redirectGate && node === this.redirectGate.ifNode) this.redirectHeld = true;
         return;
       }
       chainActive = false; chainDone = false; chainDeferred = false;
@@ -1052,6 +1067,32 @@ export class Story {
     this.inactive = prev;
     // Neutralise any interactive controls the branch produced (gotos, choices,
     // roll/market/group buttons). Effects already skipped via this.inactive.
+    span.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+    if (span.textContent.trim() || span.querySelector('*')) container.appendChild(span);
+  }
+
+  // Render a node that a taken visit-box redirect has put out of reach (task 214). It gets
+  // the same treatment as an untaken <if> branch — words shown grayed, effects suppressed,
+  // controls disabled — rather than being dropped, so the reader keeps the context the
+  // printed page gives them. Mirrors appendChildren's dispatch, forced inactive: an
+  // if/elseif/else goes through renderConditionalBranch (which does its own graying, so it
+  // is not wrapped again) and a shared branch through renderBranch, since neither is
+  // reachable via renderElement's tag table.
+  renderHeldNode(container, node, path) {
+    if (node.nodeType !== Node.ELEMENT_NODE && node.nodeType !== Node.TEXT_NODE) return;
+    const tag = node.nodeType === Node.ELEMENT_NODE ? node.tagName.toLowerCase() : null;
+    if (tag === 'if' || tag === 'elseif' || tag === 'else') {
+      this.renderConditionalBranch(container, node, path, false);
+      return;
+    }
+    const span = document.createElement('span');
+    span.className = 'cond-inactive';
+    const prev = this.inactive;
+    this.inactive = true;
+    if (node.nodeType === Node.TEXT_NODE) this.appendText(span, node.nodeValue);
+    else if (BRANCH_TAGS.has(tag)) renderBranch(this, span, node, path, this.activeRoll);
+    else this.renderElement(span, node, path);
+    this.inactive = prev;
     span.querySelectorAll('button').forEach((b) => { b.disabled = true; });
     if (span.textContent.trim() || span.querySelector('*')) container.appendChild(span);
   }

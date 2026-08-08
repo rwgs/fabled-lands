@@ -3,8 +3,8 @@
 Backlog of recommended improvements. Open tasks are filed under priority buckets
 (**HIGH** / **MEDIUM** / **LOW**) — work the first open (`- [ ]`) item top-down;
 each task's detail section carries the same stable ID. Every filed task through
-212 is complete (listed under **Done** below), apart from 207, withdrawn as a
-misdiagnosis (see the Review log); **213, 214 and 215 are open**, all three
+214 is complete (listed under **Done** below), apart from 207, withdrawn as a
+misdiagnosis (see the Review log); **215, 216 and 217 are open**, all three
 renderer defects that books 1–6 carry today.
 Completed detail sections are archived in
 [`TASKS-archive.md`](TASKS-archive.md); the Review log at the end of this file
@@ -17,11 +17,13 @@ records each audit pass and is where new work is filed.
 **MEDIUM**
 
 - [x] 213. The post-fight gate does not hold an item award, so loot is takeable before the fight
-- [ ] 214. A visit-box redirect does not hold the section body, so a one-time reward is re-takeable
+- [x] 214. A visit-box redirect does not hold the section body, so a one-time reward is re-takeable
+- [ ] 216. `<if ticks="N">` after an in-section `<tick>` reads the pre-tick count, so "now ticked" branches never fire
 
 **LOW**
 
 - [ ] 215. A self-closing effect tag renders no words, so published sentences print with a hole
+- [ ] 217. A visit-box redirect below the section head still leaves both exits live (book1/91)
 
 **Done**
 
@@ -243,12 +245,14 @@ this order.*
 - [x] 211. Re-archive completed task details 166–210 and clear them out of the priority buckets
 - [x] 212. `titleCase` capitalises the letter after an apostrophe ("Ghoul'S Head")
 - [x] 213. The post-fight gate does not hold an item award, so loot is takeable before the fight
-- [ ] 214. A visit-box redirect does not hold the section body, so a one-time reward is re-takeable
+- [x] 214. A visit-box redirect does not hold the section body, so a one-time reward is re-takeable
 - [ ] 215. A self-closing effect tag renders no words, so published sentences print with a hole
+- [ ] 216. `<if ticks="N">` after an in-section `<tick>` reads the pre-tick count, so "now ticked" branches never fire
+- [ ] 217. A visit-box redirect below the section head still leaves both exits live (book1/91)
 
 ---
 
-> **Completed task details (tasks 1–211) are archived** in [`TASKS-archive.md`](TASKS-archive.md) (tasks 141, 165, 211) to keep this file focused on open work. The checklist above still carries every task's stable ID and status; a done task's detail lives in the archive under the same `## <N>.` heading. Task 212's detail is still below, awaiting the next re-archive pass; the open tasks 213–215 and the Review log follow it.
+> **Completed task details (tasks 1–211) are archived** in [`TASKS-archive.md`](TASKS-archive.md) (tasks 141, 165, 211) to keep this file focused on open work. The checklist above still carries every task's stable ID and status; a done task's detail lives in the archive under the same `## <N>.` heading. The details for tasks 212–214 are still below, awaiting the next re-archive pass; the open tasks 215–217 and the Review log follow them.
 
 ---
 
@@ -382,6 +386,50 @@ visits or is re-armed per visit. book1/16's first visit correctly stopped at thr
 Found during conversion work on an unpublished book, whose sections inherit this idiom rather than
 introducing it.
 
+Fixed **engine-side (option 2)**, because the original engine settles it. `GotoNode.execute()`
+defaults `force` to **true** and then returns false — *"User must follow this goto - block further
+execution"* — with a 2007 comment recording that relaxing it *"allowed the player to ignore the goto
+in 5.113"*, the same bug class; `IfNode.execute()` propagates that halt out of a matched branch. So
+in JaFL the body below a taken redirect never executed, and the sections are correctly written as
+they stand. Option 1 would have rewritten published book text in 89 files to work around a gap the
+original engine did not have.
+
+New DOM-free planner `computeRedirectGate(sectionEl, state)` in `render-gates.js`: it returns the
+matched head `<if ticks=…>` whose branch carries a **mandatory** redirect, and the walk holds
+everything after that node. `isMandatoryRedirect` encodes JaFL's `canUse()`/force rules — an explicit
+`force="f"`, a `flee`/`sail` exit, a `price=`/`flag=` gated one, or a `<goto>` inside a
+`<choice>`/`<choices>`/`<group>` is the player's to pick and halts nothing (today every one of the
+corpus's 152 `<if ticks>` gotos carries `section=` alone, so the guards are there for conversion
+work). The gate is scoped to the section **head** — only prose and `hidden="t"` book-keeping, which
+JaFL runs before it reaches the goto, may precede the `<if>` — which is what admits book5/697 (a
+hidden curse cleanup sits above its redirect) and excludes book1/10: Yellowport's `ticks="4"`
+redirect sits under two codeword guards after a live `<tick>`, and holding its body would strip the
+`StillInYellowport` book-keeping that stops the hub redirecting to §273 forever.
+
+Held content gets the treatment of the untaken branch it really is — `Story.renderHeldNode` greys
+the words, suppresses the effects and disables the controls, exactly as `renderConditionalBranch`
+does — rather than vanishing, so the reader keeps the printed context. That reproduces what the
+sections already written with an explicit `<else>` (book5/592) render today, and `render()` clears
+`redirectHeld` per draw so a mid-visit rerender re-decides it.
+
+`suite-render` pins six planner cases (matched / read-on visit / effect-before-head / hidden-before-
+head / `force="f"` / in-`<choices>`) and four sections end to end: **§1.16** — first visit takes one
+of eight treasures with §251 inactive, revisit activates §251 and disables all eight Takes, the
+read-on exit to §135 and further clicks bank nothing; **§1.542** — the single-award form can no
+longer bank a second potion (measured 1 → 1, was 1 → 2); **§1.160** — the revisit holds the MAGIC
+roll and leaves §461 as the only live exit, so the leak's routing half is closed too; plus
+non-regressions for **§1.10** (hub choices stay live on the fourth visit, gate is null) and **§5.592**
+(the already-`<else>`-wrapped section's display is unchanged). Aggregate: `RESULT ALL PASS
+pass=2149 fail=0`.
+
+The `<items group … limit="N">` sub-question needs no change: the limit lives in the per-visit
+`ctx.groupLimits`/`groupPicks`, so it re-arms each visit — and with the body held on a revisit
+there is nothing left for a re-armed allowance to grant. The visit box, not the limit, is what
+makes the haul one-time, which is how the book reads it.
+
+Two neighbours were found while scoping this and filed rather than folded in: the post-tick count
+reading (**216**) and the non-head redirect (**217**).
+
 ---
 
 ## 215. A self-closing effect tag renders no words, so published sentences print with a hole
@@ -440,6 +488,77 @@ parent, a mechanic-only one does not. Regression coverage belongs in `suite-rend
 
 Found during conversion work on an unpublished book, which uses the wrapping form throughout for
 exactly this reason. book1/255 has carried the defect since book 1.
+
+---
+
+## 216. `<if ticks="N">` after an in-section `<tick>` reads the pre-tick count, so "now ticked" branches never fire
+
+**Priority: MEDIUM — four sections in books 1, 2 and 4 route to the wrong place on every visit today,
+and one codeword is unobtainable.**
+
+*(Filed 2026-08-08 while scoping task 214.)* Task 105 made `<if ticks=>` read an **entry snapshot**
+(`state.entryTickCount()`, `engine.js` ~L213) so this visit's own `<tick/>` cannot flip the guard on
+a mid-visit rerender. That is right for the idiom it was filed against — book1/496's redirect, where
+the `<if>` sits **above** the `<tick/>` and asks "was the box already ticked?".
+
+The corpus also carries the mirror idiom, where the `<tick>` comes **first** and the `<if>` asks about
+the count *now*. Against a fixed entry snapshot those branches are permanently off by one visit:
+
+| section | printed line | should route | routes |
+| --- | --- | --- | --- |
+| book1/19 | `<tick>Put a tick</tick> in an empty box. <if ticks="3">If all three boxes are now ticked, <tick codeword="Anvil">…` | 3rd visit gains **Anvil** | entry=2, never matches — the codeword is **unobtainable** |
+| book4/467 | `<tick>Tick one now</tick>. <if ticks="1">If this is your first visit, <goto 516/></if><elseif ticks="2">…</elseif><else>…<goto 284/>` | 1st → §516, 2nd → §397 | entry=0/1, so the `<else>` wins: **every** visit → §284 |
+| book2/542 | `<if not="t" ticks="3"><tick>Put a tick in the first empty box</tick>. <if ticks="1">…<goto 490/>` | 1st → §490, 2nd → §565, 3rd → §613 | all three visits → §613 |
+| book1/10 | `<tick>tick the first empty box</tick> … <if ticks="4">If this is your fourth visit, <goto 273/>` | 4th visit → §273 | entry=3, never matches — §273 unreachable from the hub |
+
+The outer `<if not="t" ticks="3">` in book2/542 is the *entry* reading ("if they weren't all ticked
+already") and is correct as it stands, so the two readings genuinely coexist inside one section — a
+per-section override would not do.
+
+Both readings are the same rule in JaFL: a section executes **sequentially**, so a `ticks=` guard sees
+the count as of its own position. The fix is to evaluate against **entry ticks plus the ticks this
+visit has already applied above this node**, rather than either a frozen entry snapshot or the live
+total. That keeps task 105's guarantee (a `<tick/>` *below* the guard still cannot flip it, on the
+first draw or a rerender) while letting a guard below a tick see it. It needs a walk-position input
+that `evaluateCondition` does not have today, so the count belongs on the per-visit record
+(`visit-state.js`) alongside the other position-sensitive state, in the manner of task 204's
+per-pass vars. Regression coverage belongs in `suite-render` (book4/467's three routes, book2/542's
+inner/outer split) and `suite-inventory` (book1/19's Anvil on the third visit), plus a pin that
+book1/496 still behaves exactly as task 105 requires.
+
+---
+
+## 217. A visit-box redirect below the section head still leaves both exits live (book1/91)
+
+**Priority: LOW — one section, a routing shortcut rather than a re-takeable reward.**
+
+*(Filed 2026-08-08 while scoping task 214.)* Task 214's redirect gate is scoped to the section
+**head** so it can never catch a mid-section option, which deliberately leaves one section of the
+same family unfixed. book1/91 (the Gambler's Den) puts its redirect in the closing paragraph, after
+the `<group>` bet and the `<outcomes>` table:
+
+```xml
+<p>
+  <tick special="unlock" cache="1.91" hidden="t"/>
+  When you are ready to leave,
+  <if ticks="0"><tick>put a tick in the box</tick> and <goto section="109"/>,</if>
+  unless the box is already ticked, in which case <goto section="100"/>.
+</p>
+```
+
+On a first visit the `<if ticks="0">` matches, so §109 is offered **and** the trailing §100 is live
+beside it: the player can leave to §100 without ticking the box, and come back. The book offers one
+exit or the other, never both. It is the same JaFL rule as task 214 (the matched branch's forced
+`<goto>` blocks what follows), just not at the head, and the *other* half of the section — the
+`<moneycache>` bet, its `lock`/`unlock` ticks (task 38) — is what makes widening the head rule
+delicate enough to keep separate.
+
+Two shapes of fix: widen task 214's gate to any matched `<if ticks=>` redirect and let the head rule
+survive only as the exclusion that keeps book1/10 out (needs re-checking against the cache lock, and
+against task 216 once that lands, since book1/91's guard sits below a hidden tick); or wrap the
+trailing sentence in an `<else>` in the source, which is the form book2/443 and book2/160 already use
+for exactly this pair of exits and is a one-line, section-local change. Regression coverage belongs
+in `suite-render` beside the task 214 cases.
 
 ---
 
