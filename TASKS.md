@@ -2,9 +2,10 @@
 
 Backlog of recommended improvements. Open tasks are filed under priority buckets
 (**HIGH** / **MEDIUM** / **LOW**) — work the first open (`- [ ]`) item top-down;
-each task's detail section carries the same stable ID. **There are currently no
-open tasks:** every filed task through 212 is complete (listed under **Done**
-below), apart from 207, withdrawn as a misdiagnosis (see the Review log).
+each task's detail section carries the same stable ID. Every filed task through
+212 is complete (listed under **Done** below), apart from 207, withdrawn as a
+misdiagnosis (see the Review log); **213, 214 and 215 are open**, all three
+renderer defects that books 1–6 carry today.
 Completed detail sections are archived in
 [`TASKS-archive.md`](TASKS-archive.md); the Review log at the end of this file
 records each audit pass and is where new work is filed.
@@ -15,11 +16,12 @@ records each audit pass and is where new work is filed.
 
 **MEDIUM**
 
-*(none open — file new MEDIUM work here)*
+- [ ] 213. The post-fight gate does not hold an item award, so loot is takeable before the fight
+- [ ] 214. A visit-box redirect does not hold the section body, so a one-time reward is re-takeable
 
 **LOW**
 
-*(none open — file new LOW work here)*
+- [ ] 215. A self-closing effect tag renders no words, so published sentences print with a hole
 
 **Done**
 
@@ -240,10 +242,13 @@ this order.*
 - [x] 210. Game teardown leaves the mobile Sheet drawer open across screens
 - [x] 211. Re-archive completed task details 166–210 and clear them out of the priority buckets
 - [x] 212. `titleCase` capitalises the letter after an apostrophe ("Ghoul'S Head")
+- [ ] 213. The post-fight gate does not hold an item award, so loot is takeable before the fight
+- [ ] 214. A visit-box redirect does not hold the section body, so a one-time reward is re-takeable
+- [ ] 215. A self-closing effect tag renders no words, so published sentences print with a hole
 
 ---
 
-> **Completed task details (tasks 1–211) are archived** in [`TASKS-archive.md`](TASKS-archive.md) (tasks 141, 165, 211) to keep this file focused on open work. The checklist above still carries every task's stable ID and status; a done task's detail lives in the archive under the same `## <N>.` heading. Task 212's detail is still below, awaiting the next re-archive pass; open-task details (none at present) and the Review log follow it.
+> **Completed task details (tasks 1–211) are archived** in [`TASKS-archive.md`](TASKS-archive.md) (tasks 141, 165, 211) to keep this file focused on open work. The checklist above still carries every task's stable ID and status; a done task's detail lives in the archive under the same `## <N>.` heading. Task 212's detail is still below, awaiting the next re-archive pass; the open tasks 213–215 and the Review log follow it.
 
 ---
 
@@ -263,8 +268,159 @@ an apostrophe, straight or curly, is skipped and everything else is unchanged. `
 pins both halves: "ghoul's head" → "Ghoul's Head" and "merchant’s cloak" → "Merchant’s Cloak",
 while "silver holy symbol", "fur cloak" and hyphenated "half-elf charm" title-case as before.
 
-Found while converting book 7, whose `merchant's cloak` renders the same way, but it is not a
-book 7 defect: the corpus has carried possessive item names since book 1.
+Found during conversion work on an unpublished book, whose `merchant's cloak` renders the same
+way. The corpus has carried possessive item names since book 1.
+
+---
+
+## 213. The post-fight gate does not hold an item award, so loot is takeable before the fight
+
+**Priority: MEDIUM — a live rules leak in books 1–6 today, and it blocks conversion work.**
+
+Task 69's fight gate holds a *bare post-fight effect* until the fight resolves, then applies only
+the branch actually taken. `computeFightGate` (`web/js/render-gates.js`) builds that hold from two
+node sets: `navNodes` — every `goto`/`choice`/`return` after the `<fight>` — and `effectNodes`,
+which it populates from **`lose` and `gain` only**:
+
+```js
+if (seenFight && !skip && !gated && (tag === 'lose' || tag === 'gain') && …)
+```
+
+The item family is absent. `renderItemAward` (`web/js/render-rewards.js`) never consults
+`story.fightGate` either, so an `<item>`/`<weapon>`/`<armour>`/`<tool>` award written after a
+`<fight>` in the same section renders a **live Take button before the fight is fought**. The
+navigation is correctly held, so the player cannot leave — but they can pocket the loot and then
+lose.
+
+Books 1–6 have carried this since book 1. Confirmed against a real `GameState`: book1/55 is
+`<fight name="Cultist" …/> If you win, you find a <item name="bag of pearls"/> on his body.` —
+its `<goto section="10">` renders disabled, its Take button renders **enabled**, and clicking it
+puts the pearls on the sheet with the cultist untouched. book5/162's magic lockpicks have the same
+shape (its `<gain shards="15"/>` in the same sentence *is* held, so one half of the reward waits
+and the other does not). book2/469 shows the corpus already works around it by hand, wrapping the
+dragon's-head award in `<if dead="f">`.
+
+The fix is symmetrical with the existing hold: classify item-family awards into `effectNodes`
+alongside `lose`/`gain`, and give `renderItemAward` (and `renderReplaceAward`) the held state —
+a disabled Take rather than an omitted one, matching how a held `<lose>`/`<gain>` still shows its
+words. Regression coverage belongs in `suite-combat`: book1/55's Take is disabled while the fight
+is unresolved, live after a win, and never live after a loss.
+
+Found during conversion work on an unpublished book, which has four sections of the same shape
+held back until this is fixed — converting them first would add new instances of the leak rather
+than expose the old ones.
+
+---
+
+## 214. A visit-box redirect does not hold the section body, so a one-time reward is re-takeable
+
+**Priority: MEDIUM — a live rules leak in books 1–6 today; it makes one-time treasure farmable.**
+
+The corpus's standard once-only-reward idiom puts a redirect at the head of a `boxes=` section and
+the reward below it, both as siblings:
+
+```xml
+<section name="16" boxes="1">
+  <p><if ticks="1">If there is a tick in the box, <goto section="251"/> immediately.</if>
+     If not, <tick/> and read on.</p>
+  …
+  <p>You may choose up to three of the following treasures: <items group="1.16" limit="3"/></p>
+  …eight <weapon>/<armour>/<tool>/<item> awards…
+</section>
+```
+
+The box exists precisely to make the haul one-time, and the printed redirect is the book's way of
+saying "leave now". But the port renders the **whole** section: nothing ties the body to the
+`<if ticks="0">` branch, so on a revisit the redirect goes live *and the reward does too*.
+
+Confirmed against a real `GameState`. **book1/16** (the sea dragon's hoard): a first visit ticks the
+box and takes three treasures; entering again with the box ticked renders the live `<goto 251>`
+redirect **and all eight Take buttons live again**. The simpler single-award form of the same shape
+behaves the same way: a first visit ticks the box and takes the award, and a revisit re-offers a
+live Take that really banks a **second** copy (measured: 1 → 2). Neither is caught by task 27's
+`addTick` cap, which only stops the tick *count* from running past `boxes=`; the body was never in
+scope for that fix.
+
+book1/16 has carried this since book 1. It is **not** the same thing as an untaken `<if>` branch
+rendering greyed-but-visible (deliberate, so the reader keeps the context): here the *taken* branch
+says leave, and the section keeps handing out rewards anyway.
+
+Two shapes of fix, and the choice is a design decision rather than an obvious repair:
+
+1. **Source-side** — move each such body inside the `<if ticks="0">` branch. Faithful and needs no
+   engine change, but it restructures the paragraph layout of every affected section across the
+   whole corpus, and would have to be told apart from the sections where reading on after the
+   redirect is genuinely intended.
+2. **Engine-side** — treat a `<goto>` inside a *matched* `<if ticks=>` at the head of a section as a
+   redirect that holds the rest of the section's effects and awards, the way task 69's fight gate
+   holds a post-fight effect. Cheaper and uniform, but it needs a rule for which redirects count, so
+   an optional "you may return to X" link is not mistaken for a mandatory one.
+
+Worth settling as part of the same pass: whether `<items group … limit="N">`'s limit persists across
+visits or is re-armed per visit. book1/16's first visit correctly stopped at three of eight; what a
+*second* visit's allowance should be follows directly from whichever fix above is chosen.
+
+Found during conversion work on an unpublished book, whose sections inherit this idiom rather than
+introducing it.
+
+---
+
+## 215. A self-closing effect tag renders no words, so published sentences print with a hole
+
+**Priority: LOW — cosmetic, but it silently deletes printed words from books 1, 2, 3 and 6 today.**
+
+`renderPassive`'s plain-effect path (`web/js/render-rewards.js`) builds a `span.fx`, fills it with
+the node's own children, and then drops it when it is empty:
+
+```js
+if (!span.textContent.trim() && isBareBoxTick(node)) span.textContent = 'tick the box';
+if (span.textContent.trim()) container.appendChild(span);
+```
+
+A **bare section-box `<tick/>`** gets synthesised filler (task 70). Nothing else does. So a
+self-closing effect tag written *inline in a printed sentence* — where the sentence's own words are
+the thing the tag names — renders **nothing at all**, and the sentence loses those words.
+
+Measured against a real `GameState`: **8 of the 10** inline self-closing title tags in the corpus
+print no text.
+
+| section | printed line | renders as |
+| --- | --- | --- |
+| book1/61 | `Write <gain title="Unspeakable Cultist"/> in the Titles and Honours box` | "Write  in the Titles and Honours box" |
+| book1/255 | `awards you the title <gain title="Protector of Sokara"/>.` | "awards you the title ." |
+| book1/256 | `He rewards you with the title <gain title="King's Champion"/>.` | "with the title ." |
+| book2/405 | `<gain title="Chosen One of Nagil"/>.` | the sentence is only the tag |
+| book3/393 | `<gain title="Saviour of Vervayens Isle"/> on your Adventure Sheet.` | " on your Adventure Sheet." |
+| book6/12 | `<gain title="Junior Court Rank"/>,` | "," |
+| book6/324 | `Lose the title <lose title="Junior Court Rank"/>` | "Lose the title" |
+| book6/479 | `<gain title="Enlightened One"/>.` | the sentence is only the tag |
+
+The **rules half is unaffected** — §1.255 really grants the title and §6.324 really removes it; only
+the words are lost, which is why it has never shown up as a rules failure. The same rule bites
+`<gain shards="500"/>` (confirmed: "He pays you <gain shards='500'/> for it." renders "He pays you
+for it." while the 500 Shards are credited).
+The **wrapping** form the corpus uses elsewhere is unaffected — book4/228's
+`note the title <gain title="Arena Champion">Arena Champion</gain>` prints correctly, as do
+book4/444, book4/568, book5/662, book6/339 and book6/384.
+
+Two shapes of fix:
+
+1. **Source-side** — rewrite the ~10 inline tags into the wrapping form the same books already use
+   elsewhere. Smallest blast radius and no engine change, but it edits published book text (adding
+   back only the words the tag swallowed, so the tag-stripped prose is restored, not altered).
+2. **Engine-side** — extend the `isBareBoxTick` synthesis so an empty `span.fx` falls back to a
+   label derived from the effect (`rewardLabel` already builds "500 Shards" and a title name for
+   choose-one buttons). Uniform, but it invents wording where the author wrote a name, and it must
+   not start printing labels for the many *deliberately* wordless tags — the mechanic-only
+   `<lose title=…/>` nodes sitting alone inside `<if>`/`<outcome>` wrappers in book1/187,
+   book2/18, book2/293, book2/442, book5/148, book5/376, book6/114, book6/118 and book6/589, which
+   correctly render nothing today.
+
+Distinguishing those two populations is the actual work: an inline tag has sibling text in its
+parent, a mechanic-only one does not. Regression coverage belongs in `suite-render`.
+
+Found during conversion work on an unpublished book, which uses the wrapping form throughout for
+exactly this reason. book1/255 has carried the defect since book 1.
 
 ---
 
