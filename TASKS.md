@@ -4,8 +4,8 @@ Backlog of recommended improvements. Open tasks are filed under priority buckets
 (**HIGH** / **MEDIUM** / **LOW**) — work the first open (`- [ ]`) item top-down;
 each task's detail section carries the same stable ID. Every filed task through
 216 is complete (listed under **Done** below), apart from 207, withdrawn as a
-misdiagnosis (see the Review log); **215 and 217 are open**, both renderer
-defects that books 1–6 carry today.
+misdiagnosis (see the Review log); **217 is open**, a renderer defect that
+book 1 carries today.
 Completed detail sections are archived in
 [`TASKS-archive.md`](TASKS-archive.md); the Review log at the end of this file
 records each audit pass and is where new work is filed.
@@ -22,7 +22,7 @@ records each audit pass and is where new work is filed.
 
 **LOW**
 
-- [ ] 215. A self-closing effect tag renders no words, so published sentences print with a hole
+- [x] 215. A self-closing effect tag renders no words, so published sentences print with a hole
 - [ ] 217. A visit-box redirect below the section head still leaves both exits live (book1/91)
 
 **Done**
@@ -246,13 +246,13 @@ this order.*
 - [x] 212. `titleCase` capitalises the letter after an apostrophe ("Ghoul'S Head")
 - [x] 213. The post-fight gate does not hold an item award, so loot is takeable before the fight
 - [x] 214. A visit-box redirect does not hold the section body, so a one-time reward is re-takeable
-- [ ] 215. A self-closing effect tag renders no words, so published sentences print with a hole
+- [x] 215. A self-closing effect tag renders no words, so published sentences print with a hole
 - [x] 216. `<if ticks="N">` after an in-section `<tick>` reads the pre-tick count, so "now ticked" branches never fire
 - [ ] 217. A visit-box redirect below the section head still leaves both exits live (book1/91)
 
 ---
 
-> **Completed task details (tasks 1–211) are archived** in [`TASKS-archive.md`](TASKS-archive.md) (tasks 141, 165, 211) to keep this file focused on open work. The checklist above still carries every task's stable ID and status; a done task's detail lives in the archive under the same `## <N>.` heading. The details for tasks 212–214 and 216 are still below, awaiting the next re-archive pass; the open tasks 215 and 217 and the Review log follow them.
+> **Completed task details (tasks 1–211) are archived** in [`TASKS-archive.md`](TASKS-archive.md) (tasks 141, 165, 211) to keep this file focused on open work. The checklist above still carries every task's stable ID and status; a done task's detail lives in the archive under the same `## <N>.` heading. The details for tasks 212–216 are still below, awaiting the next re-archive pass; the open task 217 and the Review log follow them.
 
 ---
 
@@ -488,6 +488,44 @@ parent, a mechanic-only one does not. Regression coverage belongs in `suite-rend
 
 Found during conversion work on an unpublished book, which uses the wrapping form throughout for
 exactly this reason. book1/255 has carried the defect since book 1.
+
+Fixed **engine-side (option 2)**, and the original engine both settles the choice and supplies the
+discriminator the filing was missing. `TickNode`/`LoseNode.handleContent` carry an explicit
+`!hadContent` branch that fills in a **default label per attribute** — a codeword reads "tick/erase
+the codeword X" (capitalised by `isNewSentence` when it opens a sentence), Shards "N Shards", a
+title/curse/item its own name, a `<lose stamina>` "lose N Stamina points", a blessing its printed
+description (`Blessing.getContentString`), and a bare box tick "put a tick there now" (which the
+port already had as task 70's "tick the box"). So the sections are correctly written as they stand
+and the words belong to the engine, not to the source.
+
+The filing's proposed test — sibling text in the parent — is not what JaFL uses, and would have
+mis-sorted the population. Its rule is `hidden || getParent().hideChildContent()`, and
+`hideChildContent()` is true for exactly `GroupNode`, item `EffectNode` and `TradeEventNode`: a
+`<group>` prints its own `<text>` label instead of its children, which is precisely what keeps the
+nine "deliberately wordless" nodes silent — every one of them is a `<group>` member ("delete Nagil
+from the God box" + `<lose god>` + `<lose title>`), bar book6/118's, which is `hidden="t"`.
+
+The scope is much wider than the ~10 title tags the filing measured. A corpus scan for childless,
+non-hidden `<gain>`/`<lose>`/`<tick>` nodes outside a `<group>`/`<effect>` found **422** across the
+six books, of which the biggest families are 176 `shards`, 55 bare box ticks (already handled), 37
+`blessing`, 38 `codeword`, 31 `item`, 10 `title` and 5 `stamina`. They are holes in the printed
+sentence, not decoration: book1/18 read "they give you !", book1/303 "Cross the  from your Adventure
+Sheet", book1/4 "you have returned the .", and book4/26's entire paragraph was "**.**".
+
+New DOM-free rule `defaultEffectWords(node, state, atSentenceStart)` in `render-rules.js` (with a
+`BLESSING_WORDS` table mirroring `Blessing.getContentString`); the view calls it from the single
+`appendFxWords` helper, which both the `inert` and `apply` verdicts now share, with `atSentenceStart`
+read off the container's text so far. It returns `''` for anything with no JaFL default — an
+ability/god/special/profession effect, a `?`/`*` wildcard selector — so no wording is invented for a
+form the rule does not know. Priced/flagged effects are unaffected: they never reach this path, since
+`classifyPassive` routes them to their own payment and choose-one widgets, which keep `rewardLabel`.
+
+`suite-render` pins the eleven label forms directly off the planner (including the two that must stay
+silent), the sentence-position capitalisation both ways, the rendered inline sentence for a Shards
+award and an item loss, the two silence rules (`hidden="t"`, a `<group>` member not printing its name
+twice), and three real sections end to end — **§1.255** ("the title Protector of Sokara"), **§1.186**
+("hands you over 75 Shards") and **§4.26** ("Tick the codeword Dread."). The every-section scan
+covers the remaining ~400. Aggregate: `RESULT ALL PASS pass=2187 fail=0`.
 
 ---
 

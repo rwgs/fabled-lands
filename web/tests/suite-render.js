@@ -4,6 +4,7 @@ import * as data from '../js/data.js';
 import { GameState, makeItem, readSlotData, deleteSlot, sanitizeData } from '../js/state.js';
 import * as eng from '../js/engine.js';
 import * as gates from '../js/render-gates.js';
+import * as rules from '../js/render-rules.js';
 import { fightRound } from '../js/combat.js';
 import { buyOptions, payChoiceCost } from '../js/market.js';
 import { Story } from '../js/render.js';
@@ -1191,5 +1192,71 @@ export async function run(ctx) {
       stR2.resume(sec467, 4, '467', gR2.data.visit, null);
       ok('task216: a resumed visit replays the tick position (§4.467 still routes to §397)',
          liveGotos(cR2).join(',') === '397', liveGotos(cR2).join(','));
+    }
+
+    // --- task 215: a wordless effect tag prints JaFL's default label ---
+    // The corpus writes many effects with no words of their own because the printed sentence
+    // is made OF the words the tag names. JaFL fills those in (TickNode/LoseNode's !hadContent
+    // branch); this port printed nothing, so 422 nodes across books 1-6 left a hole in their
+    // sentence. Silence stays exactly where JaFL puts it: hidden="t", or inside a <group> /
+    // item <effect>, which render their own label instead of their children.
+    {
+      const g215 = GameState.create({ name: 'W215', gender: 'm', profession: 'Warrior', book: 1, adv });
+      const sec = (body) => `<section name="T215">${body}</section>`;
+      const rulesText = (xml) => {
+        const c = document.createElement('div');
+        new Story(c, g215, { navigate() {}, onDeath() {}, notify() {} }).begin(parse(xml), 1, 'T215');
+        return c.textContent.replace(/\s+/g, ' ').trim();
+      };
+
+      // (planner) the labels themselves, straight from JaFL's defaults.
+      const label = (xml) => rules.defaultEffectWords(parse(sec(`<p>${xml}</p>`)).querySelector('p').firstElementChild, g215);
+      ok('task215: <gain shards> labels the sum', label('<gain shards="15"/>') === '15 Shards', label('<gain shards="15"/>'));
+      ok('task215: one Shard is singular', label('<gain shards="1"/>') === '1 Shard', label('<gain shards="1"/>'));
+      ok('task215: <gain title> labels the title', label('<gain title="Protector of Sokara"/>') === 'Protector of Sokara');
+      ok('task215: <tick codeword> reads "tick the codeword X"', label('<tick codeword="Dread"/>') === 'tick the codeword Dread', label('<tick codeword="Dread"/>'));
+      ok('task215: <lose codeword> reads "erase the codeword X"', label('<lose codeword="East"/>') === 'erase the codeword East', label('<lose codeword="East"/>'));
+      ok('task215: <lose item> labels the item', label('<lose item="golden net"/>') === 'golden net', label('<lose item="golden net"/>'));
+      ok('task215: <lose stamina> reads "lose N Stamina points"', label('<lose stamina="5"/>') === 'lose 5 Stamina points', label('<lose stamina="5"/>'));
+      ok('task215: <tick blessing> uses the blessing’s printed name',
+         label('<tick blessing="magic"/>') === 'MAGIC' && label('<tick blessing="storms"/>') === 'Safety from Storms',
+         `${label('<tick blessing="magic"/>')} / ${label('<tick blessing="storms"/>')}`);
+      ok('task215: a bare box <tick/> keeps its task 70 wording', label('<tick/>') === 'tick the box', label('<tick/>'));
+      ok('task215: an ability effect has no default and stays wordless', label('<gain ability="magic" amount="1"/>') === '', label('<gain ability="magic" amount="1"/>'));
+      ok('task215: a wildcard selector names nothing to print', label('<lose item="?"/>') === '', label('<lose item="?"/>'));
+
+      // (rendered) the printed sentence keeps its words.
+      const t18 = rulesText(sec('<p>They give you <gain shards="15"/>!</p>'));
+      ok('task215: an inline Shards award prints inside the sentence', /They give you 15 Shards!/.test(t18), t18);
+      const t303 = rulesText(sec('<p>Cross the <lose item="salt and iron filings"/> from your sheet.</p>'));
+      ok('task215: an inline item loss prints its name', /Cross the salt and iron filings from your sheet\./.test(t303), t303);
+      const t184 = rulesText(sec('<p><tick codeword="Dismal"/>.</p>'));
+      ok('task215: a label opening a sentence is capitalised',
+         /Tick the codeword Dismal\./.test(t184) && !/tick the codeword Dismal/.test(t184), t184);
+      const t184b = rulesText(sec('<p>Now <tick codeword="Dread"/>.</p>'));
+      ok('task215: the same label mid-sentence stays lower case', /Now tick the codeword Dread\./.test(t184b), t184b);
+
+      // (silence) hidden book-keeping and a <group>'s own members print nothing — JaFL's
+      // `hidden || getParent().hideChildContent()`.
+      const tHid = rulesText(sec('<p>Nothing happens.<lose title="blue skin" hidden="t"/></p>'));
+      ok('task215: a hidden effect stays wordless', tHid.indexOf('blue skin') < 0, tHid);
+      const tGrp = rulesText(sec('<p>You may <group force="f"><text>delete Nagil from the God box</text><lose god="Nagil"/><lose title="Chosen One of Nagil"/></group> now.</p>'));
+      ok('task215: a <group> member does not print its name a second time',
+         tGrp.indexOf('Chosen One of Nagil') < 0 && /delete Nagil from the God box/.test(tGrp), tGrp);
+
+      // (end to end) the real sections the defect was measured on.
+      const shown = async (book, section) => {
+        const g = GameState.create({ name: `S${section}`, gender: 'm', profession: 'Warrior', book, adv });
+        const c = document.createElement('div');
+        g.data.book = book; g.data.section = section;
+        new Story(c, g, { navigate() {}, onDeath() {}, notify() {} }).begin(await data.getSection(book, section), book, section);
+        return c.textContent.replace(/\s+/g, ' ');
+      };
+      const s255 = await shown(1, '255');
+      ok('task215: §1.255 awards the title in the printed sentence', /the title Protector of Sokara/.test(s255), s255.slice(0, 200));
+      const s186 = await shown(1, '186');
+      ok('task215: §1.186 hands over 75 Shards in the printed sentence', /hands you over 75 Shards/.test(s186), s186.slice(0, 200));
+      const s26 = await shown(4, '26');
+      ok('task215: §4.26 prints its lone codeword paragraph', /Tick the codeword Dread\./.test(s26), s26.slice(0, 200));
     }
 }

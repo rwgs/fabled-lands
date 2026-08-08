@@ -16,26 +16,36 @@ import {
   classifyPassive, groupPlan, groupRollDefers, ownsSoleLinkedBlessing, ITEM_FAMILY_TAGS,
   linkedRewards, isCounterReward, isChooseOne, isPricedItemAward, hasVisiblePay,
   rewardWasteReason, forcedChoiceGroup, pendingRollVar, viewPendingVars, isFightHeld,
+  defaultEffectWords,
 } from './render-rules.js';
 import { aggregateFightOutcome } from './render-gates.js';
 import { titleCase, bonusSuffix } from './render-util.js';
+
+// Is the words span about to open a new sentence? JaFL capitalises a default label there
+// (Document.isNewSentence) — book4/184's whole paragraph is "<tick codeword='Dismal'/>.".
+// Reads what the walk has already appended to this container, so it needs no walk state.
+function atSentenceStart(container) {
+  const t = container.textContent || '';
+  return !t.trim() || /[.!?:;]["'’”)\]]?\s*$/.test(t);
+}
+
+// The author wrote this effect with no words of its own, so the printed sentence is missing
+// the words the tag names: supply JaFL's own default label for it (task 215). Silent for a
+// tag with no default, and for the deliberately wordless forms (hidden book-keeping, a
+// <group>/<effect> member) — see defaultEffectWords.
+function fillDefaultWords(story, container, span, node) {
+  if (span.textContent.trim()) return;
+  span.textContent = defaultEffectWords(node, story.state, atSentenceStart(container));
+}
 
 // The shared "show the effect's words" span (class fx), appended only when non-empty.
 export function appendFxWords(story, container, node, path) {
   const span = document.createElement('span');
   span.className = 'fx';
   story.appendChildren(span, node, path);
+  fillDefaultWords(story, container, span, node);
   if (span.textContent.trim()) container.appendChild(span);
   return span;
-}
-
-// A plain visit-box <tick/> — no words of its own and no attribute that would
-// route it elsewhere (codeword/god/special/price/flag/shards/ability…); only an
-// optional count= multiplier. These are the "tick the box" instructions (task 70).
-function isBareBoxTick(node) {
-  if (node.tagName.toLowerCase() !== 'tick') return false;
-  if (node.textContent.trim()) return false;
-  return node.getAttributeNames().every((a) => a.toLowerCase() === 'count');
 }
 
 // ---- group: an optional, click-to-apply action -----------------------------
@@ -224,17 +234,11 @@ export function renderPassive(story, container, node, path) {
         if (verdict.setVarName) story.ctx.wroteVars.add(verdict.setVarName);
         if (note && verdict.showWords) story.notify(note);
       }
-      // Render its descriptive text (the words the author wrote around the effect).
-      if (verdict.showWords) {
-        const span = document.createElement('span');
-        span.className = 'fx';
-        story.appendChildren(span, node, path);
-        // A bare section-box <tick/> carries no words of its own, so the printed
-        // instruction "…, tick the box, and read on" would collapse to "…, , and
-        // read on"; supply the words so the sentence reads naturally (task 70).
-        if (!span.textContent.trim() && isBareBoxTick(node)) span.textContent = 'tick the box';
-        if (span.textContent.trim()) container.appendChild(span);
-      }
+      // Render its descriptive text (the words the author wrote around the effect), falling
+      // back to JaFL's default label when the tag carries none of its own: "…, tick the box,
+      // and read on" (task 70) and every other wordless form (task 215) would otherwise
+      // collapse to a hole in the printed sentence.
+      if (verdict.showWords) appendFxWords(story, container, node, path);
       return null;
     }
   }

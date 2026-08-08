@@ -8,10 +8,11 @@
 // only DOM *construction* belongs in the view. Unit-tested headlessly.
 
 import { boolAttr, isDiceExpr, resolveValue, matchRange } from './engine.js';
-import { normalize, currencyAward, isShardsCurrency } from './state.js';
+import { normalize, currencyAward, isShardsCurrency, splitItemName } from './state.js';
 import { bookAvailable } from './edition.js'; // the DOM-free registry, never data.js (task 195)
 import {
   isRollGate, isDeferredEscapeClear, isDeferredTagCleanup, aggregateFightOutcome, ITEM_FAMILY_TAGS,
+  hasAncestorTag,
 } from './render-gates.js';
 
 // isRollGate moved to render-gates.js (one-way dependency: classifyPassive below composes
@@ -863,4 +864,72 @@ export function classifyPassive(node, view) {
   // result correct after that roll resolves (rather than frozen at first render).
   const rerunnable = tag === 'set' && node.hasAttribute('value') && !node.hasAttribute('modifier') && !rollOwned;
   return { mode: 'apply', showWords: !hidden, setVarName, rollOwned, rerunnable };
+}
+
+// ---- default words for a wordless effect tag (task 215) ---------------------
+// The corpus writes many effects with no words of their own, because the printed sentence is
+// made OF the words the tag names: book1/18's "they give you <gain shards='15'/>!", book1/303's
+// "Cross the <lose item='salt and iron filings'/> from your Adventure Sheet", and whole
+// paragraphs that are only "<tick codeword='Dismal'/>." (book4/184). JaFL supplies the missing
+// words itself — TickNode/LoseNode.handleContent's `!hadContent` branch fills in a default
+// label per attribute — so the sections are correctly written as they stand. This port printed
+// nothing, leaving 422 such nodes across books 1-6 with a hole in their sentence.
+//
+// Silence is JaFL's own `hidden || getParent().hideChildContent()`: a hidden="t" node is
+// book-keeping, and a <group> / item <effect> shows its own label instead of its children. That
+// is exactly what keeps the wordless members of a bundled action silent — book1/187's
+// "<text>delete Nagil from the God box</text> + <lose god> + <lose title>" must not print the
+// title's name a second time.
+//
+// Returns '' when the tag has no default (an ability/god/special/profession effect, a wildcard
+// selector), so a wordless tag this rule does not know still prints nothing rather than having
+// wording invented for it.
+const LABELLED_EFFECT_TAGS = new Set(['tick', 'gain', 'lose']);
+const SILENT_CONTENT_WRAP = new Set(['group', 'effect']);
+
+// JaFL prints a blessing's description where the XML names only its key
+// (Blessing.getContentString): the six ability blessings show the ability in caps, the rest
+// their printed name. Keyed on the canonical spellings state.js folds the aliases into.
+const BLESSING_WORDS = {
+  storm: 'Safety from Storms', storms: 'Safety from Storms',
+  disease: 'Immunity to Disease/Poison', poison: 'Immunity to Disease/Poison',
+  defence: 'Defence through Faith', injury: 'Immunity to Injury',
+  luck: 'Luck', travel: 'Safe Travel', wrath: 'Divine Wrath',
+};
+function blessingWords(spec) {
+  const k = normalize(spec);
+  if (!k || k === '*' || k === '?') return ''; // a wildcard names no blessing to print
+  return BLESSING_WORDS[k] || k.toUpperCase(); // an ability blessing — MAGIC, SCOUTING…
+}
+
+export function defaultEffectWords(node, state, atSentenceStart = false) {
+  const tag = node.tagName.toLowerCase();
+  if (!LABELLED_EFFECT_TAGS.has(tag)) return '';
+  if (boolAttr(node.getAttribute('hidden'))) return '';
+  if (hasAncestorTag(node, SILENT_CONTENT_WRAP)) return '';
+  const get = (a) => node.getAttribute(a);
+  // Only the two verb-led labels need it, but JaFL capitalises any default that opens a
+  // sentence (isNewSentence) — book4/184's whole paragraph is the tag plus a full stop.
+  const cap = (s) => (atSentenceStart && s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+  const losing = tag === 'lose';
+  if (get('codeword') != null) return cap(`${losing ? 'erase' : 'tick'} the codeword ${get('codeword')}`);
+  if (losing && get('stamina') != null) {
+    const n = String(get('stamina')).trim(); // an expression ("5", "2d6") — printed, not rolled
+    return cap(`lose ${n} Stamina point${n === '1' ? '' : 's'}`);
+  }
+  if (get('item') != null) {
+    const { name } = splitItemName(get('item'));
+    return /[?*]/.test(name) ? '' : name; // a wildcard selector names nothing to print
+  }
+  if (get('shards') != null) {
+    const n = resolveValue(state, get('shards'));
+    return n > 0 ? `${n} Shard${n === 1 ? '' : 's'}` : '';
+  }
+  if (get('curse') != null) return get('curse');
+  if (get('title') != null) return get('title');
+  if (get('blessing') != null) return blessingWords(get('blessing'));
+  // A bare visit-box tick — no attribute that routes it elsewhere, only an optional count=
+  // multiplier. JaFL's "put a tick there now"; the port's wording since task 70.
+  if (tag === 'tick' && node.getAttributeNames().every((a) => a.toLowerCase() === 'count')) return 'tick the box';
+  return '';
 }
