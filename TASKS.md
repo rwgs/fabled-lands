@@ -4,8 +4,8 @@ Backlog of recommended improvements. Open tasks are filed under priority buckets
 (**HIGH** / **MEDIUM** / **LOW**) — work the first open (`- [ ]`) item top-down;
 each task's detail section carries the same stable ID. Every filed task through
 217 is complete (listed under **Done** below), apart from 207, withdrawn as a
-misdiagnosis (see the Review log), so **the backlog is empty** — file new work
-under the priority buckets and record the pass in the Review log.
+misdiagnosis (see the Review log); **218 is open**, an Adventure Sheet display
+gap task 215 surfaced.
 Completed detail sections are archived in
 [`TASKS-archive.md`](TASKS-archive.md); the Review log at the end of this file
 records each audit pass and is where new work is filed.
@@ -24,6 +24,7 @@ records each audit pass and is where new work is filed.
 
 - [x] 215. A self-closing effect tag renders no words, so published sentences print with a hole
 - [x] 217. A visit-box redirect below the section head still leaves both exits live (book1/91)
+- [ ] 218. The Adventure Sheet chips a blessing by its XML key, not the name the book prints
 
 **Done**
 
@@ -249,10 +250,11 @@ this order.*
 - [x] 215. A self-closing effect tag renders no words, so published sentences print with a hole
 - [x] 216. `<if ticks="N">` after an in-section `<tick>` reads the pre-tick count, so "now ticked" branches never fire
 - [x] 217. A visit-box redirect below the section head still leaves both exits live (book1/91)
+- [ ] 218. The Adventure Sheet chips a blessing by its XML key, not the name the book prints
 
 ---
 
-> **Completed task details (tasks 1–211) are archived** in [`TASKS-archive.md`](TASKS-archive.md) (tasks 141, 165, 211) to keep this file focused on open work. The checklist above still carries every task's stable ID and status; a done task's detail lives in the archive under the same `## <N>.` heading. The details for tasks 212–217 are still below, awaiting the next re-archive pass; the Review log follows them.
+> **Completed task details (tasks 1–211) are archived** in [`TASKS-archive.md`](TASKS-archive.md) (tasks 141, 165, 211) to keep this file focused on open work. The checklist above still carries every task's stable ID and status; a done task's detail lives in the archive under the same `## <N>.` heading. The details for tasks 212–217 are still below, awaiting the next re-archive pass; the open task 218 and the Review log follow them.
 
 ---
 
@@ -667,6 +669,31 @@ nested in a condition, not eligible for an optional/`<choice>` goto) and all fou
 — empty-box visit leaves only the ticking exit live and still prints the words above the redirect;
 ticked visit leaves only the other exit — plus §1.91's bet widget and roll surviving on the empty-box
 visit. Aggregate: `RESULT ALL PASS pass=2200 fail=0`.
+
+---
+
+## 218. The Adventure Sheet chips a blessing by its XML key, not the name the book prints
+
+**Priority: LOW — cosmetic, but the Sheet and the section prose now disagree with each other.**
+
+*(Filed 2026-08-08 while working task 215.)* Blessings are stored under the canonical key the XML
+uses — `storm`, `disease`, `magic` — and `renderSheet` (`ui.js` ~L335) chips `d.blessings` verbatim,
+so the Blessings row reads "storm", "disease", "magic". The books never call them that: they are
+*Safety from Storms*, *Immunity to Disease/Poison* and a MAGIC blessing, which is what JaFL prints
+from `Blessing.getContentString()` — the six ability blessings as the ability in caps, the rest by
+their printed name.
+
+Task 215 gave the *section prose* those names (`BLESSING_WORDS` in `render-rules.js`), so a section
+that reads "Write Safety from Storms in the Blessings box" now sends the player to a Sheet listing
+"storm". The two should agree, and the Sheet is the half that is wrong.
+
+The fix is to move that table to a shared display helper and use it in `renderSheet` as well —
+`render-util.js` is the natural home (pure label formatting, already shared by the view modules),
+leaving `render-rules.js` to import it the way `render-rewards.js` does. Worth checking the same
+pass: `rewardLabel`'s choose-one button, which shows `titleCase(blessing)` ("Storm", "Magic"), and
+the `(permanent)` suffix the Sheet appends (book6/159), which must survive the rename. The stored
+key must NOT change — saves, `<if blessing=…>` and the alias folding all key on it; only the
+display does.
 
 ---
 
