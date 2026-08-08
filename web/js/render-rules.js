@@ -10,22 +10,24 @@
 import { boolAttr, isDiceExpr, resolveValue, matchRange } from './engine.js';
 import { normalize, currencyAward, isShardsCurrency } from './state.js';
 import { bookAvailable } from './edition.js'; // the DOM-free registry, never data.js (task 195)
-import { isRollGate, isDeferredEscapeClear, isDeferredTagCleanup, aggregateFightOutcome } from './render-gates.js';
+import {
+  isRollGate, isDeferredEscapeClear, isDeferredTagCleanup, aggregateFightOutcome, ITEM_FAMILY_TAGS,
+} from './render-gates.js';
 
 // isRollGate moved to render-gates.js (one-way dependency: classifyPassive below composes
 // the gate deferrals, so this module imports from render-gates — never the reverse);
 // re-exported here so its callers (render.js, tests) keep one import site for pay rules.
-export { isRollGate } from './render-gates.js';
+// ITEM_FAMILY_TAGS lives there for the same reason (computeFightGate needs it, task 213).
+export { isRollGate, ITEM_FAMILY_TAGS } from './render-gates.js';
 
 // DOM Node.DOCUMENT_POSITION_FOLLOWING (0x04): set in the compareDocumentPosition mask
 // when the argument node comes AFTER the reference node in document order. Spelled as a
 // literal so this module never reaches for the browser `Node` global.
 const DOCUMENT_POSITION_FOLLOWING = 0x04;
 
-// The item-family effect tags (a possession award) and the tags eligible for a
-// "choose one" reward menu. Shared by the planners below and the renderer's award/pay
-// views, so they live here as the single source of truth.
-export const ITEM_FAMILY_TAGS = new Set(['item', 'weapon', 'armour', 'tool']);
+// The tags eligible for a "choose one" reward menu. Shared by the planners below and the
+// renderer's award/pay views, so it lives here as the single source of truth (the sibling
+// ITEM_FAMILY_TAGS is re-exported above from render-gates.js).
 export const CHOOSE_ONE_TAGS = new Set(['lose', 'tick', 'gain', 'item', 'weapon', 'armour', 'tool', 'resurrection']);
 
 // ---- blessing rules (tasks 43/56/108/114) ----------------------------------
@@ -725,6 +727,23 @@ export function needsProfessionChoice(node) {
   return p != null && p.includes('|');
 }
 
+// Is this post-fight effect still held by the fight gate (tasks 69/213)? computeFightGate
+// classifies each bare effect written after a <fight> as the win branch, the lose branch or
+// unconditional; it may only fire once the fight has resolved that way (win / unconditional
+// → on a win, lose → on a loss). Unresolved or fled holds everything. Effects that are not
+// post-fight are never held. `view` supplies fightGate + sectionFights (the Story, or a test
+// double). Shared by classifyPassive and the item-award view, which hold the same node the
+// same way: a <lose>/<gain> shows its words inertly, an award shows a disabled Take.
+export function isFightHeld(view, node) {
+  const role = view.fightGate && view.fightGate.effectNodes.get(node);
+  if (!role) return false;
+  const outcome = aggregateFightOutcome(view.sectionFights);
+  const take = outcome === 'win' ? role !== 'lose'
+             : outcome === 'lose' ? role === 'lose'
+             : false; // unresolved or fled → hold
+  return !take;
+}
+
 // The renderPassive decision cascade: classify a passive effect node into the ONE way it
 // executes this render. The check order below IS the rule — earlier gates win. Verdicts:
 //   { mode:'inert', showWords }            — render words only; no effect, no memo
@@ -832,15 +851,8 @@ export function classifyPassive(node, view) {
 
   // A bare <lose>/<gain> written after a <fight> in win/lose prose is a fight-OUTCOME
   // effect (task 69): hold it until the fight resolves, then apply only on the branch
-  // actually taken (win / unconditional → on a win; lose → on a loss).
-  const fightRole = view.fightGate && view.fightGate.effectNodes.get(node);
-  if (fightRole) {
-    const outcome = aggregateFightOutcome(view.sectionFights);
-    const take = outcome === 'win' ? fightRole !== 'lose'
-               : outcome === 'lose' ? fightRole === 'lose'
-               : false; // unresolved or fled → hold (show the words, apply nothing)
-    if (!take) return { mode: 'inert', showWords: !hidden };
-  }
+  // actually taken.
+  if (isFightHeld(view, node)) return { mode: 'inert', showWords: !hidden };
 
   const setVarName = tag === 'set' ? node.getAttribute('var') : null;
   // A roll this visit has taken ownership of this var: freeze the <set> so it can

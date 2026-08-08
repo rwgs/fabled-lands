@@ -16,7 +16,7 @@ records each audit pass and is where new work is filed.
 
 **MEDIUM**
 
-- [ ] 213. The post-fight gate does not hold an item award, so loot is takeable before the fight
+- [x] 213. The post-fight gate does not hold an item award, so loot is takeable before the fight
 - [ ] 214. A visit-box redirect does not hold the section body, so a one-time reward is re-takeable
 
 **LOW**
@@ -242,7 +242,7 @@ this order.*
 - [x] 210. Game teardown leaves the mobile Sheet drawer open across screens
 - [x] 211. Re-archive completed task details 166–210 and clear them out of the priority buckets
 - [x] 212. `titleCase` capitalises the letter after an apostrophe ("Ghoul'S Head")
-- [ ] 213. The post-fight gate does not hold an item award, so loot is takeable before the fight
+- [x] 213. The post-fight gate does not hold an item award, so loot is takeable before the fight
 - [ ] 214. A visit-box redirect does not hold the section body, so a one-time reward is re-takeable
 - [ ] 215. A self-closing effect tag renders no words, so published sentences print with a hole
 
@@ -305,6 +305,25 @@ alongside `lose`/`gain`, and give `renderItemAward` (and `renderReplaceAward`) t
 a disabled Take rather than an omitted one, matching how a held `<lose>`/`<gain>` still shows its
 words. Regression coverage belongs in `suite-combat`: book1/55's Take is disabled while the fight
 is unresolved, live after a win, and never live after a loss.
+
+Fixed exactly that way. `computeFightGate` now classifies `FIGHT_EFFECT_TAGS` — `lose`/`gain`
+plus the item family — under the same `!skip && !gated && !hidden` guard, so a wrapped award
+(book2/469's `<if dead="f">`) is still left alone and the existing win/lose/uncond prose roles
+are unchanged. The take/hold decision moved out of `classifyPassive` into an exported
+`isFightHeld(view, node)` in `render-rules.js`, which `renderItemAward` now consults before it
+builds the button: held → a disabled `Take <item>` titled "Fight first" (or "The fight went the
+other way" once the fight has resolved against it). The check sits above the `replace=` branch,
+so `renderReplaceAward` inherits it. `ITEM_FAMILY_TAGS` moved to `render-gates.js` — the gate
+needs it and the two rule modules' dependency stays one-way — and `render-rules.js` re-exports
+it, exactly as it already does for `isRollGate`, so every existing import site is unchanged.
+
+`suite-combat` pins book1/55 end to end: the Take is disabled on entry beside the (already
+disabled) `<goto 10>`, goes live after a win and really banks the pearls, and after a loss stays
+disabled with nothing on the sheet — plus two DOM-free gate assertions for the bare and the
+`<if>`-wrapped shapes. book5/238's trapped stone bracelet (task 60) turned out to be the same
+idiom — "If you win, the treasures of the tomb are yours" — so its `suite-inventory` test now
+asserts the hold first and wins the wight before taking the bracelet, which is the fix working
+rather than a test accommodation.
 
 Found during conversion work on an unpublished book, which has four sections of the same shape
 held back until this is fixed — converting them first would add new instances of the leak rather

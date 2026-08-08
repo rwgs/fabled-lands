@@ -251,7 +251,13 @@ export async function run(ctx) {
     const c238 = document.createElement('div');
     const st238 = new Story(c238, g238, { navigate(){}, onDeath(){}, notify(){} });
     st238.begin(await data.getSection(5, '238'), 5, '238');
-    const braceletBtn = Array.from(c238.querySelectorAll('.take-item')).find((b) => /stone bracelet/i.test(b.textContent));
+    // The tomb hoard is the wight's loot ("If you win, the treasures of the tomb are
+    // yours"), so the fight gate holds every Take until the fight is won (task 213).
+    const findBracelet = () => Array.from(c238.querySelectorAll('.take-item')).find((b) => /stone bracelet/i.test(b.textContent));
+    ok('§238 the bracelet is held while the wight is unfought', (() => { const b = findBracelet(); return !!b && b.disabled === true; })());
+    st238.sectionFights[0].outcome = 'win';
+    st238.rerender();
+    const braceletBtn = findBracelet();
     ok('§238 renders a stone-bracelet take button', !!braceletBtn && !braceletBtn.disabled, braceletBtn ? `disabled=${braceletBtn.disabled}` : 'no btn');
     braceletBtn.click();
     ok('§238 taking the bracelet attaches the curse and halves MAGIC', g238.hasCurse('Curse of Blighted Magic') && g238.ability('magic') === Math.ceil(mg238 / 2), `curse=${g238.hasCurse('Curse of Blighted Magic')} magic=${g238.ability('magic')}/${mg238}`);

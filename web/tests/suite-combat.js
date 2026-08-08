@@ -1216,6 +1216,58 @@ export async function run(ctx) {
     ok('§5.80 the dead="t" §7 lose-branch is the enabled route after a loss', (() => { const b = g80goto('7'); return b && b.disabled === false; })());
     ok('§5.80 the win exit §123 is disabled after a loss', (() => { const b = g80goto('123'); return b && b.disabled === true; })());
 
+    // --- task 213: an item award after a fight is that fight's loot, not a free pickup ---
+    // The gate held a bare post-fight <lose>/<gain> but not the item family, so the Take
+    // button rendered LIVE beside a correctly-disabled goto: the player could pocket the
+    // loot and then lose the fight.
+    const lootSec = parse('<section><fight name="X" combat="5" defence="5" stamina="5"/><p>If you win, you find a <item name="bag of pearls"/> on his body.</p></section>');
+    const lootGate = gates.computeFightGate(lootSec, new Set());
+    const lootNode = lootSec.querySelector('item');
+    ok('task213: the fight gate classifies a bare post-fight item award as the win branch',
+       !!lootGate && lootGate.effectNodes.get(lootNode) === 'win',
+       `role=${lootGate && lootGate.effectNodes.get(lootNode)}`);
+    // A wrapped award is left alone — the corpus's own <if dead="f"> workaround (§2.469).
+    const wrapSec = parse('<section><fight name="X" combat="5" defence="5" stamina="5"/><if dead="f">You take the <item name="dragon head"/>.</if><goto section="10"/></section>');
+    const wrapGate = gates.computeFightGate(wrapSec, new Set());
+    ok('task213: an award already wrapped in an <if> is not double-gated',
+       !!wrapGate && wrapGate.effectNodes.has(wrapSec.querySelector('item')) === false,
+       `gate=${!!wrapGate}`);
+
+    // §1.55 end to end: "<fight Cultist/> If you win, you find a <item name="bag of
+    // pearls"/> on his body." against a real GameState.
+    const pearlBtn = (root) => Array.from(root.querySelectorAll('.take-item')).find((b) => /bag of pearls/i.test(b.textContent));
+    const g55 = GameState.create({ name:'M55', gender:'m', profession:'Warrior', book:1, adv });
+    g55.data.stamina = 100; g55.data.staminaMax = 100;
+    const c55 = document.createElement('div');
+    const st55 = new Story(c55, g55, { navigate(){}, onDeath(){}, notify(){} });
+    const s55 = await data.getSection(1, '55'); st55.begin(s55, 1, '55');
+    ok('task213: §1.55 Take pearls is disabled while the fight is unresolved',
+       (() => { const b = pearlBtn(c55); return !!b && b.disabled === true; })(),
+       `found=${!!pearlBtn(c55)} dis=${pearlBtn(c55) && pearlBtn(c55).disabled}`);
+    ok('task213: §1.55 the exit to §10 is gated on entry as before',
+       (() => { const b = Array.from(c55.querySelectorAll('.goto')).find((x) => x.textContent.trim() === '10'); return !!b && b.disabled === true; })());
+    st55.sectionFights[0].outcome = 'win';
+    st55.rerender();
+    const won55 = pearlBtn(c55);
+    ok('task213: §1.55 Take pearls goes live once the fight is won', !!won55 && won55.disabled === false,
+       `dis=${won55 && won55.disabled}`);
+    won55.click();
+    ok('task213: §1.55 the won loot really banks', g55.findItems('bag of pearls').length === 1,
+       `n=${g55.findItems('bag of pearls').length}`);
+    // A loss must never open it.
+    const gL55 = GameState.create({ name:'L55', gender:'m', profession:'Warrior', book:1, adv });
+    gL55.data.stamina = 100; gL55.data.staminaMax = 100;
+    const cL55 = document.createElement('div');
+    const stL55 = new Story(cL55, gL55, { navigate(){}, onDeath(){}, notify(){} });
+    const sL55 = await data.getSection(1, '55'); stL55.begin(sL55, 1, '55');
+    gL55.data.stamina = 0;
+    stL55.sectionFights[0].outcome = 'lose';
+    stL55.rerender();
+    ok('task213: §1.55 Take pearls stays disabled after a loss',
+       (() => { const b = pearlBtn(cL55); return !!b && b.disabled === true; })(),
+       `dis=${pearlBtn(cL55) && pearlBtn(cL55).disabled}`);
+    ok('task213: §1.55 a loss leaves the pearls untaken', gL55.findItems('bag of pearls').length === 0);
+
     // --- task 162: a continuing combat round persists the updated fight memo ---
     // A fight lives in Story.ctx, not GameState.data. A continuing round (attack / COMBAT
     // reroll / blessing) redraws the widget directly; it previously neither rerendered nor

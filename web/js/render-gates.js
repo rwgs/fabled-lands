@@ -25,6 +25,14 @@ const ELEMENT_NODE = 1;
 const TEXT_NODE = 3;
 const DOCUMENT_POSITION_FOLLOWING = 0x04;
 
+// The item-family effect tags (a possession award). Defined here rather than in
+// render-rules.js — which re-exports it for its own callers — because computeFightGate
+// below needs it and the dependency between the two rule modules stays one-way.
+export const ITEM_FAMILY_TAGS = new Set(['item', 'weapon', 'armour', 'tool']);
+
+// The effects a fight gate holds: a value/possession change written after the fight.
+const FIGHT_EFFECT_TAGS = new Set(['lose', 'gain', ...ITEM_FAMILY_TAGS]);
+
 // Wrapper tag sets used only by these gate computations.
 const ROLLGATE_OPTIONAL_WRAP = new Set(['if', 'elseif', 'else', 'success', 'failure', 'outcome', 'group']);
 const ROLLGATE_OUTCOME_WRAP = new Set(['outcomes', 'outcome']);
@@ -66,11 +74,13 @@ export function computeEscapeCodewords(sectionEl) {
   return new Set([...boxes].filter((b) => ticked.has(b)));
 }
 
-// The fight gate (tasks 21/45/54/69): the navigation nodes that follow a <fight> (which
-// must not be clickable until it resolves), which of them are the lose-branch, and each
-// BARE post-fight <lose>/<gain> classified 'win'/'lose'/'uncond' so the renderer can hold
-// it until the fight resolves. `escapeCodewords` leaves mid-fight surrender/flee choices
-// ungated. Returns { navNodes:Set, loseNodes:Set, effectNodes:Map, hasLosePath } or null.
+// The fight gate (tasks 21/45/54/69/213): the navigation nodes that follow a <fight>
+// (which must not be clickable until it resolves), which of them are the lose-branch, and
+// each BARE post-fight <lose>/<gain> or item-family award classified 'win'/'lose'/'uncond'
+// so the renderer can hold it until the fight resolves — the loot on the body is the
+// fight's reward, not a free pickup before it (book1/55, book5/162). `escapeCodewords`
+// leaves mid-fight surrender/flee choices ungated.
+// Returns { navNodes:Set, loseNodes:Set, effectNodes:Map, hasLosePath } or null.
 export function computeFightGate(sectionEl, escapeCodewords) {
   if (!sectionEl || !sectionEl.querySelector('fight')) return null;
   const navNodes = new Set(), loseNodes = new Set(), effectNodes = new Map();
@@ -93,7 +103,7 @@ export function computeFightGate(sectionEl, escapeCodewords) {
         if (boolAttr(ch.getAttribute('dead')) || (LOSE.test(recent) && !WIN.test(recent))) loseNodes.add(ch);
         recent = '';
       }
-      if (seenFight && !skip && !gated && (tag === 'lose' || tag === 'gain') && !boolAttr(ch.getAttribute('hidden'))) {
+      if (seenFight && !skip && !gated && FIGHT_EFFECT_TAGS.has(tag) && !boolAttr(ch.getAttribute('hidden'))) {
         const role = LOSE.test(recent) && !WIN.test(recent) ? 'lose'
                    : WIN.test(recent) && !LOSE.test(recent) ? 'win'
                    : 'uncond';

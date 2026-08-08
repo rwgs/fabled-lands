@@ -15,8 +15,9 @@ import { applyInlineBuy, buyOptions } from './market.js';
 import {
   classifyPassive, groupPlan, groupRollDefers, ownsSoleLinkedBlessing, ITEM_FAMILY_TAGS,
   linkedRewards, isCounterReward, isChooseOne, isPricedItemAward, hasVisiblePay,
-  rewardWasteReason, forcedChoiceGroup, pendingRollVar, viewPendingVars,
+  rewardWasteReason, forcedChoiceGroup, pendingRollVar, viewPendingVars, isFightHeld,
 } from './render-rules.js';
+import { aggregateFightOutcome } from './render-gates.js';
 import { titleCase, bonusSuffix } from './render-util.js';
 
 // The shared "show the effect's words" span (class fx), appended only when non-empty.
@@ -628,6 +629,20 @@ export function renderItemAward(story, container, node, path) {
   const ability = node.getAttribute('ability') || null;
   const display = currency != null ? `${currency} Shards` : titleCase(name) + bonusSuffix(kind, bonus, ability);
   const key = 'take@' + path;
+  // The loot on the body is the fight's reward: a bare award written after a <fight> is
+  // held by the fight gate until the fight resolves in its favour (book1/55's bag of
+  // pearls, book5/162's lockpicks). Show a DISABLED Take rather than omitting it, the way
+  // a held <lose>/<gain> still shows its words — the player reads what is at stake but
+  // cannot pocket it and then lose. Covers replace= awards too (they route through here). (task 213)
+  if (isFightHeld(story, node)) {
+    const wait = document.createElement('button');
+    wait.className = 'btn-mini take-item';
+    wait.disabled = true;
+    wait.textContent = 'Take ' + display;
+    wait.title = aggregateFightOutcome(story.sectionFights) ? 'The fight went the other way' : 'Fight first';
+    container.appendChild(wait);
+    return wait;
+  }
   // replace= TRANSFORMS an existing possession into this reward instead of adding a
   // duplicate: a named replace="X" converts the item named X, an empty replace=""
   // converts the same-named item (§5.118 plain flute/axe → enchanted, bag of gold →
